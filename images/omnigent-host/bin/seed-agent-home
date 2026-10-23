@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+base=${LITELLM_BASE_URL:-}
+base=${base%/}
+
 render() {
-  sed -e "s#\${LITELLM_BASE_URL}#${LITELLM_BASE_URL%/}#g" \
-      -e "s#\${OPENAI_BASE_URL}#${LITELLM_BASE_URL%/}/v1#g" "$1" >"$2"
+  sed -e "s#\${LITELLM_BASE_URL}#${base}#g" \
+      -e "s#\${OPENAI_BASE_URL}#${base}/v1#g" "$1" >"$2"
 }
 
 cp -a /opt/agent/claude-home/.claude "$HOME/"
-render /opt/agent/claude-home/.claude.json.tmpl "$HOME/.claude.json"
-
 mkdir -p "$HOME/.codex"
 cp /opt/agent/codex-home/AGENTS.md "$HOME/.codex/AGENTS.md"
+
+if [ -z "$base" ]; then
+  echo "seed-agent-home: LITELLM_BASE_URL unset; skipping gateway config for Claude Code and Codex" >&2
+  exit 0
+fi
+render /opt/agent/claude-home/.claude.json.tmpl "$HOME/.claude.json"
 render /opt/agent/codex-home/config.toml.tmpl "$HOME/.codex/config.toml"
