@@ -13,7 +13,7 @@ Both read and write the knowledge vault through its normal workflow.
 | --- | --- |
 | `images/omnigent-host/` | Runner image: Omnigent host + Claude Code + Codex + plugins, LSPs and toolchains for every language in use |
 | `images/omnigent-server/` | Omnigent server with the agent bundles and sandbox configuration baked in |
-| `images/token-minter/` | Exchanges an Authentik machine identity for short-lived GitHub tokens through octo-sts and writes them into a Secret |
+| `images/agent-tools/` | Go tools from `cmd/`: `token-minter` (octo-sts GitHub tokens into Secrets) and `signal-shim` (signal-cli HTTP API for Hermes on top of signal-cli-rest-api) |
 | `images/hermes/` | Hermes with its managed configuration, `SOUL.md`, git and the vault tooling |
 | `agents/polly/` | Polly orchestrator and its workers, adapted from Omnigent's example |
 | `config/omnigent/` | Omnigent server configuration: runner image, model gateway, per-harness models |

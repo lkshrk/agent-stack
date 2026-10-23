@@ -1,0 +1,29 @@
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks git --staged --redact --no-banner
+    gofmt:
+      glob: "*.go"
+      run: 'test -z "$(gofmt -l {staged_files})" || { gofmt -l {staged_files}; echo "run gofmt -w on these files"; exit 1; }'
+    shellcheck:
+      glob: "{images/*/bin/*,images/*/cont-init.d/*,images/*/profile.d/*.sh,config/**/*.sh}"
+      run: shellcheck -S warning {staged_files}
+    yaml:
+      glob: "*.{yaml,yml}"
+      run: 'for f in {staged_files}; do yq "." "$f" >/dev/null || exit 1; done'
+    toml:
+      glob: "*.toml"
+      run: 'for f in {staged_files}; do python3 -c "import sys,tomllib; tomllib.load(open(sys.argv[1],\"rb\"))" "$f" || exit 1; done'
+    json:
+      glob: "*.json"
+      run: 'for f in {staged_files}; do jq empty "$f" || exit 1; done'
+    hadolint:
+      glob: "**/Dockerfile"
+      run: 'command -v hadolint >/dev/null || { echo "hadolint not installed, skipping"; exit 0; }; hadolint --failure-threshold error {staged_files}'
+
+pre-push:
+  parallel: true
+  commands:
+    go:
+      run: go vet ./... && go test ./...

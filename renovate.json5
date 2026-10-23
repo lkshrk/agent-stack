@@ -1,0 +1,108 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended', 'helpers:pinGitHubActionDigests', 'docker:pinDigests'],
+  labels: ['dependencies'],
+  automergeType: 'pr',
+  lockFileMaintenance: { enabled: true, automerge: true },
+  postUpdateOptions: ['gomodTidy'],
+  customManagers: [
+    {
+      customType: 'regex',
+      description: 'Base images pinned as Dockerfile ARG defaults (image:tag@digest)',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: [
+        'ARG [A-Z_]+_IMAGE=(?<depName>[^:\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})',
+      ],
+      datasourceTemplate: 'docker',
+    },
+    {
+      customType: 'regex',
+      description: 'npm CLIs pinned as Dockerfile ARGs',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: [
+        'ARG CLAUDE_CODE_VERSION=(?<currentValue>\\S+)',
+      ],
+      datasourceTemplate: 'npm',
+      depNameTemplate: '@anthropic-ai/claude-code',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG CODEX_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'npm',
+      depNameTemplate: '@openai/codex',
+    },
+    {
+      customType: 'regex',
+      description: 'GitHub release tools whose checksum must be updated by hand alongside the version',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: [
+        'ARG RTK_VERSION=(?<currentValue>\\S+)',
+      ],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'rtk-ai/rtk',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG CBM_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'DeusData/codebase-memory-mcp',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG MISE_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'jdx/mise',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG KUBECTL_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'github-releases',
+      depNameTemplate: 'kubernetes/kubernetes',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG OBSIDIAN_WIKI_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'pypi',
+      depNameTemplate: 'obsidian-wiki',
+    },
+    {
+      customType: 'regex',
+      description: 'Omnigent image tag referenced by the sandbox config',
+      managerFilePatterns: ['/(^|/)config/omnigent/config\\.yaml$/'],
+      matchStrings: ['image: (?<depName>ghcr\\.io/omnigent-ai/[^:\\s]+):(?<currentValue>[^@\\s]+)'],
+      datasourceTemplate: 'docker',
+    },
+  ],
+  packageRules: [
+    {
+      description: 'Tooling, CI and Go libraries: merge once CI is green',
+      matchManagers: ['github-actions', 'gomod', 'mise'],
+      matchUpdateTypes: ['minor', 'patch', 'digest', 'pin'],
+      automerge: true,
+    },
+    {
+      description: 'Agent runtimes change behaviour between releases; always review',
+      matchDepNames: [
+        '@anthropic-ai/claude-code',
+        '@openai/codex',
+        'ghcr.io/omnigent-ai/omnigent-host',
+        'ghcr.io/omnigent-ai/omnigent-server-kubernetes',
+        'docker.io/nousresearch/hermes-agent',
+        'ghcr.io/outsourc-e/hermes-workspace',
+      ],
+      labels: ['dependencies', 'agent-runtime'],
+      automerge: false,
+    },
+    {
+      description: 'Release assets are pinned by checksum in the Dockerfile; the PR must update the SHA256 too',
+      matchDepNames: ['rtk-ai/rtk', 'DeusData/codebase-memory-mcp'],
+      labels: ['dependencies', 'checksum-update'],
+      automerge: false,
+    },
+  ],
+}
