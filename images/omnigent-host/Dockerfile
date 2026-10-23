@@ -33,7 +33,7 @@ ENV PATH="/opt/mise/shims:/opt/agent/bin:${PATH}"
 RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-x64" -o /usr/local/bin/mise \
  && chmod 0755 /usr/local/bin/mise
 
-COPY mise.toml /etc/mise/config.toml
+COPY images/omnigent-host/mise.toml /etc/mise/config.toml
 RUN mise install \
  && mise reshim \
  && rm -rf /opt/mise/cache \
@@ -58,11 +58,11 @@ RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
  && ln -s /opt/kotlin-lsp/kotlin-lsp.sh /opt/agent/bin/kotlin-lsp \
  && cd / && rm -rf /tmp/dl
 
-COPY bin/ /opt/agent/bin/
-COPY claude/ /opt/agent/claude-home/
-COPY codex/ /opt/agent/codex-home/
-COPY profile.d/agent-home.sh /etc/profile.d/zz-agent-home.sh
-COPY gitconfig /etc/gitconfig.d/agent
+COPY images/omnigent-host/bin/ /opt/agent/bin/
+COPY images/omnigent-host/claude/ /opt/agent/claude-home/
+COPY images/omnigent-host/codex/ /opt/agent/codex-home/
+COPY images/omnigent-host/profile.d/agent-home.sh /etc/profile.d/zz-agent-home.sh
+COPY images/omnigent-host/gitconfig /etc/gitconfig.d/agent
 RUN chmod 0755 /opt/agent/bin/* \
  && git config --system include.path /etc/gitconfig.d/agent
 

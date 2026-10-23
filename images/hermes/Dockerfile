@@ -20,9 +20,14 @@ RUN "${HERMES_PYTHON:-python3}" -m venv /opt/obsidian-wiki \
  && /opt/obsidian-wiki/bin/pip install --no-cache-dir "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
  && ln -s /opt/obsidian-wiki/bin/obsidian-wiki /usr/local/bin/obsidian-wiki
 
-COPY bin/ /opt/agent/bin/
-COPY gitconfig /etc/gitconfig.d/agent
+COPY images/hermes/bin/ /opt/agent/bin/
+COPY images/hermes/gitconfig /etc/gitconfig.d/agent
+COPY --chmod=0644 config/hermes/config.yaml /etc/hermes/config.yaml
+COPY --chmod=0644 config/hermes/SOUL.md /opt/hermes-soul/SOUL.md
+COPY --chmod=0755 config/hermes/snapshot.sh /opt/agent/bin/hermes-snapshot
+COPY --chmod=0755 images/hermes/cont-init.d/03-agent-stack /etc/cont-init.d/03-agent-stack
 RUN chmod 0755 /opt/agent/bin/* \
  && git config --system include.path /etc/gitconfig.d/agent
 
-ENV PATH="/opt/agent/bin:${PATH}"
+ENV PATH="/opt/agent/bin:${PATH}" \
+    HERMES_MANAGED_DIR=/etc/hermes

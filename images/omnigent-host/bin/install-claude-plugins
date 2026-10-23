@@ -2,7 +2,7 @@
 # Build-time only: installs the pinned Claude Code plugins into $HOME/.claude.
 set -euo pipefail
 
-add_marketplace() {
+add_pinned() {
   local repo=$1 sha=$2 dir
   dir=$(mktemp -d)
   git clone --quiet --filter=blob:none "https://github.com/${repo}.git" "$dir"
@@ -10,9 +10,15 @@ add_marketplace() {
   claude plugin marketplace add "$dir"
 }
 
-add_marketplace anthropics/claude-plugins-official 465f09344424225c25d438f2e052732c3d688d2f
-add_marketplace lkshrk/useful-skills 9d1fa43aad7c2b667576e09cbee179a4832ea4db
-add_marketplace mksglu/context-mode 442f1eb6c7cdad3f0cb2411d00756f9e5cf2b587
+# The official marketplace name only accepts its GitHub source, so pin by checking out the commit afterwards.
+claude plugin marketplace add anthropics/claude-plugins-official
+official="$HOME/.claude/plugins/marketplaces/claude-plugins-official"
+git -C "$official" fetch --quiet origin 465f09344424225c25d438f2e052732c3d688d2f
+git -C "$official" checkout --quiet 465f09344424225c25d438f2e052732c3d688d2f
+
+add_pinned mksglu/context-mode 442f1eb6c7cdad3f0cb2411d00756f9e5cf2b587
+
+add_pinned lkshrk/agent-marketplace 5eaef5ad5677a53b9830b30f1fd0c3bf8d741a68
 
 for plugin in \
   typescript-lsp@claude-plugins-official \
@@ -22,7 +28,7 @@ for plugin in \
   kotlin-lsp@claude-plugins-official \
   lua-lsp@claude-plugins-official \
   swift-lsp@claude-plugins-official \
-  useful-skills@useful-skills \
+  useful-skills@lkshrk \
   context-mode@context-mode; do
   claude plugin install "$plugin" --scope user
 done

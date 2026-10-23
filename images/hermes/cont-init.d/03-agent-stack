@@ -1,0 +1,11 @@
+#!/bin/sh
+# SOUL.md is owned by this image; any edit Hermes made in its home is replaced on every start.
+set -eu
+
+home="${HERMES_HOME:-/opt/data}"
+install -m 0444 -o hermes -g hermes /opt/hermes-soul/SOUL.md "$home/SOUL.md"
+
+if [ ! -d "$home/knowledge/.git" ]; then
+  s6-setuidgid hermes git clone --quiet https://github.com/lkshrk/knowledge.git "$home/knowledge" \
+    || echo "[agent-stack] vault clone failed; Hermes can retry" >&2
+fi

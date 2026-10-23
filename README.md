@@ -12,14 +12,14 @@ Both read and write the knowledge vault through its normal workflow.
 | Path | Contents |
 | --- | --- |
 | `images/omnigent-host/` | Runner image: Omnigent host + Claude Code + Codex + plugins, LSPs and toolchains for every language in use |
+| `images/omnigent-server/` | Omnigent server with the agent bundles and sandbox configuration baked in |
 | `images/token-minter/` | Exchanges an Authentik machine identity for short-lived GitHub tokens through octo-sts and writes them into a Secret |
-| `images/hermes/` | Hermes image with git and the vault tooling |
+| `images/hermes/` | Hermes with its managed configuration, `SOUL.md`, git and the vault tooling |
 | `agents/polly/` | Polly orchestrator and its workers, adapted from Omnigent's example |
-| `config/hermes/` | Hermes `config.yaml`, `SOUL.md`, cron jobs |
-| `deploy/omnigent/` | Kustomize: Omnigent server, runner namespace, token minter |
-| `deploy/hermes/` | Kustomize: Hermes (gateway, API server, dashboard) and Hermes Workspace, the web UI connected to it |
+| `config/omnigent/` | Omnigent server configuration: runner image, model gateway, per-harness models |
+| `config/hermes/` | Hermes managed `config.yaml`, `SOUL.md`, learning snapshot script |
 
-Cluster-specific values (hostnames, secrets, database) live in the h-cloud repository, which references the bases here.
+Everything here ships inside images. Deployment manifests, secrets, databases and routes live in the h-cloud repository.
 
 ## Credentials
 

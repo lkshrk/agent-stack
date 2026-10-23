@@ -3,9 +3,9 @@ name: images
 on:
   push:
     branches: [main]
-    paths: ["images/**", ".github/workflows/images.yml"]
+    paths: ["images/**", "agents/**", "config/**", ".github/workflows/images.yml"]
   pull_request:
-    paths: ["images/**", ".github/workflows/images.yml"]
+    paths: ["images/**", "agents/**", "config/**", ".github/workflows/images.yml"]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [omnigent-host, token-minter, hermes]
+        image: [omnigent-host, omnigent-server, token-minter, hermes]
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
@@ -37,7 +37,8 @@ jobs:
             type=sha,format=short
       - uses: docker/build-push-action@v6
         with:
-          context: images/${{ matrix.image }}
+          context: .
+          file: images/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
