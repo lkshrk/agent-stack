@@ -17,7 +17,7 @@ Both read and write the knowledge vault through its normal workflow.
 | `agents/polly/` | Polly orchestrator and its workers, adapted from Omnigent's example |
 | `config/hermes/` | Hermes `config.yaml`, `SOUL.md`, cron jobs |
 | `deploy/omnigent/` | Kustomize: Omnigent server, runner namespace, token minter |
-| `deploy/hermes/` | Kustomize: Hermes Deployment |
+| `deploy/hermes/` | Kustomize: Hermes (gateway, API server, dashboard) and Hermes Workspace, the web UI connected to it |
 
 Cluster-specific values (hostnames, secrets, database) live in the h-cloud repository, which references the bases here.
 

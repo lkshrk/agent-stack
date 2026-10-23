@@ -52,11 +52,18 @@ spec:
           envFrom:
             - secretRef:
                 name: hermes-env
+          ports:
+            - name: api
+              containerPort: 8642
           env:
             - name: HERMES_HOME
               value: /opt/data
             - name: HERMES_WRITE_SAFE_ROOT
               value: /opt/data
+            - name: API_SERVER_ENABLED
+              value: "true"
+            - name: API_SERVER_HOST
+              value: 0.0.0.0
             - name: KNOWLEDGE_TOKEN_FILE
               value: /var/run/agent/github/knowledge
             - name: GH_TOKEN_FILE
@@ -78,6 +85,34 @@ spec:
           resources:
             requests: {cpu: 250m, memory: 1Gi}
             limits: {memory: 4Gi}
+        - name: dashboard
+          image: ghcr.io/lkshrk/agent-stack/hermes:latest
+          args: ["dashboard", "--host", "0.0.0.0", "--port", "9119", "--no-open"]
+          ports:
+            - name: dashboard
+              containerPort: 9119
+          envFrom:
+            - secretRef:
+                name: hermes-env
+          env:
+            - name: HERMES_HOME
+              value: /opt/data
+            - name: HERMES_DASHBOARD_PUBLIC_URL
+              value: http://hermes.hermes.svc.cluster.local:9119
+          volumeMounts:
+            - name: data
+              mountPath: /opt/data
+            - name: config
+              mountPath: /etc/hermes/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: config
+              mountPath: /opt/data/SOUL.md
+              subPath: SOUL.md
+              readOnly: true
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
+            limits: {memory: 1Gi}
         - name: snapshot
           image: ghcr.io/lkshrk/agent-stack/hermes:latest
           command: ["bash", "/config/snapshot.sh"]

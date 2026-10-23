@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+spec:
+  selector:
+    app.kubernetes.io/name: hermes
+  ports:
+    - name: api
+      port: 8642
+      targetPort: api
+    - name: dashboard
+      port: 9119
+      targetPort: dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-workspace
+spec:
+  selector:
+    app.kubernetes.io/name: hermes-workspace
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

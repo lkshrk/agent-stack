@@ -8,6 +8,8 @@ resources:
   - rbac.yaml
   - pvc.yaml
   - deployment.yaml
+  - service.yaml
+  - workspace.yaml
 
 configMapGenerator:
   - name: hermes-config
