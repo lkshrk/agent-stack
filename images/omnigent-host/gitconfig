@@ -1,0 +1,11 @@
+[credential "https://github.com"]
+	useHttpPath = true
+	helper =
+	helper = /opt/agent/bin/git-credential-agent
+[user]
+	name = h-cloud-npa[bot]
+	email = h-cloud-npa[bot]@users.noreply.github.com
+[init]
+	defaultBranch = main
+[pull]
+	rebase = true

@@ -1,0 +1,68 @@
+model:
+  provider: openai
+  base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+  default: claude-sonnet
+
+auxiliary:
+  compression:
+    model: claude-haiku
+    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+  background_review:
+    enabled: true
+    model: claude-haiku
+    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+  title:
+    model: claude-haiku
+    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+
+agent:
+  max_turns: 150
+
+delegation:
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+
+memory:
+  provider: openviking
+  write_approval: false
+
+skills:
+  write_approval: false
+  guard_agent_created: true
+
+approvals:
+  mode: smart
+  cron_mode: deny
+  unattended_mode: deny
+
+security:
+  redact_secrets: true
+  allow_lazy_installs: false
+
+terminal:
+  backend: local
+
+mcp_servers:
+  linear:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+    tools:
+      include:
+        - list_issues
+        - get_issue
+        - list_comments
+        - save_comment
+        - list_projects
+        - get_project
+        - list_teams
+        - list_issue_labels
+        - list_issue_statuses
+  context7:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/context7
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+  searxng:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/searxng
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}

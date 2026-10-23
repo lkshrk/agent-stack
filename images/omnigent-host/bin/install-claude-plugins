@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Build-time only: installs the pinned Claude Code plugins into $HOME/.claude.
+set -euo pipefail
+
+add_marketplace() {
+  local repo=$1 sha=$2 dir
+  dir=$(mktemp -d)
+  git clone --quiet --filter=blob:none "https://github.com/${repo}.git" "$dir"
+  git -C "$dir" checkout --quiet "$sha"
+  claude plugin marketplace add "$dir"
+}
+
+add_marketplace anthropics/claude-plugins-official 465f09344424225c25d438f2e052732c3d688d2f
+add_marketplace lkshrk/useful-skills 9d1fa43aad7c2b667576e09cbee179a4832ea4db
+add_marketplace mksglu/context-mode 442f1eb6c7cdad3f0cb2411d00756f9e5cf2b587
+
+for plugin in \
+  typescript-lsp@claude-plugins-official \
+  pyright-lsp@claude-plugins-official \
+  gopls-lsp@claude-plugins-official \
+  rust-analyzer-lsp@claude-plugins-official \
+  kotlin-lsp@claude-plugins-official \
+  lua-lsp@claude-plugins-official \
+  swift-lsp@claude-plugins-official \
+  useful-skills@useful-skills \
+  context-mode@context-mode; do
+  claude plugin install "$plugin" --scope user
+done

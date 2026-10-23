@@ -1,0 +1,14 @@
+{
+  "hasCompletedOnboarding": true,
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp"
+    },
+    "litellm-tools": {
+      "type": "http",
+      "url": "${LITELLM_BASE_URL}/mcp/",
+      "headersHelper": "/opt/agent/bin/litellm-mcp-headers"
+    }
+  }
+}

@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: token-minter
+  namespace: omnigent-sandboxes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: token-minter
+  namespace: omnigent-sandboxes
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["agent-github-tokens"]
+    verbs: ["get", "patch"]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: agent-github-tokens
+  namespace: omnigent-sandboxes
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
+type: Opaque
+stringData:
+  code: ""
+  knowledge: ""
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: token-minter
+  namespace: omnigent-sandboxes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: token-minter
+subjects:
+  - kind: ServiceAccount
+    name: token-minter
+    namespace: omnigent-sandboxes
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: token-minter
+  namespace: omnigent-sandboxes
+spec:
+  schedule: "*/20 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: token-minter
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            seccompProfile: {type: RuntimeDefault}
+          containers:
+            - name: mint
+              image: ghcr.io/lkshrk/agent-stack/token-minter:latest
+              envFrom:
+                - secretRef:
+                    name: token-minter-config
+              env:
+                - name: SECRET_NAME
+                  value: agent-github-tokens
+                - name: TOKENS
+                  value: code=routivo,knowledge=lkshrk
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}

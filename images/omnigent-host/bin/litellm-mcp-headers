@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+[ -n "${LITELLM_API_KEY:-}" ] || { echo 'litellm mcp: LITELLM_API_KEY unset' >&2; exit 1; }
+printf '{"x-litellm-api-key":"%s"}\n' "$LITELLM_API_KEY"

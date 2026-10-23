@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+render() {
+  sed -e "s#\${LITELLM_BASE_URL}#${LITELLM_BASE_URL%/}#g" \
+      -e "s#\${OPENAI_BASE_URL}#${LITELLM_BASE_URL%/}/v1#g" "$1" >"$2"
+}
+
+cp -a /opt/agent/claude-home/.claude "$HOME/"
+render /opt/agent/claude-home/.claude.json.tmpl "$HOME/.claude.json"
+
+mkdir -p "$HOME/.codex"
+cp /opt/agent/codex-home/AGENTS.md "$HOME/.codex/AGENTS.md"
+render /opt/agent/codex-home/config.toml.tmpl "$HOME/.codex/config.toml"
