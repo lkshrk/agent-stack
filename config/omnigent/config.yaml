@@ -1,6 +1,6 @@
 sandbox:
   provider: kubernetes
-  server_url: http://omnigent.omnigent.svc.cluster.local
+  server_url: http://omnigent.ai.svc.cluster.local
   host_config:
     providers:
       litellm:

@@ -66,9 +66,7 @@ def octo_sts_token(bearer: str, owner: str) -> str:
     return token
 
 
-def write_secret(name: str, data: dict[str, str]) -> None:
-    with open(f"{SA_DIR}/namespace") as fh:
-        namespace = fh.read().strip()
+def write_secret(namespace: str, name: str, data: dict[str, str]) -> None:
     with open(f"{SA_DIR}/token") as fh:
         sa_token = fh.read().strip()
     context = ssl.create_default_context(cafile=f"{SA_DIR}/ca.crt")
@@ -96,8 +94,10 @@ def main() -> None:
     pairs = [item.split("=", 1) for item in env("TOKENS").split(",") if item.strip()]
     bearer = authentik_token()
     tokens = {key.strip(): octo_sts_token(bearer, owner.strip()) for key, owner in pairs}
-    write_secret(env("SECRET_NAME"), tokens)
-    print(f"token-minter: refreshed {', '.join(sorted(tokens))}")
+    namespaces = [ns.strip() for ns in env("SECRET_NAMESPACES").split(",") if ns.strip()]
+    for namespace in namespaces:
+        write_secret(namespace, env("SECRET_NAME"), tokens)
+    print(f"token-minter: refreshed {', '.join(sorted(tokens))} in {', '.join(namespaces)}")
 
 
 if __name__ == "__main__":
