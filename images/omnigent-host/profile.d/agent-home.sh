@@ -1,7 +1,7 @@
 # shellcheck shell=sh
 export PATH="/opt/mise/shims:/opt/agent/bin:${PATH}"
-export GH_TOKEN_FILE="${GH_TOKEN_FILE:-/var/run/agent/github/code}"
-export KNOWLEDGE_TOKEN_FILE="${KNOWLEDGE_TOKEN_FILE:-/var/run/agent/github/knowledge}"
+export GH_TOKEN_FILE="${GH_TOKEN_FILE:-/agent-secrets/github/code}"
+export KNOWLEDGE_TOKEN_FILE="${KNOWLEDGE_TOKEN_FILE:-/agent-secrets/github/knowledge}"
 
 if [ -n "${LITELLM_BASE_URL:-}" ] && [ -n "${LITELLM_API_KEY:-}" ]; then
   export ANTHROPIC_BASE_URL="$LITELLM_BASE_URL"

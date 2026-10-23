@@ -30,7 +30,7 @@ sandbox:
     namespace: omnigent-sandboxes
     service_account: omnigent-runner
     secret_name: omnigent-runner-env
-    image: ghcr.io/lkshrk/agent-stack/omnigent-host:latest
+    image: ghcr.io/lkshrk/agent-stack/omnigent-host:1.0.0@sha256:5ba1e6c12faab83f4de1ac3fc3ea01436f9258d3c367aed6560e40e7db8398c4
     pod_ready_timeout_s: 600
     home_size_limit: 20Gi
     resources:
@@ -38,5 +38,5 @@ sandbox:
       limits: {cpu: "4", memory: 12Gi, ephemeral-storage: 24Gi}
     secret_mounts:
       - secret_name: agent-github-tokens
-        mount_path: /var/run/agent/github
+        mount_path: /agent-secrets/github
 
