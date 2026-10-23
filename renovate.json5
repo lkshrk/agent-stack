@@ -69,9 +69,9 @@
     },
     {
       customType: 'regex',
-      description: 'Omnigent image tag referenced by the sandbox config',
+      description: 'Runner image referenced by the sandbox config',
       managerFilePatterns: ['/(^|/)config/omnigent/config\\.yaml$/'],
-      matchStrings: ['image: (?<depName>ghcr\\.io/omnigent-ai/[^:\\s]+):(?<currentValue>[^@\\s]+)'],
+      matchStrings: ['image: (?<depName>ghcr\\.io/[^:\\s]+):(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[0-9a-f]{64}))?'],
       datasourceTemplate: 'docker',
     },
   ],
