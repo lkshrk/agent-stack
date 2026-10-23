@@ -11,7 +11,7 @@ auxiliary:
     enabled: true
     model: claude-haiku
     base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
-  title:
+  title_generation:
     model: claude-haiku
     base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
 

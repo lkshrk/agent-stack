@@ -1,42 +1,64 @@
 name: release
 
 on:
-  push:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Skip the CI check and release anyway
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
 
 jobs:
-  release-please:
+  release:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
-      released: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-      pr: ${{ steps.release.outputs.pr && fromJSON(steps.release.outputs.pr).number }}
+      published: ${{ steps.semrel.outputs.new_release_published }}
+      version: ${{ steps.semrel.outputs.new_release_git_tag }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
+      - uses: actions/checkout@v5
         with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
+          fetch-depth: 0
+          persist-credentials: false
 
-  automerge-release-pr:
-    needs: release-please
-    if: needs.release-please.outputs.pr
-    runs-on: ubuntu-latest
-    steps:
-      - run: gh pr merge "${{ needs.release-please.outputs.pr }}" --repo "${{ github.repository }}" --squash --auto
+      - name: Verify the latest ci run on main succeeded
+        if: ${{ github.event_name != 'workflow_run' && !inputs.force }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          conclusion=$(gh run list --workflow ci --branch main --event push --limit 1 --json conclusion --jq '.[0].conclusion')
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::latest ci run on main is '${conclusion:-none}'; refusing to release"
+            exit 1
+          fi
+
+      - uses: cycjimmy/semantic-release-action@v8.1.3
+        id: semrel
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   images:
-    needs: release-please
-    if: needs.release-please.outputs.released == 'true'
+    needs: release
+    if: needs.release.outputs.published == 'true'
     uses: ./.github/workflows/images.yml
     with:
-      version: ${{ needs.release-please.outputs.tag }}
+      version: ${{ needs.release.outputs.version }}
     permissions:
       contents: read
       packages: write

@@ -1,8 +1,6 @@
 name: images
 
 on:
-  pull_request:
-    paths: ["images/**", "agents/**", "config/**", "cmd/**", "go.mod", "go.sum", ".github/workflows/images.yml"]
   workflow_dispatch:
   workflow_call:
     inputs:

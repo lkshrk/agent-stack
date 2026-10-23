@@ -1,9 +1,6 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  extends: ['config:recommended', 'helpers:pinGitHubActionDigests', 'docker:pinDigests'],
-  labels: ['dependencies'],
-  automergeType: 'pr',
-  lockFileMaintenance: { enabled: true, automerge: true },
+  extends: ['github>lkshrk/gh-ops//renovate/presets/app-library.json5', 'helpers:pinGitHubActionDigests', 'docker:pinDigests'],
   postUpdateOptions: ['gomodTidy'],
   customManagers: [
     {
@@ -80,12 +77,6 @@
   ],
   packageRules: [
     {
-      description: 'Tooling, CI and Go libraries: merge once CI is green',
-      matchManagers: ['github-actions', 'gomod', 'mise'],
-      matchUpdateTypes: ['minor', 'patch', 'digest', 'pin'],
-      automerge: true,
-    },
-    {
       description: 'Agent runtimes change behaviour between releases; always review',
       matchDepNames: [
         '@anthropic-ai/claude-code',
@@ -95,13 +86,13 @@
         'docker.io/nousresearch/hermes-agent',
         'ghcr.io/outsourc-e/hermes-workspace',
       ],
-      labels: ['dependencies', 'agent-runtime'],
+      addLabels: ['agent-runtime'],
       automerge: false,
     },
     {
       description: 'Release assets are pinned by checksum in the Dockerfile; the PR must update the SHA256 too',
       matchDepNames: ['rtk-ai/rtk', 'DeusData/codebase-memory-mcp'],
-      labels: ['dependencies', 'checksum-update'],
+      addLabels: ['checksum-update'],
       automerge: false,
     },
   ],

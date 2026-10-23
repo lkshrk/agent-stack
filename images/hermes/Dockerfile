@@ -5,6 +5,8 @@ FROM ${HERMES_IMAGE}
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.3
 ARG KUBECTL_VERSION=v1.37.1
+# Same commit the Hermes plugin catalog pins for openviking.
+ARG OPENVIKING_PLUGIN_SHA=9f150ece247ad683494ab172d738023bd6dc6170
 
 USER root
 RUN apt-get update \
@@ -19,6 +21,13 @@ RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kub
 RUN "${HERMES_PYTHON:-python3}" -m venv /opt/obsidian-wiki \
  && /opt/obsidian-wiki/bin/pip install --no-cache-dir "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
  && ln -s /opt/obsidian-wiki/bin/obsidian-wiki /usr/local/bin/obsidian-wiki
+
+RUN git clone --quiet --filter=blob:none --no-checkout https://github.com/volcengine/OpenViking.git /tmp/ov \
+ && git -C /tmp/ov sparse-checkout set examples/hermes-plugin \
+ && git -C /tmp/ov checkout --quiet "${OPENVIKING_PLUGIN_SHA}" \
+ && cp -a /tmp/ov/examples/hermes-plugin /opt/hermes/plugins/memory/openviking \
+ && rm -rf /tmp/ov /opt/hermes/plugins/memory/openviking/tests \
+ && /opt/hermes/.venv/bin/python -c "import httpx, psutil, packaging"
 
 COPY images/hermes/bin/ /opt/agent/bin/
 COPY images/hermes/gitconfig /etc/gitconfig.d/agent

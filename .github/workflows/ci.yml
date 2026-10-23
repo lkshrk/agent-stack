@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.filter.outputs.go }}
+      images: ${{ steps.filter.outputs.images }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            go:
+              - 'cmd/**'
+              - 'go.mod'
+              - 'go.sum'
+            images:
+              - 'images/**'
+              - 'agents/**'
+              - 'config/**'
+              - 'cmd/**'
+              - 'go.mod'
+              - 'go.sum'
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.15.0
+
+  images:
+    needs: changes
+    if: needs.changes.outputs.images == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [omnigent-host, omnigent-server, agent-tools, hermes]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}
+
+  gate:
+    if: always()
+    needs: [changes, go, images]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job that ran to succeed
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results" | jq -e 'to_entries | all(.value.result == "success" or .value.result == "skipped")'
