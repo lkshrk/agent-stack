@@ -208,7 +208,7 @@ func doJSON(c *http.Client, req *http.Request, out any) error {
 	if err != nil {
 		return fmt.Errorf("request to %s failed", req.URL.Host)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode >= 300 {
 		return fmt.Errorf("%s %s returned HTTP %d: %.300s", req.Method, req.URL.Host, res.StatusCode, raw)

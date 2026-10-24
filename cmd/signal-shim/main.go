@@ -82,7 +82,7 @@ func (s *shim) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream receive: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(64 << 20)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -225,13 +225,17 @@ func (s *shim) send(ctx context.Context, p map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
+	// signal-cli-rest-api answers /v2/send with one entry per request it split the send into.
+	var resp []struct {
 		Timestamp string `json:"timestamp"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, fmt.Errorf("decode send response: %w", err)
 	}
-	ts, _ := strconv.ParseInt(resp.Timestamp, 10, 64)
+	if len(resp) == 0 {
+		return nil, fmt.Errorf("decode send response: empty")
+	}
+	ts, _ := strconv.ParseInt(resp[0].Timestamp, 10, 64)
 	return map[string]any{"timestamp": ts, "results": []any{map[string]any{"type": "SUCCESS"}}}, nil
 }
 
@@ -341,7 +345,7 @@ func (s *shim) do(ctx context.Context, method, path string, body []byte) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	out, _ := io.ReadAll(io.LimitReader(res.Body, 128<<20))
 	switch {
 	case res.StatusCode == http.StatusTooManyRequests || strings.Contains(string(out), "RateLimit"):

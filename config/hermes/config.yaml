@@ -1,7 +1,8 @@
 model:
-  provider: openai
+  provider: custom
   base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
   default: claude-sonnet
+  key_env: LITELLM_API_KEY
 
 auxiliary:
   compression:
