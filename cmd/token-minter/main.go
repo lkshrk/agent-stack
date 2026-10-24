@@ -89,6 +89,15 @@ func run(ctx context.Context, env envFunc, sa string) error {
 			return err
 		}
 	}
+	envSecrets, err := parseEnvSecrets(env("ENV_SECRETS"), tokens)
+	if err != nil {
+		return err
+	}
+	for _, es := range envSecrets {
+		if err := applySecret(ctx, kube, env("KUBERNETES_SERVICE_HOST"), env("KUBERNETES_SERVICE_PORT"), es.namespace, es.name, es.data); err != nil {
+			return err
+		}
+	}
 
 	keys := make([]string, 0, len(tokens))
 	for k := range tokens {
@@ -97,6 +106,47 @@ func run(ctx context.Context, env envFunc, sa string) error {
 	sort.Strings(keys)
 	log.Printf("token-minter: refreshed %s in %s", strings.Join(keys, ", "), strings.Join(namespaces, ", "))
 	return nil
+}
+
+type envSecret struct {
+	namespace, name string
+	data            map[string]string
+}
+
+// parseEnvSecrets reads ENV_SECRETS="ns/name:ENV_KEY=token_key;ns/name:..." into
+// per-Secret key sets. Server-side apply with this field manager owns only these
+// keys, so the rest of a Flux-managed Secret stays untouched.
+func parseEnvSecrets(raw string, tokens map[string]string) ([]envSecret, error) {
+	byTarget := map[string]*envSecret{}
+	var order []string
+	for _, entry := range strings.Split(raw, ";") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		target, mapping, ok := strings.Cut(entry, ":")
+		ns, name, okTarget := strings.Cut(target, "/")
+		envKey, tokenKey, okMapping := strings.Cut(mapping, "=")
+		if !ok || !okTarget || !okMapping || ns == "" || name == "" || envKey == "" || tokenKey == "" {
+			return nil, fmt.Errorf("ENV_SECRETS entry %q is not ns/name:ENV_KEY=token_key", entry)
+		}
+		tok, minted := tokens[tokenKey]
+		if !minted {
+			return nil, fmt.Errorf("ENV_SECRETS entry %q names token %q, which TOKENS does not mint", entry, tokenKey)
+		}
+		es, seen := byTarget[target]
+		if !seen {
+			es = &envSecret{namespace: ns, name: name, data: map[string]string{}}
+			byTarget[target] = es
+			order = append(order, target)
+		}
+		es.data[envKey] = tok
+	}
+	out := make([]envSecret, 0, len(order))
+	for _, target := range order {
+		out = append(out, *byTarget[target])
+	}
+	return out, nil
 }
 
 func authentikToken(ctx context.Context, c *http.Client, cfg map[string]string) (string, error) {
