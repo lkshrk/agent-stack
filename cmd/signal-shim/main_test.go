@@ -38,7 +38,7 @@ func newFakeREST(t *testing.T) *fakeREST {
 			if err != nil {
 				return
 			}
-			defer c.CloseNow()
+			defer func() { _ = c.CloseNow() }()
 			for msg := range f.push {
 				if err := c.Write(r.Context(), websocket.MessageText, []byte(msg)); err != nil {
 					return
@@ -166,7 +166,7 @@ func TestEventsRelaysEnvelopesAsSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	f.push <- `{"envelope": {"source": "+492", "dataMessage": {"message": "ping"}}, "account": "+491"}`
 

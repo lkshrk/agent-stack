@@ -82,7 +82,7 @@ func (s *shim) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "upstream receive: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(64 << 20)
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -345,7 +345,7 @@ func (s *shim) do(ctx context.Context, method, path string, body []byte) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w", method, path, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	out, _ := io.ReadAll(io.LimitReader(res.Body, 128<<20))
 	switch {
 	case res.StatusCode == http.StatusTooManyRequests || strings.Contains(string(out), "RateLimit"):
