@@ -57,7 +57,7 @@ func newFakeREST(t *testing.T) *fakeREST {
 			_, _ = w.Write([]byte(`{"mode":"json-rpc"}`))
 		case r.URL.Path == "/v2/send":
 			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"timestamp":"1761245000123"}`))
+			_, _ = w.Write([]byte(`[{"timestamp":"1761245000123"}]`))
 		case strings.HasPrefix(r.URL.Path, "/v1/attachments/"):
 			_, _ = w.Write([]byte("ATTACHMENT-BYTES"))
 		default:

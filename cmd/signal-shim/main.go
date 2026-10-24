@@ -225,13 +225,17 @@ func (s *shim) send(ctx context.Context, p map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
+	// signal-cli-rest-api answers /v2/send with one entry per request it split the send into.
+	var resp []struct {
 		Timestamp string `json:"timestamp"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, fmt.Errorf("decode send response: %w", err)
 	}
-	ts, _ := strconv.ParseInt(resp.Timestamp, 10, 64)
+	if len(resp) == 0 {
+		return nil, fmt.Errorf("decode send response: empty")
+	}
+	ts, _ := strconv.ParseInt(resp[0].Timestamp, 10, 64)
 	return map[string]any{"timestamp": ts, "results": []any{map[string]any{"type": "SUCCESS"}}}, nil
 }
 
