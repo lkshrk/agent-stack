@@ -30,7 +30,7 @@ sandbox:
     namespace: omnigent-sandboxes
     service_account: omnigent-runner
     secret_name: omnigent-runner-env
-    image: ghcr.io/lkshrk/agent-stack/omnigent-host:1.0.4@sha256:20810b7449404cffceaa13a3ab91d92f9addc35723b54f6c815ebdb5fbb3ec68
+    image: ghcr.io/lkshrk/agent-stack/omnigent-host:1.0.6@sha256:0de47bf7b2cd5546e24901a22fa35729a7d4144c87dcc1106cff5f07edb58079
     pod_ready_timeout_s: 600
     home_size_limit: 20Gi
     resources:
