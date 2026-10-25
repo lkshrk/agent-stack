@@ -62,3 +62,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  renovate:
+    needs: images
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Trigger Renovate for h-cloud
+        env:
+          GH_TOKEN: ${{ secrets.RENOVATE_DISPATCH_TOKEN }}
+        run: gh workflow run renovate.yml -R lkshrk/gh-ops -f repositories=lkshrk/h-cloud
