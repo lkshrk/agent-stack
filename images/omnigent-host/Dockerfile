@@ -21,6 +21,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       build-essential pkg-config libssl-dev zsh jq xz-utils zip \
       lua5.4 libcurl4-openssl-dev libxml2 libsqlite3-0 libncurses6 tzdata \
+      libhdf5-dev \
  && rm -rf /var/lib/apt/lists/*
 
 ENV MISE_DATA_DIR=/opt/mise \
