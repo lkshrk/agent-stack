@@ -29,6 +29,12 @@ RUN git clone --quiet --filter=blob:none --no-checkout https://github.com/volcen
  && rm -rf /tmp/ov /opt/hermes/plugins/memory/openviking/tests \
  && /opt/hermes/.venv/bin/python -c "import httpx, psutil, packaging"
 
+# hermes-workspace lists MCP servers at GET /api/mcp; Hermes serves them at /api/mcp/servers.
+RUN f=/opt/hermes/hermes_cli/web_routers/mcp.py \
+ && grep -qx '@router.get("/api/mcp/servers")' "$f" \
+ && sed -i 's|^@router.get("/api/mcp/servers")$|@router.get("/api/mcp")\n&|' "$f" \
+ && grep -qx '@router.get("/api/mcp")' "$f"
+
 COPY images/hermes/bin/ /opt/agent/bin/
 COPY images/hermes/gitconfig /etc/gitconfig.d/agent
 COPY --chmod=0644 config/hermes/config.yaml /etc/hermes/config.yaml
