@@ -84,7 +84,6 @@
         'ghcr.io/omnigent-ai/omnigent-host',
         'ghcr.io/omnigent-ai/omnigent-server-kubernetes',
         'docker.io/nousresearch/hermes-agent',
-        'ghcr.io/outsourc-e/hermes-workspace',
         'ghcr.io/nesquena/hermes-webui',
       ],
       addLabels: ['agent-runtime'],
