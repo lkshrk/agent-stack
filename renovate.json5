@@ -85,9 +85,15 @@
         'ghcr.io/omnigent-ai/omnigent-server-kubernetes',
         'docker.io/nousresearch/hermes-agent',
         'ghcr.io/outsourc-e/hermes-workspace',
+        'ghcr.io/nesquena/hermes-webui',
       ],
       addLabels: ['agent-runtime'],
       automerge: false,
+    },
+    {
+      description: 'hermes-webui imports Hermes internals and supports only the matching Hermes release; bump them together',
+      matchDepNames: ['docker.io/nousresearch/hermes-agent', 'ghcr.io/nesquena/hermes-webui'],
+      groupName: 'hermes runtime',
     },
     {
       description: 'Release assets are pinned by checksum in the Dockerfile; the PR must update the SHA256 too',

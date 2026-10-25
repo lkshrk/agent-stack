@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [omnigent-host, omnigent-server, agent-tools, hermes]
+        image: [omnigent-host, omnigent-server, agent-tools, hermes, hermes-webui]
     steps:
       - uses: actions/checkout@v5
         with:
