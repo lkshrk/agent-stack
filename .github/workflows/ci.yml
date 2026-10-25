@@ -87,8 +87,8 @@ jobs:
           done
           docker logs webui
           [ "$status" = healthy ]
-          docker logs webui 2>&1 | grep -q 'Dependencies already installed'
-          docker logs webui 2>&1 | grep -q 'Hermes agent critical imports verified'
+          grep -q 'Dependencies already installed' <(docker logs webui 2>&1)
+          grep -q 'Hermes agent critical imports verified' <(docker logs webui 2>&1)
           docker exec -u 10000 webui test -r /etc/hermes/config.yaml
 
   gate:
