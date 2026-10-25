@@ -13,6 +13,12 @@ ARG KUBECTL_VERSION=v1.37.1
 ARG OPENVIKING_PLUGIN_SHA=9f150ece247ad683494ab172d738023bd6dc6170
 
 USER root
+# The OIDC SSRF guard rejects private IPs, but in-cluster DNS sends the issuer to the envoy ClusterIP.
+RUN f=/apptoo/api/auth_oidc.py \
+ && grep -qx 'def _is_disallowed_oidc_host(hostname: str) -> bool:' "$f" \
+ && sed -i 's|^def _is_disallowed_oidc_host(hostname: str) -> bool:$|&\n    if hostname.lower() in os.getenv("HERMES_WEBUI_OIDC_TRUSTED_HOSTS", "").lower().split(","):\n        return False|' "$f" \
+ && grep -q 'HERMES_WEBUI_OIDC_TRUSTED_HOSTS' "$f"
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
