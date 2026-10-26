@@ -1,5 +1,6 @@
 import copy
 from datetime import date
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -8,7 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import drop_negligible, load_bundle, validate
+from apply_wow_season_refresh import drop_negligible, load_bundle, main as apply_main, validate
+from check_wow_season_updates import analyze
 
 
 def fixture():
@@ -243,48 +245,141 @@ class PublishChecks(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_bundle(root)
 
-    def test_cli_writes_actual_bundle_files(self):
-        old, observation, result = fixture()
+
+LIVE_PAGE = (Path(__file__).parent / 'fixtures/method-affliction-warlock.html').read_text()
+LIVE_GUIDE = 'https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables'
+
+
+def live_guide(url=LIVE_GUIDE):
+    digest, extra = analyze('guide', LIVE_PAGE)
+    return {'kind': 'guide', 'spec_ids': [265], 'sha256': digest, **extra}
+
+
+def spec_fixture(flask='item:241326'):
+    old, observation, result = fixture()
+    scope = {k: old['spec-265.json'][k] for k in ['schema_version', 'game', 'season', 'verified_at', 'status']}
+    setup = {**scope, 'spec_id': 265, 'verified_patch': '12.1', 'sources': [{'url': LIVE_GUIDE, 'updated': '2026-08-12'}],
+             'stat_guidance': {'single_target': 'Method: Crit > Haste = Mastery > Versatility.'},
+             'recommendations': {'gems': {'default': 'item:240967'}, 'enchants': {'head': 'item:244007'}, 'consumables': {'flask': flask}}}
+    record = old['catalog.json']['records']['item:1']
+    for key in ['item:241326', 'item:241324', 'item:240967', 'item:244007']:
+        old['catalog.json']['records'][key] = {**record, 'item_id': int(key.split(':')[1]), 'name': 'Flask'}
+    old['catalog.json']['records']['item:1'] = record
+    old['index.json']['catalogue_record_count'] = 5
+    old['spec-265.json'] = setup
+    old['source-watch.json'] = {'captured_at': 'old', 'sources': {LIVE_GUIDE: {'kind': 'guide', 'spec_ids': [265], 'sha256': 'a' * 64}}}
+    observation['current']['sources'] = {LIVE_GUIDE: live_guide()}
+    return old, observation
+
+
+class PipelineRuns(unittest.TestCase):
+    def run_pipeline(self, old, observation, parts=(), force=False, fetched=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            base, candidate = root / 'base', root / 'candidate'
-            base.mkdir(); candidate.mkdir()
+            base, parts_dir = root / 'base', root / 'parts'
+            base.mkdir(); parts_dir.mkdir()
             for name, doc in old.items():
                 (base / name).write_text(json.dumps(doc))
-                (candidate / name).write_text(json.dumps(doc))
-            doc = copy.deepcopy(old['spec-265.json'])
-            doc['stat_guidance']['baseline'] = 'Crit first'
-            (candidate / 'spec-265.json').write_text(json.dumps(doc))
-            run = self.run_cli(root, base, candidate, result, observation)
-            self.assertEqual(run.returncode, 0, run.stderr)
-            self.assertEqual(json.loads((base / 'spec-265.json').read_text())['stat_guidance']['baseline'], 'Crit first')
-            self.assertTrue(json.loads(run.stdout)['release'])
+            for result, edits in parts:
+                folder = parts_dir / ('wow-spec-' + str(result['spec_id']))
+                (folder / 'candidate').mkdir(parents=True)
+                for name, doc in old.items():
+                    doc = edits.get(name, doc)
+                    (folder / 'candidate' / name).write_text(json.dumps(doc))
+                (folder / 'result.json').write_text(json.dumps(result))
+            (root / 'observation.json').write_text(json.dumps(observation))
+            argv = ['--bundle', str(base), '--parts', str(parts_dir), '--observation', str(root / 'observation.json'), '--no-enrich']
+            with patch('apply_wow_season_refresh.fetch_guides', return_value=fetched if fetched is not None else observation['current']['sources']), \
+                    patch('sys.stdout', new_callable=io.StringIO):
+                output = apply_main(argv + (['--force'] if force else []))
+            return output, {n.name: json.loads(n.read_text()) for n in base.iterdir()}
 
-    def test_cli_fingerprint_only_refresh_is_not_a_release(self):
-        old, observation, result = fixture()
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base, candidate = root / 'base', root / 'candidate'
-            base.mkdir(); candidate.mkdir()
-            for name, doc in old.items():
-                (base / name).write_text(json.dumps(doc))
-                (candidate / name).write_text(json.dumps(doc))
-            doc = copy.deepcopy(old['spec-265.json'])
-            doc['verified_at'] = '2000-01-01'
-            (candidate / 'spec-265.json').write_text(json.dumps(doc))
-            run = self.run_cli(root, base, candidate, result, observation)
-            self.assertEqual(run.returncode, 0, run.stderr)
-            output = json.loads(run.stdout)
-            self.assertEqual((output['changed_files'], output['release']), (['source-watch.json'], False))
-            self.assertEqual(json.loads((base / 'spec-265.json').read_text()), old['spec-265.json'])
+    def part(self, outcome, **changes):
+        return {'spec_id': 265, 'outcome': outcome, 'summary': 'checked', 'accepted_sources': [LIVE_GUIDE],
+                'unresolved_sources': [], **changes}
 
-    def run_cli(self, root, base, candidate, result, observation):
-        (root / 'result.json').write_text(json.dumps(result))
-        (root / 'observation.json').write_text(json.dumps(observation))
-        return subprocess.run([sys.executable, str(Path(__file__).with_name('apply_wow_season_refresh.py')),
-                               '--bundle', str(base), '--candidate', str(candidate),
-                               '--result', str(root / 'result.json'), '--observation', str(root / 'observation.json')],
-                              capture_output=True, text=True)
+    def test_unchanged_advice_advances_patch_date_and_fingerprint_without_claude(self):
+        old, observation = spec_fixture()
+        output, saved = self.run_pipeline(old, observation)
+        self.assertEqual(output['advanced'], [265])
+        self.assertFalse(output['release'])
+        setup = saved['spec-265.json']
+        self.assertEqual((setup['verified_patch'], setup['verified_at']), ('12.1.5', date.today().isoformat()))
+        self.assertEqual(setup['sources'][0]['updated'], '2026-10-13')
+        self.assertEqual(setup['recommendations'], old['spec-265.json']['recommendations'])
+        self.assertEqual(saved['source-watch.json']['sources'][LIVE_GUIDE]['sha256'], observation['current']['sources'][LIVE_GUIDE]['sha256'])
+        self.assertEqual(saved['source-watch.json']['sources'][LIVE_GUIDE]['meta']['patch'], '12.1.5')
+        self.assertNotIn('extract', saved['source-watch.json']['sources'][LIVE_GUIDE])
+        self.assertEqual(saved['index.json']['verified_patch'], '12.1.5')
+
+    def test_a_spec_that_differs_from_its_guide_is_not_advanced_without_a_claude_result(self):
+        old, observation = spec_fixture(flask='item:241324')
+        output, saved = self.run_pipeline(old, observation)
+        self.assertEqual((output['advanced'], output['changed_files']), ([], []))
+        self.assertEqual(saved['spec-265.json'], old['spec-265.json'])
+
+    def test_settled_spec_without_drift_makes_no_change(self):
+        old, observation = spec_fixture()
+        _, settled = self.run_pipeline(old, observation)
+        output, _ = self.run_pipeline(settled, observation)
+        self.assertEqual(output['changed_files'], [])
+
+    def test_claude_update_is_applied_and_validated_per_spec(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['recommendations']['consumables']['flask'] = 'item:241326'
+        output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': edited})])
+        self.assertEqual(output['ai_updated'], [265])
+        self.assertTrue(output['release'])
+        self.assertEqual(saved['spec-265.json']['recommendations']['consumables']['flask'], 'item:241326')
+
+    def test_claude_unchanged_outcome_advances_verification_but_rejects_edits(self):
+        old, observation = spec_fixture(flask='item:241324')
+        output, saved = self.run_pipeline(old, observation, [(self.part('unchanged'), {})])
+        self.assertEqual(output['advanced'], [265])
+        self.assertEqual(saved['spec-265.json']['recommendations'], old['spec-265.json']['recommendations'])
+        self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1.5')
+        sneaky = copy.deepcopy(old['spec-265.json'])
+        sneaky['stat_guidance']['single_target'] = 'Haste first'
+        with self.assertRaisesRegex(ValueError, 'unchanged outcome must not edit'):
+            self.run_pipeline(old, observation, [(self.part('unchanged'), {'spec-265.json': sneaky})])
+
+    def test_unresolved_result_keeps_the_old_spec_and_fingerprint(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['stat_guidance']['single_target'] = 'Guess'
+        part = self.part('unresolved', accepted_sources=[], unresolved_sources=[LIVE_GUIDE])
+        output, saved = self.run_pipeline(old, observation, [(part, {'spec-265.json': edited})])
+        self.assertEqual(output['status'], 'partial')
+        self.assertEqual(saved['spec-265.json'], old['spec-265.json'])
+        self.assertEqual(saved['source-watch.json']['sources'][LIVE_GUIDE]['sha256'], 'a' * 64)
+
+    def test_a_run_cannot_edit_another_spec(self):
+        old, observation = spec_fixture()
+        other = copy.deepcopy(old['spec-265.json'])
+        old['spec-266.json'] = {**other, 'spec_id': 266}
+        old['index.json']['specs'].append({'spec_id': 266, 'file': 'spec-266.json'})
+        old['index.json']['spec_count'] = 2
+        tampered = {**old['spec-266.json'], 'stat_guidance': {'x': 'y'}}
+        with self.assertRaisesRegex(ValueError, 'outside its scope'):
+            self.run_pipeline(old, observation, [(self.part('updated'), {'spec-266.json': tampered})])
+
+    def test_unavailable_guide_leaves_the_spec_untouched(self):
+        old, observation = spec_fixture()
+        down = {LIVE_GUIDE: {'kind': 'guide', 'spec_ids': [265], 'error': 'HTTP 403'}}
+        output, _ = self.run_pipeline(old, observation, fetched=down)
+        self.assertEqual(output['changed_files'], [])
+
+    def test_cross_check_baselines_only_move_with_a_real_change(self):
+        old, observation = spec_fixture()
+        old['spec-265.json']['sources'].append({'url': 'https://murlok.io/a/b/m+', 'updated': None})
+        observation['current']['sources']['https://murlok.io/a/b/m+'] = {'kind': 'crosscheck', 'spec_ids': [265], 'sha256': 'c' * 64}
+        _, saved = self.run_pipeline(old, observation)
+        self.assertEqual(saved['source-watch.json']['sources']['https://murlok.io/a/b/m+']['sha256'], 'c' * 64)
+        settled = copy.deepcopy(saved)
+        observation['current']['sources']['https://murlok.io/a/b/m+']['sha256'] = 'd' * 64
+        output, _ = self.run_pipeline(settled, observation)
+        self.assertEqual(output['changed_files'], [])
 
 
 if __name__ == '__main__':

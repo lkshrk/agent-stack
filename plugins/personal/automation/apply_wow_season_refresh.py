@@ -2,6 +2,7 @@
 """Validate an AI-produced data-only candidate before the trusted publishing job commits it."""
 import argparse
 import copy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import json
 from pathlib import Path
@@ -9,13 +10,15 @@ import re
 import subprocess
 from urllib.parse import urlparse
 
-from check_wow_season_updates import DEFAULT_BUNDLE, observe, refs, targets
+from check_wow_season_updates import active_bundle, observe, refs, targets, watch_record
+from enrich_wow_catalog import enrich
+from prediff_wow_specs import classify, live_guides, needs_advance
 
 ALLOWED = re.compile(r'(catalog|index|source-watch|spec-\d+)\.json')
 # Provenance and verification bookkeeping; a change confined to these is not a player-visible update.
 BOOKKEEPING = {'verified_at', 'identity_verified_at', 'verified_patch', 'captured_at', 'updated', 'sources',
                'unresolved', 'unknown_fields', 'quality_note', 'identity_verification', 'verification_basis',
-               'validation_scope', 'coverage'}
+               'validation_scope', 'coverage', 'tooltip_enriched_at'}
 
 
 def load_bundle(path):
@@ -79,7 +82,7 @@ def validate(old, candidate, result, observation, checked=None):
         raise ValueError('Game/season migration requires a separate change')
     if observation['current']['season'] != scope[1]:
         raise ValueError('Observation is from a different season')
-    for field in ['roster_source', 'season_source']:
+    for field in ['roster_source', 'season_source', 'trigger_sources']:
         if index.get(field) != old['index.json'].get(field):
             raise ValueError('Metadata source migration requires a separate change')
     valid_date(index['verified_at'])
@@ -179,8 +182,8 @@ def validate(old, candidate, result, observation, checked=None):
         current = current_sources.get(url)
         if not current or current.get('error') or not re.fullmatch('[0-9a-f]{64}', current.get('sha256', '')):
             raise ValueError('Cannot advance an unavailable/unobserved source')
-        if watch['sources'].get(url) != current:
-            watch['sources'][url] = current
+        if watch['sources'].get(url) != watch_record(current):
+            watch['sources'][url] = watch_record(current)
             fingerprints_changed = True
     if fingerprints_changed:
         watch['captured_at'] = observation['current']['captured_at']
@@ -210,29 +213,166 @@ def drop_negligible(old, docs):
     return kept
 
 
-def main():
+def merge_parts(old, parts):
+    """Combine independent per-spec Claude runs into one candidate bundle and one legacy-shaped result."""
+    merged = copy.deepcopy(old)
+    records = merged['catalog.json']['records']
+    accepted, unresolved, summaries, unchanged, updated = [], [], [], [], []
+    for result, candidate in parts:
+        spec_id, name = result['spec_id'], f'spec-{result["spec_id"]}.json'
+        if name not in old:
+            raise ValueError('Result for an unknown spec: ' + name)
+        if result['outcome'] not in ['updated', 'unchanged', 'unresolved']:
+            raise ValueError('Unsupported per-spec outcome')
+        for other, value in candidate.items():
+            if other in [name, 'catalog.json']:
+                continue
+            before, after = old.get(other), value
+            if other == 'index.json':
+                before, after = ({k: v for k, v in d.items() if k != 'catalogue_record_count'} for d in (before, after))
+            if before != after:
+                raise ValueError('Per-spec run changed files outside its scope: ' + other)
+        accepted += result['accepted_sources']
+        unresolved += result['unresolved_sources']
+        summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
+        if result['outcome'] == 'unresolved':
+            continue
+        for key, record in candidate['catalog.json']['records'].items():
+            if record == old['catalog.json']['records'].get(key):
+                continue
+            if key in records and records[key] != old['catalog.json']['records'].get(key) and records[key] != record:
+                raise ValueError('Conflicting catalogue edits for ' + key)
+            records[key] = record
+        if result['outcome'] == 'updated':
+            merged[name] = candidate[name]
+            updated.append(spec_id)
+        else:
+            before = {k: v for k, v in old[name].items() if k != 'unresolved'}
+            if {k: v for k, v in candidate[name].items() if k != 'unresolved'} != before:
+                raise ValueError('An unchanged outcome must not edit the spec: ' + name)
+            unchanged.append(spec_id)
+    merged['index.json']['catalogue_record_count'] = len(records)
+    blocked = set(unresolved)
+    accepted = [url for url in dict.fromkeys(accepted) if url not in blocked]
+    result = {'status': 'partial' if unresolved else 'complete',
+              'summary': '\n'.join(summaries) or 'No Claude runs were needed.',
+              'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved))}
+    return merged, result, unchanged, updated
+
+
+def load_parts(directory):
+    parts = []
+    for folder in sorted(directory.iterdir()) if directory and directory.is_dir() else []:
+        result_file = folder / 'result.json'
+        if result_file.is_file() and (folder / 'candidate').is_dir():
+            parts.append((json.loads(result_file.read_text()), load_bundle(folder / 'candidate')))
+    return parts
+
+
+def fetch_guides(docs, spec_ids):
+    wanted = {}
+    for entry in docs['index.json']['specs']:
+        if entry['spec_id'] in spec_ids:
+            for source in docs[entry['file']]['sources']:
+                url = source['url'] if isinstance(source, dict) else source
+                wanted[url] = {'kind': 'guide', 'spec_ids': [entry['spec_id']]}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return dict(pool.map(observe, wanted.items()))
+
+
+def version_key(patch):
+    return [int(part) for part in patch.split('.')]
+
+
+def advance_verified(docs, spec_ids, sources, today, require_unchanged, force=False):
+    """Record that a spec was rechecked against its live guide and its advice still stands."""
+    live = {s: v for s, v in sources.items() if v.get('kind') == 'guide'}
+    done = []
+    verdicts = classify(docs, live) if require_unchanged else {}
+    watch = docs['source-watch.json']
+    for sid in spec_ids:
+        name = f'spec-{sid}.json'
+        setup = copy.deepcopy(docs[name])
+        guides = live_guides(setup, live)
+        if not guides or (require_unchanged and (verdicts[sid]['status'] != 'unchanged'
+                                                 or not needs_advance(setup, guides, watch['sources'], force))):
+            continue
+        patches = [g['meta']['patch'] for g in guides.values() if g.get('meta', {}).get('patch')]
+        if patches:
+            setup['verified_patch'] = max(patches, key=version_key)
+        setup['verified_at'] = today
+        for source in setup['sources']:
+            if isinstance(source, dict) and guides.get(source['url'], {}).get('meta', {}).get('updated'):
+                source['updated'] = guides[source['url']]['meta']['updated']
+        if setup != docs[name]:
+            docs[name] = setup
+            done.append(sid)
+        for url, guide in guides.items():
+            if watch['sources'].get(url) != watch_record(guide):
+                watch['sources'][url] = watch_record(guide)
+    if done:
+        index = docs['index.json']
+        index['verified_at'] = docs['catalog.json']['verified_at'] = today
+        patches = {docs[f'spec-{e["spec_id"]}.json'].get('verified_patch') for e in index['specs']}
+        if len(patches) == 1:
+            index['verified_patch'] = patches.pop()
+    return done
+
+
+def record_informational(docs, observation):
+    watch = docs['source-watch.json']
+    wanted = targets(documents=docs)
+    for url, value in observation['current']['sources'].items():
+        if value.get('kind') in ['crosscheck', 'news'] and not value.get('error') and url in wanted:
+            watch['sources'][url] = watch_record(value)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--candidate', type=Path, required=True)
-    parser.add_argument('--result', type=Path, required=True)
+    parser.add_argument('--parts', type=Path, help='Directory of per-spec runs: <dir>/<name>/{candidate/,result.json}; may be empty or absent')
     parser.add_argument('--observation', type=Path, required=True)
-    parser.add_argument('--bundle', type=Path, default=DEFAULT_BUNDLE)
+    parser.add_argument('--bundle', type=Path)
+    parser.add_argument('--game')
+    parser.add_argument('--season')
+    parser.add_argument('--no-enrich', action='store_true')
+    parser.add_argument('--force', action='store_true', help='Advance verification of unchanged specs even without drift')
     parser.add_argument('--dry-run', action='store_true')
-    args = parser.parse_args()
-    old = load_bundle(args.bundle)
-    result = json.loads(args.result.read_text())
-    candidate = load_bundle(args.candidate)
+    args = parser.parse_args(argv)
+    bundle = args.bundle or active_bundle(args.game, args.season)
+    old = load_bundle(bundle)
     observation = json.loads(args.observation.read_text())
+    today = date.today().isoformat()
+    candidate, result, ai_unchanged, ai_updated = merge_parts(old, load_parts(args.parts))
     checked = identity_checks(old, candidate)
     for key, proof in checked.items():
         spec_ids = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
         observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(spec_ids), 'sha256': proof['sha256']}
-    docs = drop_negligible(old, validate(old, candidate, result, observation, checked))
+    docs = copy.deepcopy(drop_negligible(old, validate(old, candidate, result, observation, checked)))
+    all_ids = [e['spec_id'] for e in docs['index.json']['specs']]
+    rest = [i for i in all_ids if i not in ai_updated]
+    fresh = fetch_guides(docs, set(rest))
+    advanced = advance_verified(docs, [i for i in rest if i not in ai_unchanged], fresh, today, True, args.force)
+    advanced += advance_verified(docs, [i for i in ai_unchanged if i in rest], {**fresh, **observation['current']['sources']}, today, False)
+    if any(docs[n] != old.get(n) for n in docs):
+        record_informational(docs, observation)
+    enriched = {} if args.no_enrich else enrich(docs['catalog.json'], today)
     changed = [name for name, value in docs.items() if value != old.get(name)]
-    release = any(name != 'source-watch.json' for name in changed)
+    release = any(substance(docs[n]) != substance(old.get(n, {})) for n in changed if n != 'source-watch.json')
     if not args.dry_run:
         for name in changed:
-            (args.bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
-    print(json.dumps({'changed_files': changed, 'release': release, 'status': result['status'], 'summary': result['summary']}))
+            (bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
+    lines = [result['summary']]
+    if advanced:
+        lines += ['', f'Advice unchanged, verification advanced for {len(advanced)} specs: ' + ', '.join(map(str, sorted(advanced)))]
+    if enriched:
+        lines += ['', f'Tooltip data filled for {len(enriched)} catalogue records: ' + ', '.join(sorted(enriched))]
+    deferred = observation.get('prediff', {}).get('deferred', [])
+    if deferred:
+        lines += ['', 'Specs with differences not processed this run (retried next run): ' + ', '.join(map(str, deferred))]
+    output = ({'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
+                      'advanced': sorted(advanced), 'ai_updated': ai_updated, 'enriched': sorted(enriched)})
+    print(json.dumps(output))
+    return output
 
 
 if __name__ == '__main__':
