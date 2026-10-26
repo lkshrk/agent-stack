@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from check_wow_season_updates import capture, compare, exit_status, fingerprint, main, refs, report
+from check_wow_season_updates import active_bundle, analyze, capture, classify_url, compare, exit_status, fingerprint, main, refs, report, targets
 
 
 class UpdateChecks(unittest.TestCase):
@@ -99,7 +99,7 @@ class UpdateChecks(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory)
-            (bundle / 'index.json').write_text('{"season":"test"}')
+            (bundle / 'index.json').write_text('{"game":"retail","season":"test"}')
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch('check_wow_season_updates.targets', return_value=wanted), \
                     patch('check_wow_season_updates.observe', side_effect=observation), \
@@ -117,7 +117,7 @@ class UpdateChecks(unittest.TestCase):
     def test_json_and_snapshot_stdout_remain_machine_readable(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory)
-            (bundle / 'index.json').write_text('{"season":"test"}')
+            (bundle / 'index.json').write_text('{"game":"retail","season":"test"}')
             wanted = {'https://example.test': {'kind': 'tooltip', 'spec_ids': [265]}}
             for option in ['--json', '--snapshot']:
                 with self.subTest(option=option):
@@ -135,7 +135,86 @@ class UpdateChecks(unittest.TestCase):
                         self.assertTrue(data['requires_refresh'])
                         self.assertIn('requires_refresh=true', stderr.getvalue())
                     else:
-                        self.assertEqual(set(data), {'schema_version', 'captured_at', 'season', 'sources'})
+                        self.assertEqual(set(data), {'schema_version', 'captured_at', 'game', 'season', 'sources'})
+
+
+FIXTURES = Path(__file__).parent / 'fixtures'
+
+
+def fixture(name):
+    return (FIXTURES / name).read_text()
+
+
+class GuideFingerprints(unittest.TestCase):
+    def test_header_patch_and_date_are_metadata_not_part_of_the_hash(self):
+        page = fixture('method-affliction-warlock.html')
+        bumped = page.replace('Patch 12.1.5', 'Patch 12.2').replace('13th Oct, 2026', '25th Oct, 2026')
+        first, second = analyze('guide', page), analyze('guide', bumped)
+        self.assertEqual(first[0], second[0])
+        self.assertEqual(first[1]['meta'], {'patch': '12.1.5', 'updated': '2026-10-13'})
+        self.assertEqual(second[1]['meta'], {'patch': '12.2', 'updated': '2026-10-25'})
+
+    def test_sections_that_matter_change_the_hash(self):
+        page = fixture('method-affliction-warlock.html')
+        for old, new in [('item=241308', 'item=241309'), ('Crit &gt; Haste', 'Haste &gt; Crit'), ('item=244007', 'item=244008')]:
+            with self.subTest(old=old):
+                self.assertIn(old, page)
+                self.assertNotEqual(fingerprint('guide', page), fingerprint('guide', page.replace(old, new, 1)))
+
+    def test_race_and_footer_noise_is_ignored(self):
+        page = fixture('method-affliction-warlock.html')
+        self.assertEqual(fingerprint('guide', page), fingerprint('guide', page.replace('<footer>', '<footer>Posted 3 days ago ')))
+
+    def test_extract_has_only_the_gear_sections_with_item_markers(self):
+        extract = analyze('guide', fixture('method-affliction-warlock.html'))[1]['extract']
+        self.assertEqual(set(extract), {'stats', 'enchants', 'gems', 'consumables'})
+        self.assertIn('[item:244007]', extract['enchants'])
+        self.assertIn('[item:241326]', extract['consumables'])
+
+    def test_crosscheck_and_news_sources_are_recorded_without_triggering(self):
+        murlok = analyze('crosscheck', fixture('murlok-affliction-warlock.html'))
+        self.assertEqual(murlok[1]['extract']['stats'], 'Haste Critical Strike Mastery Versatility')
+        self.assertIn('Enchant Helm', murlok[1]['extract']['enchants'])
+        news = analyze('news', fixture('blizzard-news.html'))
+        self.assertEqual(news[1]['extract']['announcements'], ['Hotfixes: October 23, 2026'])
+        rows = compare({'sources': {'m': {'sha256': 'a', 'kind': 'crosscheck'}}}, {'sources': {'m': {'sha256': 'b', 'kind': 'crosscheck'}}})
+        self.assertEqual(rows[0]['status'], 'informational')
+        self.assertEqual(exit_status(rows), 0)
+        with self.assertRaises(ValueError):
+            analyze('news', '<html>no announcements</html>')
+
+    def test_sources_are_classified_by_host(self):
+        self.assertEqual(classify_url('https://murlok.io/warlock/affliction/m+'), 'crosscheck')
+        self.assertEqual(classify_url('https://www.method.gg/guides/x'), 'guide')
+        self.assertEqual(classify_url('https://nether.wowhead.com/tooltip/item/1'), 'tooltip')
+
+
+class SeasonParameters(unittest.TestCase):
+    def test_active_bundle_comes_from_the_pointer_file_or_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'current.json').write_text('{"game": "retail", "season": "season-x"}')
+            self.assertEqual(active_bundle(root=root), root / 'retail' / 'season-x')
+            self.assertEqual(active_bundle('classic', 'season-y', root=root), root / 'classic' / 'season-y')
+            self.assertEqual(active_bundle(season='season-z', root=root), root / 'retail' / 'season-z')
+            with self.assertRaises(ValueError):
+                active_bundle('../etc', 'x', root=root)
+
+    def test_shipped_pointer_names_an_existing_bundle(self):
+        self.assertTrue((active_bundle() / 'index.json').is_file())
+
+    def test_trigger_sources_come_from_the_index(self):
+        docs = {'catalog.json': {'records': {}}, 'spec-1.json': {'sources': ['https://murlok.io/a/b/m+']},
+                'index.json': {'specs': [{'spec_id': 1, 'file': 'spec-1.json'}], 'roster_source': 'https://r.test',
+                               'trigger_sources': ['https://news.test/wow']}}
+        found = targets(documents=docs)
+        self.assertEqual(found['https://news.test/wow']['kind'], 'news')
+        self.assertEqual(found['https://murlok.io/a/b/m+'], {'kind': 'crosscheck', 'spec_ids': [1]})
+
+    def test_no_season_or_game_is_hardcoded_in_automation(self):
+        for name in ['check_wow_season_updates.py', 'prediff_wow_specs.py', 'apply_wow_season_refresh.py',
+                     'enrich_wow_catalog.py', 'prepare_wow_refresh.py', 'prompts/refresh-wow-season.md']:
+            self.assertNotIn('season-mn-2', (Path(__file__).parent / name).read_text(), name)
 
 
 if __name__ == '__main__':

@@ -15,7 +15,21 @@ import time
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BUNDLE = ROOT / 'skills/wow-spec/assets/season-data/retail/season-mn-2'
+DATA_ROOT = ROOT / 'skills/wow-spec/assets/season-data'
+SOURCE_FIELDS = ('kind', 'spec_ids', 'sha256', 'meta', 'error')
+
+
+def active_bundle(game=None, season=None, root=DATA_ROOT):
+    if not (game and season):
+        pointer = json.loads((root / 'current.json').read_text())
+        game, season = game or pointer['game'], season or pointer['season']
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', game) or not re.fullmatch(r'[a-z0-9][a-z0-9-]*', season):
+        raise ValueError('Invalid game/season name')
+    return root / game / season
+
+
+def watch_record(value):
+    return {k: v for k, v in value.items() if k in SOURCE_FIELDS}
 
 
 def refs(value):
@@ -26,6 +40,15 @@ def refs(value):
     if isinstance(value, list):
         return set().union(*(refs(v) for v in value))
     return set()
+
+
+def classify_url(url):
+    host = urlparse(url).netloc
+    if host == 'nether.wowhead.com' and '/tooltip/' in url:
+        return 'tooltip'
+    if host.endswith('murlok.io'):
+        return 'crosscheck'
+    return 'guide'
 
 
 def targets(bundle=None, documents=None):
@@ -47,10 +70,8 @@ def targets(bundle=None, documents=None):
             entity = re.search(r'(item|spell)=(\d+)', url)
             if entity and 'wowhead.com' in urlparse(url).netloc:
                 add('https://nether.wowhead.com/tooltip/' + '/'.join(entity.groups()), 'tooltip', entry['spec_id'])
-            elif '/tooltip/' in url and urlparse(url).netloc == 'nether.wowhead.com':
-                add(url, 'tooltip', entry['spec_id'])
             else:
-                add(url, 'guide', entry['spec_id'])
+                add(url, classify_url(url), entry['spec_id'])
         for key in refs(setup):
             if key not in catalog['records']:
                 raise ValueError('Unresolved catalogue reference: ' + key)
@@ -58,57 +79,128 @@ def targets(bundle=None, documents=None):
     add(index['roster_source'], 'roster')
     if index.get('season_source'):
         add(index['season_source'], 'seasons')
+    for url in index.get('trigger_sources', []):
+        add(url, 'news')
     for row in out.values():
         row['spec_ids'].sort()
     return dict(sorted(out.items()))
 
 
-class GuideText(HTMLParser):
+SECTION_KINDS = [('stats', r'stat'), ('enchants', r'enchant'), ('gems', r'gem'),
+                 ('consumables', r'consum|flask|potion|food'), ('gear', r'gear|\bbis\b')]
+SECTION_TITLE = re.compile(r'<div[^>]*class="[^"]*guide-section-title[^"]*"[^>]*>(.*?)</div>', re.S)
+AGO = re.compile(r'\(?\b\d+\s*(?:d|w|mo|days?|weeks?|months?|years?)\s+ago\)?', re.I)
+
+
+class SectionText(HTMLParser):
     def __init__(self):
         super().__init__()
-        self.active = False
         self.skip = 0
         self.parts = []
 
     def handle_starttag(self, tag, attrs):
-        if tag == 'h1':
-            self.active = True
-        if tag == 'footer':
-            self.active = False
-        if tag in ['script', 'style', 'noscript']:
+        if tag in ['script', 'style', 'noscript', 'svg']:
             self.skip += 1
-        if self.active and not self.skip:
-            if tag in ['h1', 'h2', 'h3', 'h4', 'p', 'li', 'tr', 'br']:
-                self.parts.append('\n')
-            href = dict(attrs).get('href', '')
-            entity = re.search(r'(item|spell)=(\d+)', href)
-            if tag == 'a' and entity:
-                self.parts.append(' [' + ':'.join(entity.groups()) + '] ')
+        if self.skip:
+            return
+        if tag in ['h1', 'h2', 'h3', 'h4', 'p', 'li', 'tr', 'br', 'div']:
+            self.parts.append('\n')
+        entity = re.search(r'(item|spell)=(\d+)', dict(attrs).get('href') or '')
+        if tag == 'a' and entity:
+            self.parts.append(' [' + ':'.join(entity.groups()) + '] ')
 
     def handle_endtag(self, tag):
-        if tag in ['script', 'style', 'noscript']:
+        if tag in ['script', 'style', 'noscript', 'svg']:
             self.skip = max(0, self.skip - 1)
 
     def handle_data(self, text):
-        if self.active and not self.skip:
+        if not self.skip:
             self.parts.append(text)
 
 
-def fingerprint(kind, raw):
+def plain(fragment):
+    parser = SectionText()
+    parser.feed(fragment)
+    return ' '.join(AGO.sub('', ''.join(parser.parts)).split())
+
+
+def ordinal_date(text):
+    match = re.search(r'(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3})[a-z]*,?\s+(\d{4})', text or '')
+    if not match:
+        return None
+    try:
+        return datetime.strptime(' '.join(match.groups()), '%d %b %Y').date().isoformat()
+    except ValueError:
+        return None
+
+
+def guide_meta(raw):
+    patch = re.search(r'Patch\s+(\d+(?:\.\d+)+)', raw)
+    updated = re.search(r'Last Updated:?\s*(?:</[^>]+>)?\s*([^<]{4,40})', raw)
+    return {'patch': patch.group(1) if patch else None, 'updated': ordinal_date(updated.group(1)) if updated else None}
+
+
+def guide_sections(raw):
+    body = raw[:raw.index('</article>')] if '</article>' in raw else raw
+    marks = list(SECTION_TITLE.finditer(body))
+    sections = {}
+    for number, mark in enumerate(marks):
+        end = marks[number + 1].start() if number + 1 < len(marks) else len(body)
+        title = plain(mark.group(1)).casefold()
+        for key, pattern in SECTION_KINDS:
+            if re.search(pattern, title):
+                sections[key] = (sections.get(key, '') + ' ' + plain(body[mark.end():end])).strip()
+                break
+    return sections
+
+
+def murlok_sections(raw):
+    raw = re.sub(r'<(script|style|svg)\b.*?</\1>', '', raw, flags=re.S)
+    parts = re.split(r'(?=<h2[ >])', raw)
+
+    def block(title):
+        return next((p for p in parts if re.match(r'<h2[^>]*>\s*' + title, p)), '')
+    stat = plain(block('Stat Priority'))
+    order = re.search(r'Stat priority ((?:[A-Z][a-z]+(?: Strike)? ){2,5}?)(?:Additional|Talent)', stat + ' Talent')
+    names = lambda title: sorted({plain(n) for n in re.findall(r'<h4[^>]*>(.*?)</h4>', block(title), re.S)})
+    return {'stats': order.group(1).strip() if order else '', 'enchants': ' | '.join(names('Enchantments')),
+            'gems': ' | '.join(names('Gems'))}
+
+
+def news_entries(raw):
+    found = re.findall(r'"title":"([^"]+)","id":(\d+),"slug":"([^"]+)"', raw)
+    return sorted({(int(i), t) for t, i, _ in found if re.search(r'hotfix|patch\s+\d|patch notes', t, re.I)})
+
+
+def analyze(kind, raw):
+    extra = {}
     if kind == 'guide':
-        parser = GuideText()
-        parser.feed(raw)
-        content = ' '.join(''.join(parser.parts).split())
-        content = re.sub(r'\(?\b\d+\s*(?:d|w|mo|days?|weeks?|months?|years?)\s+ago\)?', '', content, flags=re.I)
-        content = ' '.join(content.split())
-        if len(content) < 150 or not re.search(r'stat|consumable|enchant|talent', content, re.I):
+        sections = guide_sections(raw)
+        if not sections:
+            start = max(raw.find('<article'), 0) if '<article' in raw else max(raw.find('<h1'), 0)
+            ends = [i for i in (raw.find('</article>', start), raw.find('<footer', start)) if i >= 0]
+            sections = {'body': plain(raw[start:min(ends) if ends else len(raw)])}
+        if sum(map(len, sections.values())) < 150:
             raise ValueError('No usable guide body; access challenge or layout change')
+        content = json.dumps(sections, sort_keys=True)
+        extra = {'meta': guide_meta(raw), 'extract': sections}
+    elif kind == 'crosscheck':
+        sections = murlok_sections(raw)
+        if not sections['stats'] or not sections['enchants']:
+            raise ValueError('Cross-check page layout not recognised')
+        content = json.dumps(sections, sort_keys=True)
+        extra = {'extract': sections}
+    elif kind == 'news':
+        entries = news_entries(raw)
+        if not entries:
+            raise ValueError('No hotfix or patch announcements found')
+        content = json.dumps(entries)
+        extra = {'extract': {'announcements': [title for _, title in entries]}}
     else:
         data = json.loads(raw)
         if kind == 'tooltip':
             if not data.get('name') or not data.get('tooltip'):
                 raise ValueError('Missing tooltip identity/body')
-            # Spell links and visible numbers are meaningful; layout/icon changes are not.
             body = re.sub(r'<[^>]+>', ' ', data['tooltip'])
             content = json.dumps({'name': data['name'], 'text': ' '.join(body.split())}, sort_keys=True)
         elif kind == 'roster':
@@ -120,7 +212,11 @@ def fingerprint(kind, raw):
             content = json.dumps(sorted(seasons, key=lambda s: s['slug']), sort_keys=True)
         else:
             raise ValueError('Unsupported source kind')
-    return hashlib.sha256(content.encode()).hexdigest()
+    return hashlib.sha256(content.encode()).hexdigest(), extra
+
+
+def fingerprint(kind, raw):
+    return analyze(kind, raw)[0]
 
 
 def observe(pair):
@@ -132,7 +228,8 @@ def observe(pair):
         status = re.search(r'(?:error:|returned error:)\s*(\d{3})', result.stderr)
         return url, {**info, 'error': 'HTTP ' + status.group(1) if status else 'Retrieval failed/timeout'}
     try:
-        return url, {**info, 'sha256': fingerprint(info['kind'], result.stdout)}
+        digest, extra = analyze(info['kind'], result.stdout)
+        return url, {**info, 'sha256': digest, **extra}
     except (ValueError, KeyError, TypeError) as error:
         return url, {**info, 'error': str(error)[:150]}
 
@@ -156,9 +253,13 @@ def capture(bundle):
                 print(f'Source collection: {done}/{total} completed; {done - unavailable} fingerprinted; '
                       f'{unavailable} unavailable; {time.monotonic() - started:.1f}s elapsed.',
                       file=sys.stderr, flush=True)
-    return {'schema_version': 1, 'captured_at': datetime.now(timezone.utc).isoformat(),
-            'season': json.loads((bundle / 'index.json').read_text())['season'],
+    index = json.loads((bundle / 'index.json').read_text())
+    return {'schema_version': 2, 'captured_at': datetime.now(timezone.utc).isoformat(),
+            'game': index['game'], 'season': index['season'],
             'sources': {url: sources[url] for url in wanted}}
+
+
+INFORMATIONAL = ('crosscheck',)
 
 
 def compare(baseline, current):
@@ -173,9 +274,11 @@ def compare(baseline, current):
             status = 'changed'
         else:
             status = 'unchanged'
+        if value.get('kind') in INFORMATIONAL and status != 'unchanged':
+            status = 'informational'
         rows.append({'url': url, 'status': status,
                      'known_unavailable': status == 'unavailable' and bool(old and old.get('error') and not old.get('sha256')),
-                     **value})
+                     **{k: v for k, v in value.items() if k != 'extract'}})
     for url, old in baseline.get('sources', {}).items():
         if url not in current['sources']:
             rows.append({'url': url, 'status': 'no-longer-referenced', 'spec_ids': old.get('spec_ids', [])})
@@ -231,21 +334,29 @@ def exit_status(rows):
         return 2
     if any(r['status'] == 'unavailable' and not r.get('known_unavailable') for r in rows):
         return 2
-    return int(any(r['status'] not in ['unchanged', 'unavailable'] for r in rows))
+    return int(any(r['status'] not in ['unchanged', 'unavailable', 'informational'] for r in rows))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--bundle', type=Path, default=DEFAULT_BUNDLE)
+    parser.add_argument('--bundle', type=Path)
+    parser.add_argument('--game', help='Defaults to the game in season-data/current.json')
+    parser.add_argument('--season', help='Defaults to the season in season-data/current.json')
+    parser.add_argument('--print-bundle', action='store_true', help='Print the active bundle directory and exit')
     parser.add_argument('--snapshot', action='store_true', help='Print candidate fingerprints only; not verification or automatic acceptance')
     parser.add_argument('--json', action='store_true', help='Emit observations and change rows for the refresh workflow')
     args = parser.parse_args()
+    args.bundle = args.bundle or active_bundle(args.game, args.season)
+    if args.print_bundle:
+        print(args.bundle)
+        return 0
     path = args.bundle / 'source-watch.json'
     baseline = json.loads(path.read_text()) if path.exists() else {'sources': {}}
     print(f'Baseline: {path}; {len(baseline.get("sources", {}))} saved sources; '
           f'captured at {baseline.get("captured_at", "unknown / no baseline")}.', file=sys.stderr, flush=True)
     current = capture(args.bundle)
     if args.snapshot:
+        current['sources'] = {url: watch_record(value) for url, value in current['sources'].items()}
         for url, value in current['sources'].items():
             previous = baseline.get('sources', {}).get(url, {})
             if value.get('error') and previous.get('sha256'):
