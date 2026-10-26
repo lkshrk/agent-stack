@@ -27,18 +27,6 @@ jobs:
       refresh_needed: ${{ steps.inspect.outputs.needed }}
       candidate_ready: ${{ steps.result_file.outcome == 'success' }}
     steps:
-      - name: Explain pipeline stages and trigger
-        env:
-          EVENT: ${{ github.event_name }}
-          FORCE_REFRESH: ${{ inputs.force_refresh || false }}
-        run: |
-          echo "Trigger: $EVENT; ref: $GITHUB_REF; commit: $GITHUB_SHA"
-          echo "Force AI recheck: $FORCE_REFRESH"
-          echo "1. Fetch public sources and compare fingerprints with the saved baseline (no AI)."
-          echo "2. Run Claude Code only when the source check requests it or force_refresh=true."
-          echo "3. Validate candidate data and stage accepted changes on a branch."
-          echo "4. Open a pull request for accepted changes; merging it lets the Release workflow decide on a release."
-
       - name: Check out repository
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,15 +71,6 @@ jobs:
               print('::warning::Some sources could not be checked. See the source report for known versus new monitoring gaps.')
           PY
 
-      - name: Preserve trusted source observations
-        id: observation
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wow-source-observation
-          path: wow-source-observation.json
-          retention-days: 30
-          if-no-files-found: error
-
       - name: Configure refresh gateway
         if: steps.inspect.outputs.needed == 'true'
         id: provider
@@ -102,16 +81,6 @@ jobs:
         run: |
           echo "AI refresh requested; validating gateway configuration. Credentials and arguments are not logged."
           python3 plugins/personal/automation/prepare_wow_refresh.py >> "$GITHUB_OUTPUT"
-
-      - name: Explain AI refresh scope
-        if: steps.inspect.outputs.needed == 'true'
-        env:
-          PROVIDER_MODEL: ${{ steps.provider.outputs.model }}
-        run: |
-          echo "Starting Claude Code refresh through the LiteLLM gateway."
-          echo "Model: $PROVIDER_MODEL"
-          echo "Input: wow-source-observation.json and the bundled seasonal records."
-          echo "Expected result: candidate data plus wow-refresh-result.json; this job cannot publish changes."
 
       - name: Refresh affected setup records with Claude Code
         if: steps.inspect.outputs.needed == 'true'
@@ -135,24 +104,27 @@ jobs:
           [ -n "$RESULT" ] || { echo "Claude Code returned no structured result."; exit 1; }
           printf '%s' "$RESULT" | jq . > wow-refresh-result.json
 
-      # Only data is exported from the agent's runner; publishing uses a fresh job.
-      - name: Keep candidate data
-        id: candidate
-        if: steps.result_file.outcome == 'success'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: wow-refresh-candidate
-          path: plugins/personal/skills/wow-spec/assets/season-data/retail/season-mn-2/
-          retention-days: 30
-          if-no-files-found: error
+      - name: Collect refresh outputs
+        id: collect
+        if: always() && steps.inspect.outcome == 'success'
+        env:
+          RESULT_FILE_OUTCOME: ${{ steps.result_file.outcome }}
+        run: |
+          mkdir wow-refresh-out
+          cp wow-source-observation.json wow-refresh-out/
+          [ ! -f wow-refresh-result.json ] || cp wow-refresh-result.json wow-refresh-out/
+          if [ "$RESULT_FILE_OUTCOME" = success ]; then
+            cp -r plugins/personal/skills/wow-spec/assets/season-data/retail/season-mn-2 wow-refresh-out/candidate
+          fi
 
-      - name: Keep refresh result
-        id: result
-        if: always() && hashFiles('wow-refresh-result.json') != ''
+      # Only data is exported from the agent's runner; publishing uses a fresh job.
+      - name: Upload refresh outputs
+        id: upload
+        if: always() && steps.collect.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: wow-refresh-result
-          path: wow-refresh-result.json
+          name: wow-refresh
+          path: wow-refresh-out
           retention-days: 30
           if-no-files-found: error
 
@@ -161,18 +133,24 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
           NEEDED: ${{ steps.inspect.outputs.needed }}
+          EVENT: ${{ github.event_name }}
+          FORCE_REFRESH: ${{ inputs.force_refresh || false }}
+          PROVIDER_MODEL: ${{ steps.provider.outputs.model }}
           STAGES: >-
-            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"observation":{"outcome":"${{ steps.observation.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"candidate":{"outcome":"${{ steps.candidate.outcome }}"},"result":{"outcome":"${{ steps.result.outcome }}"}}
+            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"collect":{"outcome":"${{ steps.collect.outcome }}"},"upload":{"outcome":"${{ steps.upload.outcome }}"}}
         run: |
           python3 - <<'PY'
           import json, os
           stages = json.loads(os.environ['STAGES'])
           lines = ['## Detection and AI refresh: ' + os.environ['JOB_STATUS'], '',
+                   'Trigger: ' + os.environ['EVENT'] + '; force_refresh: ' + os.environ['FORCE_REFRESH'], '',
                    '| Stage | Outcome |', '| --- | --- |']
           for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('bun', 'Bun setup'), ('inspect', 'Source fetch and comparison'),
-                             ('observation', 'Observation artifact'), ('provider', 'Gateway configuration'),
-                             ('refresh', 'Claude Code refresh'), ('result_file', 'Result file'), ('candidate', 'Candidate artifact'), ('result', 'Result artifact')]:
+                             ('provider', 'Gateway configuration'), ('refresh', 'Claude Code refresh'), ('result_file', 'Result file'),
+                             ('collect', 'Collect outputs'), ('upload', 'Output artifact')]:
               lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
+          if os.environ['PROVIDER_MODEL']:
+              lines += ['', 'Claude Code refresh model: ' + os.environ['PROVIDER_MODEL']]
           if os.environ['NEEDED'] == 'false':
               lines += ['', 'AI refresh skipped: no triggering source drift and force_refresh=false. Provider setup, candidate generation and publishing are intentionally skipped.',
                         'To recheck recommendations anyway, run this workflow with force_refresh enabled.']
@@ -209,26 +187,12 @@ jobs:
         with:
           ref: ${{ needs.refresh.outputs.base_sha }}
 
-      - name: Download candidate data
-        id: candidate_download
+      - name: Download refresh outputs
+        id: download
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: wow-refresh-candidate
-          path: ${{ runner.temp }}/wow-candidate
-
-      - name: Download source observations
-        id: observation_download
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: wow-source-observation
-          path: ${{ runner.temp }}/wow-observation
-
-      - name: Download refresh result
-        id: result_download
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: wow-refresh-result
-          path: ${{ runner.temp }}/wow-result
+          name: wow-refresh
+          path: ${{ runner.temp }}/wow-refresh
 
       - name: Set up Bun
         id: bun
@@ -242,9 +206,9 @@ jobs:
           echo "Validating candidate against trusted source observations and base $BASE_SHA."
           echo "Only accepted seasonal data changes may be applied; unsupported observations retain previous values."
           python3 plugins/personal/automation/apply_wow_season_refresh.py \
-            --candidate "$RUNNER_TEMP/wow-candidate" \
-            --result "$RUNNER_TEMP/wow-result/wow-refresh-result.json" \
-            --observation "$RUNNER_TEMP/wow-observation/wow-source-observation.json" \
+            --candidate "$RUNNER_TEMP/wow-refresh/candidate" \
+            --result "$RUNNER_TEMP/wow-refresh/wow-refresh-result.json" \
+            --observation "$RUNNER_TEMP/wow-refresh/wow-source-observation.json" \
             > "$RUNNER_TEMP/wow-apply.json"
           cat "$RUNNER_TEMP/wow-apply.json"
           echo "release=$(jq -r '.release' "$RUNNER_TEMP/wow-apply.json")" >> "$GITHUB_OUTPUT"
@@ -299,14 +263,13 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           PUSHED: ${{ steps.stage.outputs.pushed }}
           STAGES: >-
-            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"candidate_download":{"outcome":"${{ steps.candidate_download.outcome }}"},"observation_download":{"outcome":"${{ steps.observation_download.outcome }}"},"result_download":{"outcome":"${{ steps.result_download.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"apply":{"outcome":"${{ steps.apply.outcome }}"},"stage":{"outcome":"${{ steps.stage.outcome }}"},"pr":{"outcome":"${{ steps.pr.outcome }}"}}
+            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"download":{"outcome":"${{ steps.download.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"apply":{"outcome":"${{ steps.apply.outcome }}"},"stage":{"outcome":"${{ steps.stage.outcome }}"},"pr":{"outcome":"${{ steps.pr.outcome }}"}}
         run: |
           python3 - <<'PY'
           import json, os
           stages = json.loads(os.environ['STAGES'])
           lines = ['## Candidate publication: ' + os.environ['JOB_STATUS'], '', '| Stage | Outcome |', '| --- | --- |']
-          for key, label in [('checkout', 'Trusted checkout'), ('candidate_download', 'Download candidate'),
-                             ('observation_download', 'Download observations'), ('result_download', 'Download result'),
+          for key, label in [('checkout', 'Trusted checkout'), ('download', 'Download refresh outputs'),
                              ('bun', 'Bun setup'), ('apply', 'Validate data and run tests'), ('stage', 'Commit and stage'),
                              ('pr', 'Pull request')]:
               lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
@@ -317,7 +280,7 @@ jobs:
           else:
               lines += ['', 'Accepted update staged and pull request opened; it awaits review and merge. Checks do not start automatically for a pull request opened by the workflow token.']
           if stages.get('apply', {}).get('outcome') == 'success':
-              result_path = os.path.join(os.environ['RUNNER_TEMP'], 'wow-result/wow-refresh-result.json')
+              result_path = os.path.join(os.environ['RUNNER_TEMP'], 'wow-refresh/wow-refresh-result.json')
               with open(result_path) as source:
                   data = json.load(source)
               lines += ['', 'Validated AI result: ' + data['status'], '', data['summary']]
