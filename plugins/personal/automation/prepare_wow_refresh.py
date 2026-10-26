@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 SCHEMA = Path(__file__).with_name('prompts') / 'wow-refresh-result.schema.json'
-TOOLS = 'Read,Write,Edit,Glob,Grep,WebFetch,Bash(bun:*),Bash(curl:*),Bash(python3:*),Bash(jq:*)'
-MAX_TURNS = 60
+TOOLS = 'Read,Write,Edit,Glob,Grep,Bash(bun:*),Bash(curl:*),Bash(python3:*),Bash(jq:*)'
+DISALLOWED = 'Task,Agent,WebFetch,WebSearch'
+MAX_TURNS = 12
 
 
 def configuration(env):
@@ -36,7 +37,8 @@ def configuration(env):
         raise ValueError('Add the WOW_REFRESH_API_KEY Actions secret for the configured gateway.')
     schema = json.dumps(json.loads(SCHEMA.read_text()), separators=(',', ':'))
     args = ' '.join(['--model', shlex.quote(model), '--max-turns', str(MAX_TURNS),
-                     '--allowedTools', shlex.quote(TOOLS), '--json-schema', shlex.quote(schema)])
+                     '--allowedTools', shlex.quote(TOOLS),
+                     '--disallowedTools', shlex.quote(DISALLOWED), '--json-schema', shlex.quote(schema)])
     return {'base_url': base_url, 'model': model, 'claude_args': args}
 
 

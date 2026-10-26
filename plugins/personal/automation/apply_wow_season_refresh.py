@@ -2,20 +2,24 @@
 """Validate an AI-produced data-only candidate before the trusted publishing job commits it."""
 import argparse
 import copy
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from urllib.parse import urlparse
 
-from check_wow_season_updates import DEFAULT_BUNDLE, observe, refs, targets
+from check_wow_season_updates import active_bundle, fingerprint, observe, refs, targets, watch_record
+from enrich_wow_catalog import enrich
+from prediff_wow_specs import classify, live_guides, needs_advance
 
 ALLOWED = re.compile(r'(catalog|index|source-watch|spec-\d+)\.json')
 # Provenance and verification bookkeeping; a change confined to these is not a player-visible update.
 BOOKKEEPING = {'verified_at', 'identity_verified_at', 'verified_patch', 'captured_at', 'updated', 'sources',
                'unresolved', 'unknown_fields', 'quality_note', 'identity_verification', 'verification_basis',
-               'validation_scope', 'coverage'}
+               'validation_scope', 'coverage', 'tooltip_enriched_at'}
 
 
 def load_bundle(path):
@@ -54,10 +58,16 @@ def identity_checks(old, candidate):
         if not re.fullmatch(r'(item|spell):\d+', key):
             raise ValueError('Invalid changed catalogue key')
         url = 'https://nether.wowhead.com/tooltip/' + key.replace(':', '/')
-        response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True, check=True)
-        data = json.loads(response.stdout)
-        from check_wow_season_updates import fingerprint
-        checked[key] = {'name': data['name'], 'url': url, 'sha256': fingerprint('tooltip', response.stdout)}
+        try:
+            response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True)
+        except OSError:
+            raise ValueError('Tooltip lookup unavailable for ' + key) from None
+        if response.returncode:
+            raise ValueError('Tooltip lookup failed for ' + key)
+        try:
+            checked[key] = {'name': json.loads(response.stdout)['name'], 'url': url, 'sha256': fingerprint('tooltip', response.stdout)}
+        except (ValueError, KeyError, TypeError):
+            raise ValueError('Tooltip for ' + key + ' is not usable') from None
     return checked
 
 
@@ -79,7 +89,7 @@ def validate(old, candidate, result, observation, checked=None):
         raise ValueError('Game/season migration requires a separate change')
     if observation['current']['season'] != scope[1]:
         raise ValueError('Observation is from a different season')
-    for field in ['roster_source', 'season_source']:
+    for field in ['roster_source', 'season_source', 'trigger_sources']:
         if index.get(field) != old['index.json'].get(field):
             raise ValueError('Metadata source migration requires a separate change')
     valid_date(index['verified_at'])
@@ -140,8 +150,7 @@ def validate(old, candidate, result, observation, checked=None):
     if any(url not in wanted for url in accepted):
         raise ValueError('Cannot accept an unrelated source')
     current_sources = copy.deepcopy(observation['current']['sources'])
-    # Replacement guides were not present during the pre-agent capture. Observe
-    # only accepted new citations, with spec ownership derived from the candidate.
+    # Replacement guides were absent from the pre-agent capture; observe accepted new citations.
     for url in dict.fromkeys(accepted):
         added_specs = set(wanted[url]['spec_ids']) - set(previous_targets.get(url, {}).get('spec_ids', []))
         if wanted[url]['kind'] == 'guide' and (url not in previous_targets or added_specs):
@@ -179,8 +188,8 @@ def validate(old, candidate, result, observation, checked=None):
         current = current_sources.get(url)
         if not current or current.get('error') or not re.fullmatch('[0-9a-f]{64}', current.get('sha256', '')):
             raise ValueError('Cannot advance an unavailable/unobserved source')
-        if watch['sources'].get(url) != current:
-            watch['sources'][url] = current
+        if watch['sources'].get(url) != watch_record(current):
+            watch['sources'][url] = watch_record(current)
             fingerprints_changed = True
     if fingerprints_changed:
         watch['captured_at'] = observation['current']['captured_at']
@@ -210,29 +219,234 @@ def drop_negligible(old, docs):
     return kept
 
 
-def main():
+ENRICHABLE = ('effect', 'duration_seconds', 'cooldown_seconds', 'quality_rank')
+
+
+def catalogue_edit_allowed(before, after):
+    if before is None:
+        return True
+    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+    return all(k in ENRICHABLE and before.get(k) is None for k in changed)
+
+
+def merge_parts(old, parts):
+    """Combine per-spec Claude runs into one candidate bundle, a legacy-shaped result and the spec ids by outcome."""
+    merged = copy.deepcopy(old)
+    records = merged['catalog.json']['records']
+    old_records = old['catalog.json']['records']
+    accepted, unresolved, summaries, touched = [], [], [], set()
+    by_outcome = {'unchanged': [], 'updated': [], 'unresolved': []}
+    for result, candidate in parts:
+        spec_id, name = result['spec_id'], f'spec-{result["spec_id"]}.json'
+        if name not in old:
+            raise ValueError('Result for an unknown spec: ' + name)
+        if result['outcome'] not in by_outcome:
+            raise ValueError('Unsupported per-spec outcome')
+        for other, value in candidate.items():
+            if other in [name, 'catalog.json']:
+                continue
+            before, after = old.get(other), value
+            if other == 'index.json':
+                before, after = ({k: v for k, v in d.items() if k != 'catalogue_record_count'} for d in (before, after))
+            if before != after:
+                raise ValueError('Per-spec run changed files outside its scope: ' + other)
+        if result['outcome'] != 'unresolved':
+            accepted += result['accepted_sources']
+        unresolved += result['unresolved_sources']
+        summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
+        by_outcome[result['outcome']].append(spec_id)
+        if result['outcome'] == 'unresolved':
+            continue
+        for key, record in candidate['catalog.json']['records'].items():
+            if record == old_records.get(key):
+                continue
+            if not catalogue_edit_allowed(old_records.get(key), record):
+                raise ValueError('Existing catalogue record may only gain enrichment fields: ' + key)
+            if key in touched and records[key] != record:
+                raise ValueError('Conflicting catalogue edits for ' + key)
+            records[key] = record
+            touched.add(key)
+        if result['outcome'] == 'updated':
+            merged[name] = candidate[name]
+        elif {k: v for k, v in candidate[name].items() if k != 'unresolved'} != {k: v for k, v in old[name].items() if k != 'unresolved'}:
+            raise ValueError('An unchanged outcome must not edit the spec: ' + name)
+    merged['index.json']['catalogue_record_count'] = len(records)
+    accepted = [url for url in dict.fromkeys(accepted) if url not in set(unresolved)]
+    result = {'status': 'partial' if unresolved else 'complete',
+              'summary': '\n'.join(summaries) or 'No Claude runs were needed.',
+              'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved))}
+    return merged, result, by_outcome
+
+
+def describe(error):
+    return (type(error).__name__ + ': ' + str(error))[:200]
+
+
+def load_parts(directory):
+    """Return (folder spec id, loaded part or None, failure reason or None) for every per-spec folder."""
+    loaded = []
+    for folder in sorted(directory.iterdir()) if directory and directory.is_dir() else []:
+        number = re.match(r'wow-spec-(\d+)', folder.name)
+        key = int(number.group(1)) if number else folder.name
+        try:
+            if not number:
+                raise ValueError('Unrecognised result folder name')
+            if not (folder / 'result.json').is_file() or not (folder / 'candidate').is_dir():
+                raise ValueError('Missing result or candidate')
+            result = json.loads((folder / 'result.json').read_text())
+            claimed = result.get('spec_id') if isinstance(result, dict) else None
+            if isinstance(claimed, bool) or claimed != key or not isinstance(claimed, int):
+                raise ValueError('Result spec_id does not match its folder')
+            loaded.append((key, (result, load_bundle(folder / 'candidate')), None))
+        except Exception as error:
+            loaded.append((key, None, describe(error)))
+    return loaded
+
+
+def accept_parts(old, loaded, observation):
+    """Validate every part on its own; a rejected part is dropped and its spec reported with the reason."""
+    good, rejected, notes, checked, taken = [], {}, [], {}, set()
+    for spec_id, part, failure in sorted(loaded, key=lambda item: (not isinstance(item[0], int), item[0] if isinstance(item[0], int) else 0, str(item[0]))):
+        proofs = {}
+        try:
+            if failure:
+                raise ValueError(failure)
+            if spec_id in taken:
+                notes.append(f'Duplicate result for spec {spec_id} ignored; the first one was kept')
+                continue
+            merged, result, _ = merge_parts(old, [part])
+            proofs = identity_checks(old, merged)
+            seen = copy.deepcopy(observation)
+            for key, proof in proofs.items():
+                owners = [d['spec_id'] for n, d in merged.items() if n.startswith('spec-') and key in refs(d)]
+                seen['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
+            validate(old, merged, result, seen, proofs)
+            merge_parts(old, good + [part])
+        except Exception as error:
+            reason = failure or describe(error)
+            print(f'Rejected result for spec {spec_id}: {reason}', file=sys.stderr)
+            rejected[spec_id] = reason
+            continue
+        taken.add(spec_id)
+        good.append(part)
+        checked.update(proofs)
+    return good, rejected, notes, checked
+
+
+def fetch_guides(docs, spec_ids):
+    wanted = {}
+    for entry in docs['index.json']['specs']:
+        if entry['spec_id'] in spec_ids:
+            for source in docs[entry['file']]['sources']:
+                url = source['url'] if isinstance(source, dict) else source
+                wanted[url] = {'kind': 'guide', 'spec_ids': [entry['spec_id']]}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        return dict(pool.map(observe, wanted.items()))
+
+
+def version_key(patch):
+    return [int(part) for part in patch.split('.')]
+
+
+def advance_verified(docs, spec_ids, sources, today, require_unchanged):
+    """Record that a spec was rechecked against its live guide and its advice still stands."""
+    live = {s: v for s, v in sources.items() if v.get('kind') == 'guide'}
+    done = []
+    verdicts = classify(docs, live) if require_unchanged else {}
+    watch = docs['source-watch.json']
+    for sid in spec_ids:
+        name = f'spec-{sid}.json'
+        setup = copy.deepcopy(docs[name])
+        guides = live_guides(setup, live, complete=require_unchanged)
+        if not guides or (require_unchanged and (verdicts[sid]['status'] != 'unchanged'
+                                                 or not needs_advance(setup, guides, watch['sources']))):
+            continue
+        patches = [g['meta']['patch'] for g in guides.values() if g.get('meta', {}).get('patch')]
+        if patches:
+            setup['verified_patch'] = max(patches, key=version_key)
+        setup['verified_at'] = today
+        for source in setup['sources']:
+            if isinstance(source, dict) and guides.get(source['url'], {}).get('meta', {}).get('updated'):
+                source['updated'] = guides[source['url']]['meta']['updated']
+        if setup != docs[name]:
+            docs[name] = setup
+            done.append(sid)
+        for url, guide in guides.items():
+            if watch['sources'].get(url) != watch_record(guide):
+                watch['sources'][url] = watch_record(guide)
+    if done:
+        index = docs['index.json']
+        index['verified_at'] = docs['catalog.json']['verified_at'] = today
+        patches = {docs[f'spec-{e["spec_id"]}.json'].get('verified_patch') for e in index['specs']}
+        if len(patches) == 1:
+            index['verified_patch'] = patches.pop()
+    return done
+
+
+def record_informational(docs, observation):
+    watch = docs['source-watch.json']
+    wanted = targets(documents=docs)
+    for url, value in observation['current']['sources'].items():
+        if value.get('kind') in ['crosscheck', 'news'] and not value.get('error') and url in wanted:
+            watch['sources'][url] = watch_record(value)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--candidate', type=Path, required=True)
-    parser.add_argument('--result', type=Path, required=True)
+    parser.add_argument('--parts', type=Path, help='Directory of per-spec runs: <dir>/<name>/{candidate/,result.json}; may be empty or absent')
     parser.add_argument('--observation', type=Path, required=True)
-    parser.add_argument('--bundle', type=Path, default=DEFAULT_BUNDLE)
+    parser.add_argument('--bundle', type=Path)
+    parser.add_argument('--game')
+    parser.add_argument('--season')
+    parser.add_argument('--no-enrich', action='store_true')
     parser.add_argument('--dry-run', action='store_true')
-    args = parser.parse_args()
-    old = load_bundle(args.bundle)
-    result = json.loads(args.result.read_text())
-    candidate = load_bundle(args.candidate)
+    args = parser.parse_args(argv)
+    bundle = args.bundle or active_bundle(args.game, args.season)
+    old = load_bundle(bundle)
     observation = json.loads(args.observation.read_text())
-    checked = identity_checks(old, candidate)
+    today = date.today().isoformat()
+    good, rejected, notes, checked = accept_parts(old, load_parts(args.parts), observation)
+    candidate, result, outcomes = merge_parts(old, good)
     for key, proof in checked.items():
-        spec_ids = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
-        observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(spec_ids), 'sha256': proof['sha256']}
-    docs = drop_negligible(old, validate(old, candidate, result, observation, checked))
+        owners = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
+        observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
+    docs = copy.deepcopy(drop_negligible(old, validate(old, candidate, result, observation, checked)))
+    skipped = set(outcomes['unresolved']) | set(rejected)
+    for spec_id, reason in rejected.items():
+        name = f'spec-{spec_id}.json'
+        if name in docs:
+            note = 'Automated refresh rejected: ' + reason
+            docs[name]['unresolved'] = [u for u in docs[name].get('unresolved', []) if not u.startswith('Automated refresh rejected')] + [note]
+    all_ids = [e['spec_id'] for e in docs['index.json']['specs']]
+    rest = [i for i in all_ids if i not in skipped]
+    fresh = fetch_guides(docs, set(rest))
+    sources = {**observation['current']['sources'], **fresh}
+    direct = [i for i in rest if i not in outcomes['updated'] and i not in outcomes['unchanged']]
+    advanced = advance_verified(docs, direct, sources, today, True)
+    advanced += advance_verified(docs, outcomes['updated'] + outcomes['unchanged'], sources, today, False)
+    if any(docs[n] != old.get(n) for n in docs):
+        record_informational(docs, observation)
+    enriched = {} if args.no_enrich else enrich(docs['catalog.json'], today)
     changed = [name for name, value in docs.items() if value != old.get(name)]
-    release = any(name != 'source-watch.json' for name in changed)
+    release = any(substance(docs[n]) != substance(old.get(n, {})) for n in changed if n != 'source-watch.json')
     if not args.dry_run:
         for name in changed:
-            (args.bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
-    print(json.dumps({'changed_files': changed, 'release': release, 'status': result['status'], 'summary': result['summary']}))
+            (bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
+    lines = [result['summary']] + (['', *notes] if notes else [])
+    if rejected:
+        lines += ['', 'Rejected per-spec results (previous values kept): ' + '; '.join(f'{i}: {r}' for i, r in sorted(rejected.items(), key=str))]
+    if advanced:
+        lines += ['', f'Advice unchanged, verification advanced for {len(advanced)} specs: ' + ', '.join(map(str, sorted(advanced)))]
+    if enriched:
+        lines += ['', f'Tooltip data filled for {len(enriched)} catalogue records: ' + ', '.join(sorted(enriched))]
+    deferred = observation.get('prediff', {}).get('deferred', [])
+    if deferred:
+        lines += ['', 'Specs with differences not processed this run (retried next run): ' + ', '.join(map(str, deferred))]
+    output = {'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
+                      'advanced': sorted(advanced), 'ai_updated': outcomes['updated'], 'rejected': {str(k): v for k, v in rejected.items()}, 'notes': notes,
+               'enriched': sorted(enriched)}
+    print(json.dumps(output))
+    return output
 
 
 if __name__ == '__main__':

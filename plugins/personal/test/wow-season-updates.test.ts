@@ -12,6 +12,16 @@ test("AI refresh publishes validated data while rejecting unsafe or incomplete c
   execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
 });
 
+test("spec pre-diff decides deterministically which specs need Claude", () => {
+  const script = fileURLToPath(new URL("../automation/test_prediff_wow_specs.py", import.meta.url));
+  execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
+});
+
+test("tooltip enrichment fills catalogue fields from fixtures", () => {
+  const script = fileURLToPath(new URL("../automation/test_enrich_wow_catalog.py", import.meta.url));
+  execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
+});
+
 test("refresh run configuration targets the gateway root without exposing credentials", () => {
   const script = fileURLToPath(new URL("../automation/test_prepare_wow_refresh.py", import.meta.url));
   execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });

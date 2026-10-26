@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force_refresh:
-        description: Recheck recommendations even when source fingerprints are unchanged
+        description: Send every spec with a readable guide to Claude Code (within the cap), even without differences
         type: boolean
         default: false
 
@@ -18,14 +18,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  refresh:
+  inspect:
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     outputs:
       base_sha: ${{ steps.base.outputs.sha }}
-      refresh_needed: ${{ steps.inspect.outputs.needed }}
-      candidate_ready: ${{ steps.result_file.outcome == 'success' }}
+      bundle_dir: ${{ steps.bundle.outputs.dir }}
+      matrix: ${{ steps.inspect.outputs.matrix }}
+      claude_needed: ${{ steps.inspect.outputs.claude_needed }}
     steps:
       - name: Check out repository
         id: checkout
@@ -40,30 +41,48 @@ jobs:
           echo "Trusted base commit: $sha"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Bun
-        id: bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.4
+      - name: Resolve the active season bundle
+        id: bundle
+        run: |
+          dir="$(realpath --relative-to="$PWD" "$(python3 plugins/personal/automation/check_wow_season_updates.py --print-bundle)")"
+          echo "Active bundle: $dir"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch sources, compare fingerprints and explain AI run decision
+      - name: Fetch sources, fingerprint guides and pre-diff every spec
         id: inspect
         env:
           FORCE_REFRESH: ${{ inputs.force_refresh || false }}
+          MAX_SPECS: ${{ vars.WOW_REFRESH_MAX_SPECS || '12' }}
         run: |
           python3 plugins/personal/automation/check_wow_season_updates.py --json > wow-source-observation.json
           python3 - <<'PY'
-          import json, os, sys
+          import json, os, subprocess, sys
           sys.path.insert(0, 'plugins/personal/automation')
           from check_wow_season_updates import report
           data = json.load(open('wow-source-observation.json'))
-          data['force_refresh'] = os.environ['FORCE_REFRESH'] == 'true'
+          force = os.environ['FORCE_REFRESH'] == 'true'
+          data['force_refresh'] = force
+          try:
+              cap = min(max(int(os.environ['MAX_SPECS']), 1), 40)
+          except ValueError:
+              sys.exit('::error::WOW_REFRESH_MAX_SPECS must be a whole number between 1 and 40.')
+          command = ['python3', 'plugins/personal/automation/prediff_wow_specs.py', '--observation', 'wow-source-observation.json',
+                     '--cap', str(cap), '--out', 'wow-prediff.json'] + (['--force'] if force else [])
+          subprocess.run(command, check=True)
+          prediff = json.load(open('wow-prediff.json'))
+          data['prediff'] = {k: v for k, v in prediff.items() if k != 'specs'}
           with open('wow-source-observation.json', 'w') as out:
               json.dump(data, out, indent=2)
-          needed = data['requires_refresh'] or data['force_refresh']
+          claude_needed = bool(prediff['selected'])
           with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              out.write('needed=' + str(needed).lower() + '\n')
-          summary = report(data['rows'], data['current'], force_refresh=data['force_refresh'])
+              out.write('matrix=' + json.dumps(prediff['selected']) + '\n')
+              out.write('claude_needed=' + str(claude_needed).lower() + '\n')
+          summary = report(data['rows'], data['current'], force_refresh=force)
+          summary += ('\n## Spec pre-diff\n\n'
+                      f'{len(prediff["unchanged"])} unchanged (no Claude call); {len(prediff["changed"])} with differences; '
+                      f'{len(prediff["incomplete"])} with a guide missing a parsable part; '
+                      f'{len(prediff["unavailable"])} without a readable guide. '
+                      f'Claude runs: {len(prediff["selected"])} (cap {cap}); deferred: {len(prediff["deferred"])}.\n')
           print(summary, flush=True)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
               out.write(summary)
@@ -71,20 +90,103 @@ jobs:
               print('::warning::Some sources could not be checked. See the source report for known versus new monitoring gaps.')
           PY
 
+      - name: Upload observation
+        id: upload
+        if: always() && steps.inspect.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wow-observation
+          path: wow-source-observation.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Summarize detection outcome
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CLAUDE_NEEDED: ${{ steps.inspect.outputs.claude_needed }}
+          EVENT: ${{ github.event_name }}
+          FORCE_REFRESH: ${{ inputs.force_refresh || false }}
+          STAGES: >-
+            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bundle":{"outcome":"${{ steps.bundle.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"upload":{"outcome":"${{ steps.upload.outcome }}"}}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          stages = json.loads(os.environ['STAGES'])
+          lines = ['## Detection: ' + os.environ['JOB_STATUS'], '',
+                   'Trigger: ' + os.environ['EVENT'] + '; force_refresh: ' + os.environ['FORCE_REFRESH'], '',
+                   '| Stage | Outcome |', '| --- | --- |']
+          for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('bundle', 'Resolve season bundle'),
+                             ('inspect', 'Source fetch, fingerprints and pre-diff'), ('upload', 'Observation artifact')]:
+              lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
+          if os.environ['JOB_STATUS'] != 'success':
+              lines += ['', 'Detection did not complete successfully. Inspect the first failed stage above; later skipped stages are not evidence of unchanged sources.']
+          elif os.environ['CLAUDE_NEEDED'] == 'false':
+              lines += ['', 'Claude Code skipped: no spec differs from its live guide. Deterministic verification advances and tooltip enrichment still run in publishing.',
+                        'Enable force_refresh to send unchanged specs to Claude Code too, within the cap.']
+          else:
+              lines += ['', 'Specs with differences are rechecked one Claude Code run each; see the matrix jobs.']
+          summary = '\n'.join(lines) + '\n'
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
+              out.write(summary)
+          PY
+
+  refresh:
+    name: refresh spec ${{ matrix.spec }}
+    needs: inspect
+    if: needs.inspect.outputs.claude_needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        spec: ${{ fromJSON(needs.inspect.outputs.matrix) }}
+    env:
+      BUNDLE_DIR: ${{ needs.inspect.outputs.bundle_dir }}
+    steps:
+      - name: Check out trusted base
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.inspect.outputs.base_sha }}
+          persist-credentials: false
+
+      - name: Set up Bun
+        id: bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Download observation
+        id: download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wow-observation
+          path: ${{ runner.temp }}/observation
+
+      - name: Write the narrow task for this spec
+        id: task
+        env:
+          SPEC: ${{ matrix.spec }}
+        run: |
+          python3 plugins/personal/automation/prediff_wow_specs.py \
+            --observation "$RUNNER_TEMP/observation/wow-source-observation.json" \
+            --task "$SPEC" --task-out wow-spec-task.json
+
       - name: Configure refresh gateway
-        if: steps.inspect.outputs.needed == 'true'
         id: provider
         env:
           WOW_REFRESH_BASE_URL: ${{ vars.WOW_REFRESH_BASE_URL }}
           WOW_REFRESH_MODEL: ${{ vars.WOW_REFRESH_MODEL }}
           WOW_REFRESH_API_KEY: ${{ secrets.WOW_REFRESH_API_KEY }}
         run: |
-          echo "AI refresh requested; validating gateway configuration. Credentials and arguments are not logged."
+          echo "Validating gateway configuration. Credentials and arguments are not logged."
           python3 plugins/personal/automation/prepare_wow_refresh.py >> "$GITHUB_OUTPUT"
 
-      - name: Refresh affected setup records with Claude Code
-        if: steps.inspect.outputs.needed == 'true'
-        id: refresh
+      - name: Recheck this spec with Claude Code
+        id: claude
         uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         env:
           ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
@@ -92,81 +194,36 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.WOW_REFRESH_API_KEY }}
           github_token: ${{ github.token }}
-          prompt: Follow the instructions in plugins/personal/automation/prompts/refresh-wow-season.md.
+          prompt: Follow the instructions in plugins/personal/automation/prompts/refresh-wow-season.md for spec ${{ matrix.spec }}.
           claude_args: ${{ steps.provider.outputs.claude_args }}
 
-      - name: Save structured refresh result
+      - name: Save structured result and candidate
         id: result_file
-        if: steps.refresh.outcome == 'success'
+        if: steps.claude.outcome == 'success'
         env:
-          RESULT: ${{ steps.refresh.outputs.structured_output }}
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+          SPEC: ${{ matrix.spec }}
         run: |
           [ -n "$RESULT" ] || { echo "Claude Code returned no structured result."; exit 1; }
-          printf '%s' "$RESULT" | jq . > wow-refresh-result.json
+          mkdir -p wow-spec-out
+          printf '%s' "$RESULT" | jq --argjson spec "$SPEC" '. | select(.spec_id == $spec)' > wow-spec-out/result.json
+          [ -s wow-spec-out/result.json ] || { echo "Result is for a different spec."; exit 1; }
+          cp -r "$BUNDLE_DIR" wow-spec-out/candidate
 
-      - name: Collect refresh outputs
-        id: collect
-        if: always() && steps.inspect.outcome == 'success'
-        env:
-          RESULT_FILE_OUTCOME: ${{ steps.result_file.outcome }}
-        run: |
-          mkdir wow-refresh-out
-          cp wow-source-observation.json wow-refresh-out/
-          [ ! -f wow-refresh-result.json ] || cp wow-refresh-result.json wow-refresh-out/
-          if [ "$RESULT_FILE_OUTCOME" = success ]; then
-            cp -r plugins/personal/skills/wow-spec/assets/season-data/retail/season-mn-2 wow-refresh-out/candidate
-          fi
-
-      # Only data is exported from the agent's runner; publishing uses a fresh job.
-      - name: Upload refresh outputs
+      # Only data leaves the agent's runner; publishing uses a fresh job.
+      - name: Upload this spec's result
         id: upload
-        if: always() && steps.collect.outcome == 'success'
+        if: steps.result_file.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: wow-refresh
-          path: wow-refresh-out
+          name: wow-spec-${{ matrix.spec }}
+          path: wow-spec-out
           retention-days: 30
           if-no-files-found: error
 
-      - name: Summarize detection and AI stage outcomes
-        if: always()
-        env:
-          JOB_STATUS: ${{ job.status }}
-          NEEDED: ${{ steps.inspect.outputs.needed }}
-          EVENT: ${{ github.event_name }}
-          FORCE_REFRESH: ${{ inputs.force_refresh || false }}
-          PROVIDER_MODEL: ${{ steps.provider.outputs.model }}
-          STAGES: >-
-            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"collect":{"outcome":"${{ steps.collect.outcome }}"},"upload":{"outcome":"${{ steps.upload.outcome }}"}}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          stages = json.loads(os.environ['STAGES'])
-          lines = ['## Detection and AI refresh: ' + os.environ['JOB_STATUS'], '',
-                   'Trigger: ' + os.environ['EVENT'] + '; force_refresh: ' + os.environ['FORCE_REFRESH'], '',
-                   '| Stage | Outcome |', '| --- | --- |']
-          for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('bun', 'Bun setup'), ('inspect', 'Source fetch and comparison'),
-                             ('provider', 'Gateway configuration'), ('refresh', 'Claude Code refresh'), ('result_file', 'Result file'),
-                             ('collect', 'Collect outputs'), ('upload', 'Output artifact')]:
-              lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
-          if os.environ['PROVIDER_MODEL']:
-              lines += ['', 'Claude Code refresh model: ' + os.environ['PROVIDER_MODEL']]
-          if os.environ['NEEDED'] == 'false':
-              lines += ['', 'AI refresh skipped: no triggering source drift and force_refresh=false. Provider setup, candidate generation and publishing are intentionally skipped.',
-                        'To recheck recommendations anyway, run this workflow with force_refresh enabled.']
-          elif stages.get('refresh', {}).get('outcome') == 'success' and os.environ['JOB_STATUS'] == 'success':
-              lines += ['', 'AI candidate generated and artifacts saved. Publishing still requires data validation and CI; no release is confirmed here.']
-          else:
-              lines += ['', 'Refresh did not complete successfully. Inspect the first failed stage above; later skipped stages are not evidence of unchanged sources. A missing result artifact means no result file was produced.']
-          summary = '\n'.join(lines) + '\n'
-          print(summary)
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
-              out.write(summary)
-          PY
-
   publish:
-    needs: refresh
-    if: needs.refresh.outputs.candidate_ready == 'true'
+    needs: [inspect, refresh]
+    if: always() && needs.inspect.result == 'success' && needs.refresh.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
@@ -176,8 +233,8 @@ jobs:
       pull-requests: write
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      BASE_SHA: ${{ needs.refresh.outputs.base_sha }}
-      BUNDLE_DIR: plugins/personal/skills/wow-spec/assets/season-data/retail/season-mn-2
+      BASE_SHA: ${{ needs.inspect.outputs.base_sha }}
+      BUNDLE_DIR: ${{ needs.inspect.outputs.bundle_dir }}
       STAGING_BRANCH: automation/wow-season-refresh
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -185,14 +242,23 @@ jobs:
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.refresh.outputs.base_sha }}
+          ref: ${{ needs.inspect.outputs.base_sha }}
 
-      - name: Download refresh outputs
+      - name: Download observation
         id: download
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: wow-refresh
+          name: wow-observation
           path: ${{ runner.temp }}/wow-refresh
+
+      - name: Download per-spec Claude results
+        id: parts
+        if: needs.inspect.outputs.claude_needed == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: wow-spec-*
+          path: ${{ runner.temp }}/wow-parts
 
       - name: Set up Bun
         id: bun
@@ -205,9 +271,9 @@ jobs:
         run: |
           echo "Validating candidate against trusted source observations and base $BASE_SHA."
           echo "Only accepted seasonal data changes may be applied; unsupported observations retain previous values."
+          mkdir -p "$RUNNER_TEMP/wow-parts"
           python3 plugins/personal/automation/apply_wow_season_refresh.py \
-            --candidate "$RUNNER_TEMP/wow-refresh/candidate" \
-            --result "$RUNNER_TEMP/wow-refresh/wow-refresh-result.json" \
+            --parts "$RUNNER_TEMP/wow-parts" \
             --observation "$RUNNER_TEMP/wow-refresh/wow-source-observation.json" \
             > "$RUNNER_TEMP/wow-apply.json"
           cat "$RUNNER_TEMP/wow-apply.json"
@@ -236,8 +302,8 @@ jobs:
           if [ "$RELEASE" = "true" ]; then
             git commit -m "fix(wow): refresh seasonal setup bundle"
           else
-            git commit -m "chore(wow): advance seasonal source fingerprints"
-            echo "Only source fingerprints changed; no recommendation update." | tee -a "$GITHUB_STEP_SUMMARY"
+            git commit -m "chore(wow): advance seasonal verification and source fingerprints"
+            echo "Only verification metadata, fingerprints or tooltip fields changed; no recommendation update." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           git push --force origin "HEAD:refs/heads/$STAGING_BRANCH"
           echo "Staged commit $(git rev-parse HEAD) on $STAGING_BRANCH; default branch not updated."
@@ -280,13 +346,11 @@ jobs:
           else:
               lines += ['', 'Accepted update staged and pull request opened; it awaits review and merge. Checks do not start automatically for a pull request opened by the workflow token.']
           if stages.get('apply', {}).get('outcome') == 'success':
-              result_path = os.path.join(os.environ['RUNNER_TEMP'], 'wow-refresh/wow-refresh-result.json')
-              with open(result_path) as source:
+              with open(os.path.join(os.environ['RUNNER_TEMP'], 'wow-apply.json')) as source:
                   data = json.load(source)
-              lines += ['', 'Validated AI result: ' + data['status'], '', data['summary']]
-              if data['unresolved_sources']:
-                  lines += ['', 'Unresolved sources (previous values retained):']
-                  lines += ['- ' + url for url in data['unresolved_sources']]
+              lines += ['', 'Validated refresh: ' + data['status'], '', data['summary']]
+              if data['status'] == 'partial':
+                  lines += ['', 'Unresolved sources keep their previous values and are retried next run.']
           summary = '\n'.join(lines) + '\n'
           print(summary)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
@@ -295,34 +359,34 @@ jobs:
 
   summary:
     name: Explain final pipeline outcome
-    needs: [refresh, publish]
+    needs: [inspect, refresh, publish]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Report run, skip or failure reason
         env:
+          INSPECT_RESULT: ${{ needs.inspect.result }}
           REFRESH_RESULT: ${{ needs.refresh.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
-          NEEDED: ${{ needs.refresh.outputs.refresh_needed }}
+          NEEDED: ${{ needs.inspect.outputs.claude_needed }}
           PUSHED: ${{ needs.publish.outputs.pushed }}
         run: |
           python3 - <<'PY'
           import os
-          refresh, publish, needed = (os.environ[k] for k in ['REFRESH_RESULT', 'PUBLISH_RESULT', 'NEEDED'])
-          if refresh == 'skipped':
+          inspect, refresh, publish, needed = (os.environ[k] for k in ['INSPECT_RESULT', 'REFRESH_RESULT', 'PUBLISH_RESULT', 'NEEDED'])
+          if inspect == 'skipped':
               reason = 'Refresh skipped: this workflow runs only on the default branch.'
-          elif refresh != 'success':
-              reason = 'Detection/AI job ' + refresh + '; publishing did not receive a successful candidate. Inspect that job, not the skipped publish steps.'
-          elif needed == 'false':
-              reason = 'Source detection ran successfully; no triggering drift and no forced recheck. AI and publishing skipped. Enable force_refresh for an AI recheck anyway.'
+          elif inspect != 'success':
+              reason = 'Detection job ' + inspect + '; no candidate was produced. Inspect that job, not the skipped later jobs.'
           elif publish == 'success':
+              ai = 'no spec needed Claude Code' if needed == 'false' else 'per-spec Claude Code runs: ' + refresh
               if os.environ.get('PUSHED') == 'false':
-                  reason = 'AI recheck completed with no accepted data changes. Nothing was pushed.'
+                  reason = 'Detection ran (' + ai + '). No accepted data changes. Nothing was pushed.'
               else:
-                  reason = 'Accepted update staged and a pull request opened for review. Nothing reached the default branch.'
+                  reason = 'Detection ran (' + ai + '). Accepted update staged and a pull request opened for review. Nothing reached the default branch.'
           else:
-              reason = 'AI candidate produced; publication ' + publish + '. Inspect validation and pull request outcomes; no end-to-end success is claimed.'
-          summary = '# WoW pipeline outcome\n\nDetection/AI: ' + refresh + '\n\nPublication: ' + publish + '\n\n' + reason + '\n'
+              reason = 'Detection ran; publication ' + publish + '. Inspect validation and pull request outcomes; no end-to-end success is claimed.'
+          summary = '# WoW pipeline outcome\n\nDetection: ' + inspect + '\n\nClaude Code: ' + refresh + '\n\nPublication: ' + publish + '\n\n' + reason + '\n'
           print(summary)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:
               out.write(summary)

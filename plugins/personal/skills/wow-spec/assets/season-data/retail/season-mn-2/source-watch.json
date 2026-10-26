@@ -1259,41 +1259,6 @@
       "spec_ids": [],
       "sha256": "e18d797685a14410d9081afdb9ae7db69df5bc75ce2c1b7bab70041da5b503ea"
     },
-    "https://www.icy-veins.com/wow/affliction-warlock-pve-dps-gems-enchants-consumables": {
-      "kind": "guide",
-      "spec_ids": [
-        265
-      ],
-      "error": "HTTP 403"
-    },
-    "https://www.icy-veins.com/wow/blood-death-knight-pve-tank-gems-enchants-consumables": {
-      "kind": "guide",
-      "spec_ids": [
-        250
-      ],
-      "error": "HTTP 403"
-    },
-    "https://www.icy-veins.com/wow/demonology-warlock-pve-dps-gems-enchants-consumables": {
-      "kind": "guide",
-      "spec_ids": [
-        266
-      ],
-      "error": "HTTP 403"
-    },
-    "https://www.icy-veins.com/wow/subtlety-rogue-pve-dps-gems-enchants-consumables": {
-      "kind": "guide",
-      "spec_ids": [
-        261
-      ],
-      "error": "HTTP 403"
-    },
-    "https://www.kalamazi.gg/guides/affliction": {
-      "kind": "guide",
-      "spec_ids": [
-        265
-      ],
-      "error": "No usable guide body; access challenge or layout change"
-    },
     "https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
