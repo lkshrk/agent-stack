@@ -90,6 +90,9 @@ DENIED = [
     "sh <<< 'claude -p x'",
     "cat cmds | parallel",
     'echo "unterminated | claude -p',
+    "omp -p x -V",
+    "codex exec x -v",
+    "claude -p x -V",
 ]
 
 ALLOWED = [
@@ -100,7 +103,12 @@ ALLOWED = [
     "codex --version",
     "codex exec --help",
     "omp --version",
+    "omp -v",
+    "omp -p x --help",
+    "codex exec x -V",
+    "claude -p x -v",
     "opencode --version",
+    "opencode run x -h",
     "which claude codex omp",
     "command -v claude",
     "rg -n 'claude -p' docs",

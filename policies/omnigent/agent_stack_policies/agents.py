@@ -9,7 +9,12 @@ from .paths import SHELL_TOOLS
 _PRINT_AGENTS = frozenset({"claude", "omp"})
 _RUN_SUBCOMMANDS = {"codex": frozenset({"exec", "e", "review"}), "opencode": frozenset({"run"})}
 _PACKAGES = {"claude-code": "claude", "codex": "codex", "pi-coding-agent": "omp", "opencode-ai": "opencode"}
-_INFO_FLAGS = frozenset({"--help", "-h", "--version", "-V"})
+_INFO_FLAGS = {
+    "claude": frozenset({"-h", "--help", "-v", "--version"}),
+    "codex": frozenset({"-h", "--help", "-V", "--version"}),
+    "omp": frozenset({"-h", "--help", "-v", "--version"}),
+    "opencode": frozenset({"-h", "--help", "-v", "--version"}),
+}
 _RUNTIMES = frozenset({"node", "bun", "deno"})
 _AGENT_TEXT = re.compile(r"\b(claude|codex|omp|opencode|apply_patch)\b|\|\s*(sh|bash|zsh|dash|ksh)\b")
 _HINT = "agent CLIs started from the shell bypass this session's policies; do the work with your own tools"
@@ -41,7 +46,7 @@ def _check(command: Command, extra: frozenset[str]) -> str | None:
         return "apply_patch through the shell is not allowed; use the file edit tools"
     if name in extra:
         return f"{name} is not allowed; {_HINT}"
-    if _INFO_FLAGS & set(args):
+    if _INFO_FLAGS.get(name, frozenset()) & set(args):
         return None
     if name in _PRINT_AGENTS and any(_print_flag(a) for a in args):
         return f"{name} -p is not allowed; {_HINT}"
