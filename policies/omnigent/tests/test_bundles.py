@@ -42,9 +42,10 @@ def _fires(policy_spec, case: Case) -> bool:
     )
 
 
-def decide(agent_dir: Path, case: Case) -> tuple[str, str | None]:
+def results(agent_dir: Path, case: Case) -> dict:
     from omnigent.policies.function import resolve_function_policy
     from omnigent.policies.types import EvaluationContext
+    from omnigent.runtime.policies.engine import _dispatch_policy
     from omnigent.spec import load
     from omnigent.spec.types import FunctionPolicySpec, Phase
 
@@ -57,13 +58,21 @@ def decide(agent_dir: Path, case: Case) -> tuple[str, str | None]:
         session_state=dict(case.session_state),
         turn_final=case.turn_final,
     )
-    result, reason = "ALLOW", None
+    out = {}
     for policy_spec in specs:
         if not isinstance(policy_spec, FunctionPolicySpec):
             raise TypeError(f"{agent_dir}: {policy_spec.name} is not a function policy")
         if not _fires(policy_spec, case):
             continue
-        decision = asyncio.run(resolve_function_policy(policy_spec).evaluate(ctx, {}))
+        out[policy_spec.name] = asyncio.run(
+            _dispatch_policy(resolve_function_policy(policy_spec), ctx, {})
+        )
+    return out
+
+
+def decide(agent_dir: Path, case: Case) -> tuple[str, str | None]:
+    result, reason = "ALLOW", None
+    for decision in results(agent_dir, case).values():
         action = decision.action.name
         if RANK[action] > RANK[result]:
             result, reason = action, decision.reason
@@ -111,15 +120,26 @@ class BundleVerdictTest(unittest.TestCase):
                 self.assertEqual(verdict(BUNDLES / case.agent, case), case.expected)
 
     def test_polly_loop_denied_not_asked(self):
-        from omnigent.policies.builtins.safety import _args_hash
+        from agent_stack_policies.loop import LOOP_STATE_KEY, _call_hash
 
         data = {"command": "make test"}
-        repeats = [_args_hash("sys_os_shell", data)] * 2
-        state = {"_policy_loop_recent_hashes": repeats}
+        state = {LOOP_STATE_KEY: [_call_hash("sys_os_shell", data)] * 2}
         case = Case("polly", "tool_call", "sys_os_shell", data, "DENY", state)
         action, reason = decide(BUNDLES / case.agent, case)
         self.assertEqual(action, "DENY")
-        self.assertIn("unattended:", reason)
+        self.assertIn("agent-stack: loop:", reason)
+
+    def test_polly_state_updates_accepted_by_engine(self):
+        case = Case("polly", "tool_call", "sys_session_send", DISPATCH, "ALLOW", {"agent_stack_dispatches": 3})
+        out = results(BUNDLES / case.agent, case)
+        expected = {
+            "max_dispatches_per_session": "agent_stack_dispatches",
+            "detect_loop": "agent_stack_loop_recent",
+        }
+        for name, key in expected.items():
+            with self.subTest(policy=name):
+                self.assertEqual(out[name].action.name, "ALLOW", out[name].reason)
+                self.assertIn(key, [op.key for op in out[name].state_updates or []])
 
     def test_polly_spawn_disabled(self):
         from omnigent.spec import load

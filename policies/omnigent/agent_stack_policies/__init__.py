@@ -53,6 +53,20 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.loop.detect_loop",
+        "kind": "factory",
+        "name": "detect_loop",
+        "description": "Deny a tool call repeated with identical arguments within a window.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "window": {"type": "integer", "minimum": 2},
+                "threshold": {"type": "integer", "minimum": 2},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.unattended.deny_on_ask",
         "kind": "factory",
         "name": "deny_on_ask",

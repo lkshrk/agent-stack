@@ -342,9 +342,8 @@ guardrails:
     detect_loop:
       type: function
       function:
-        path: agent_stack_policies.unattended.deny_on_ask
-        arguments:
-          handler: omnigent.policies.builtins.safety.detect_loop
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
     no_policy_tools:
       type: function
       function:

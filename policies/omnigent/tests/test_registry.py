@@ -5,7 +5,7 @@ import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_merge, test_paths, test_result, test_spawn, test_tools
+from . import assert_not_ask, test_loop, test_merge, test_paths, test_result, test_spawn, test_tools
 
 EVENTS_BY_MODULE = {
     "agent_stack_policies.spawn": test_spawn.EVENTS,
@@ -13,6 +13,7 @@ EVENTS_BY_MODULE = {
     "agent_stack_policies.tools": test_tools.EVENTS,
     "agent_stack_policies.merge": test_merge.EVENTS,
     "agent_stack_policies.unattended": test_tools.EVENTS,
+    "agent_stack_policies.loop": test_loop.EVENTS,
     "agent_stack_policies.result": test_result.EVENTS,
 }
 DEFAULT_PARAMS = {
@@ -25,6 +26,7 @@ DEFAULT_PARAMS = {
         "arguments": {"patterns": ["mcp__*linear_app-*"]},
     },
     "agent_stack_policies.result": {"kind": "planner"},
+    "agent_stack_policies.loop": {},
 }
 
 

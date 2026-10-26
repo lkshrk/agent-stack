@@ -11,8 +11,9 @@ anyone needs to read through.
 
 ## Procedure
 0. Bring the task branch up to date with `origin/main`: rebase if the branch was
-   never pushed, otherwise `git merge origin/main`. Rerun the gates, push
-   without force, and only then snapshot the diff.
+   never pushed, otherwise `git merge origin/main`. On a conflict, send it back
+   to the implementer through `sys_session_send` instead of resolving it
+   yourself. Push without force, and only then snapshot the diff.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
    redirect (`gh pr diff <pr> > <absolute shared diff path>` or
    `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > <absolute shared diff path>`).
@@ -53,7 +54,7 @@ anyone needs to read through.
    `agent` + `title` (or address it by `session_id`) with
    `purpose: "implement"`, so the worker keeps its worktree/branch context and
    updates its existing PR. A new title would spawn a fresh worker with no
-   memory of the task. Then loop to step 1.
+   memory of the task. Then loop to step 0.
 6. When gates are green AND there are zero blocking issues, the PR passes
    review — mark it ready in the registry (with its PR URL) and leave it for
    the human to merge. polly does NOT merge it.

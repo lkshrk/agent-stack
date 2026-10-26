@@ -74,13 +74,14 @@ class InImageTest(unittest.TestCase):
     def test_phase_names_reach_policies(self):
         from omnigent.policies.function import resolve_function_policy
         from omnigent.policies.types import EvaluationContext
+        from omnigent.runtime.policies.engine import _dispatch_policy
         from omnigent.spec.types import FunctionPolicySpec, FunctionRef, Phase
 
         def run(path, arguments, **ctx):
             spec = FunctionPolicySpec(
                 name="probe", on=None, function=FunctionRef(path=path, arguments=arguments)
             )
-            result = asyncio.run(resolve_function_policy(spec).evaluate(EvaluationContext(**ctx), {}))
+            result = asyncio.run(_dispatch_policy(resolve_function_policy(spec), EvaluationContext(**ctx), {}))
             return result.action.name
 
         dispatch = {

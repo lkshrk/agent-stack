@@ -5,6 +5,14 @@ from collections.abc import Awaitable, Callable
 from ._event import Decision, Event, deny
 
 ALLOWED_HANDLER_PREFIXES = ("omnigent.policies.builtins.", "agent_stack_policies.")
+# The engine accepts their reserved `_policy_*` counter writes only from the unwrapped builtin.
+RUNTIME_COUNTER_HANDLERS = frozenset(
+    {
+        "omnigent.policies.builtins.orchestration.spawn_bounds",
+        "omnigent.policies.builtins.safety.max_tool_calls_per_session",
+        "omnigent.policies.builtins.safety.detect_loop",
+    }
+)
 
 
 KNOWN_VERDICTS = ("ALLOW", "DENY", "ASK")
@@ -38,6 +46,8 @@ def deny_on_ask(
 ) -> Callable[[Event, dict], Awaitable[Decision | None]]:
     if not handler.startswith(ALLOWED_HANDLER_PREFIXES):
         raise ValueError(f"handler {handler!r} is outside the allowed prefixes")
+    if handler in RUNTIME_COUNTER_HANDLERS:
+        raise ValueError(f"handler {handler!r} writes runtime counters and cannot be wrapped")
     module_name, _, attr = handler.rpartition(".")
     factory = getattr(importlib.import_module(module_name), attr)
     inner = factory(**arguments) if arguments else factory()

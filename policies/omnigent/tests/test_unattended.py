@@ -37,6 +37,12 @@ class UnattendedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             unattended.deny_on_ask(handler="os.getcwd")
 
+    def test_wrapper_rejects_runtime_counter_builtins(self):
+        with mock.patch.object(unattended, "ALLOWED_HANDLER_PREFIXES", ("omnigent.policies.builtins.",)):
+            for handler in sorted(unattended.RUNTIME_COUNTER_HANDLERS):
+                with self.subTest(handler=handler), self.assertRaisesRegex(ValueError, "runtime counters"):
+                    unattended.deny_on_ask(handler=handler)
+
     def test_wrapper_two_arg_evaluator(self):
         policy = unattended.deny_on_ask(handler="tests.fake_policies.two_arg", arguments={"marker": "m"})
         decision = run(policy)
