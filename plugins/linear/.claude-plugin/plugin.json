@@ -1,0 +1,15 @@
+{
+  "name": "linear",
+  "version": "1.0.0",
+  "description": "Linear issue intake, refinement, implementation, closeout, status and reconciliation workflow skills using Linear statuses as the state.",
+  "skills": [
+    "./skills/linear-intake",
+    "./skills/linear-refine",
+    "./skills/linear-implement",
+    "./skills/linear-status",
+    "./skills/linear-reconcile"
+  ],
+  "author": {
+    "name": "lkshrk"
+  }
+}
