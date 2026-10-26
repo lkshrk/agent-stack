@@ -251,5 +251,8 @@
       "spec": "Protection",
       "file": "spec-73.json"
     }
+  ],
+  "trigger_sources": [
+    "https://worldofwarcraft.blizzard.com/en-us/news"
   ]
 }

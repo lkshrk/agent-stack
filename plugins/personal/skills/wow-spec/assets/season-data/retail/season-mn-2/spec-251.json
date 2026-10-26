@@ -16,6 +16,10 @@
     {
       "url": "https://www.method.gg/guides/frost-death-knight/stats-races-and-consumables",
       "updated": "2026-09-27"
+    },
+    {
+      "url": "https://murlok.io/death-knight/frost/m+",
+      "updated": null
     }
   ],
   "stat_guidance": {
@@ -56,13 +60,23 @@
   "content_overrides": [
     {
       "condition": "Dual-wield Breath of Sindragosa raid/cleave build with Arctic Assault",
-      "replacements": {"enchants.main_hand": "spell:53344", "enchants.off_hand": "spell:62158"},
-      "sources": ["https://www.method.gg/guides/frost-death-knight/talents"]
+      "replacements": {
+        "enchants.main_hand": "spell:53344",
+        "enchants.off_hand": "spell:62158"
+      },
+      "sources": [
+        "https://www.method.gg/guides/frost-death-knight/talents"
+      ]
     },
     {
       "condition": "Dual-wield Frostbane M+ build",
-      "replacements": {"enchants.main_hand": "spell:53343", "enchants.off_hand": "spell:53344"},
-      "sources": ["https://www.method.gg/guides/frost-death-knight/talents"]
+      "replacements": {
+        "enchants.main_hand": "spell:53343",
+        "enchants.off_hand": "spell:53344"
+      },
+      "sources": [
+        "https://www.method.gg/guides/frost-death-knight/talents"
+      ]
     }
   ],
   "conditions": [

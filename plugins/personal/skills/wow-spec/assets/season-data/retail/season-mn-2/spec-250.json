@@ -10,12 +10,12 @@
   "scope": "Max-level PvE guide baseline; no personal gear simulation.",
   "sources": [
     {
-      "url": "https://www.icy-veins.com/wow/blood-death-knight-pve-tank-gems-enchants-consumables",
-      "updated": "2026-08-10"
-    },
-    {
       "url": "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables",
       "updated": "2026-09-04"
+    },
+    {
+      "url": "https://murlok.io/death-knight/blood/m+",
+      "updated": null
     }
   ],
   "stat_guidance": {
