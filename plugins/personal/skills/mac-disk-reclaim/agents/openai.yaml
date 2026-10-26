@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mac Disk Reclaim"
+  short_description: "Find and purge risk-free disk bloat on macOS, confirming each item largest-first."
+  default_prompt: "Scan my Mac for disk space I can safely reclaim, then walk the findings largest-first and ask me before deleting each one directly."

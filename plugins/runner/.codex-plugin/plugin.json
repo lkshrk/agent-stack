@@ -1,0 +1,27 @@
+{
+  "name": "runner",
+  "version": "1.0.0",
+  "description": "Skills for the Omnigent runner: dependency upgrades, project tool allowlists and AI context generation.",
+  "author": {
+    "name": "lkshrk"
+  },
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "codex",
+    "claude-code",
+    "runner"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Runner",
+    "shortDescription": "Dependency upgrades, tool allowlists and AI context for coding sessions.",
+    "longDescription": "Portable agent skills used by the Omnigent runner: safe dependency upgrades, project-local tool allowlists and AI context generation.",
+    "developerName": "lkshrk",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ]
+  }
+}

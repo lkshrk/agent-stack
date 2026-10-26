@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Tool Allowlist"
+  short_description: "Generate a project-local agent permission allowlist from a repo's stack and tools."
+  default_prompt: "Scan this repo's tooling and installed tools, then generate a project-local permission allowlist for the current client so its dev commands run without prompting."

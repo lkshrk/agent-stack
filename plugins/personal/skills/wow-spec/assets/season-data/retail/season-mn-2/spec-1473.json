@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "spec_id": 1473,
+  "spec": "Augmentation Evoker",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/augmentation-evoker/stats-races-and-consumables",
+      "updated": "2026-08-25"
+    }
+  ],
+  "stat_guidance": {
+    "baseline": "Intellect > Mastery > Haste = Critical Strike > Versatility.",
+    "support": "Mastery strengthens ally buffs and their duration. Versatility boosts own damage but not the support buffs; do not optimize only personal DPS.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:240133",
+      "feet": "item:243953",
+      "rings": "item:243959",
+      "weapon": "item:244031"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241326",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "food_alternative": "item:255845",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Mastery is highest secondary stat",
+      "replacements": {
+        "consumables.combat_potion": "item:241288"
+      },
+      "reason": "Guide prefers Recklessness when it grants Mastery.",
+      "source": "https://www.method.gg/guides/augmentation-evoker/stats-races-and-consumables"
+    }
+  ],
+  "conditions": [
+    "Regular gems favour Mastery; ring/weapon choices are gear-dependent.",
+    "Guide's Mastery gem family mapped to Mastery-dominant Quick Amethyst from its live tooltip, with secondary Haste. This is a concrete matching example, not a simulated best gem."
+  ],
+  "unresolved": [
+    "Exact item quality ranks and full use/cooldown restrictions not independently verified."
+  ],
+  "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
+  "derivation_notes": [
+    "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
+  ]
+}

@@ -21,6 +21,9 @@ pre-commit:
     hadolint:
       glob: "**/Dockerfile"
       run: 'command -v hadolint >/dev/null || { echo "hadolint not installed, skipping"; exit 0; }; hadolint --failure-threshold error {staged_files}'
+    plugin-tests:
+      glob: "plugins/{linear,personal}/**"
+      run: 'for d in linear personal; do (cd plugins/$d && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX bun test) || exit 1; done'
 
 pre-push:
   parallel: true

@@ -1,0 +1,4 @@
+interface:
+  display_name: "yabai + skhd Doctor"
+  short_description: "Health-check macOS yabai and skhd services and propose a fix path."
+  default_prompt: "Check whether my yabai and skhd setup is healthy — installed, services running, Accessibility granted, configs present — and if anything is wrong, propose a concrete fix path."

@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "spec_id": 66,
+  "spec": "Protection Paladin",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/protection-paladin/stats-races-and-consumables",
+      "updated": "2026-09-03"
+    }
+  ],
+  "stat_guidance": {
+    "overall": "Item level > Haste > Critical Strike > Versatility > Mastery.",
+    "notes": "Prioritize Strength, Stamina and Armor; jewelry/trinkets require separate evaluation. Balanced survival/damage guidance; simulate offensive optimization.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243948",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "legs": "item:244641",
+      "feet": "item:243983",
+      "rings": "item:244015",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240890"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "food": "item:255846",
+      "flask": "item:241324",
+      "combat_potion": "item:241288",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Lightsmith weapon buff",
+      "replacement": {
+        "consumables.weapon_oil": "spell:433568"
+      },
+      "sources": [
+        "https://www.method.gg/guides/protection-paladin/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Silvermoon Parade feast available",
+      "replacement": {
+        "consumables.food": "item:255845"
+      },
+      "sources": [
+        "https://www.method.gg/guides/protection-paladin/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Thalassian Phoenix Oil is the Templar choice; Lightsmith uses its class ability instead."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

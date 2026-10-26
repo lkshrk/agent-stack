@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "spec_id": 72,
+  "spec": "Fury Warrior",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/fury-warrior/stats-races-and-consumables",
+      "updated": "2026-08-11"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Secondary baseline: Mastery > Haste > Crit = Versatility; reassess with gear.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243989",
+      "chest": "item:243977",
+      "feet": "item:243953",
+      "legs": "item:244643",
+      "rings": "item:243957",
+      "main_hand": "item:244031",
+      "off_hand": "item:243973"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240892"
+    },
+    "consumables": {
+      "flask": "item:241324",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:242272",
+      "feast": "item:255845",
+      "weapon_oil": "item:243734"
+    }
+  },
+  "alternatives": {},
+  "content_overrides": [],
+  "conditions": [
+    "Different main-hand and off-hand enchants; apply weapon oil to both weapons."
+  ],
+  "unresolved": [
+    "Exact item qualities, tooltip restrictions and consumable timings not independently checked."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown."
+}

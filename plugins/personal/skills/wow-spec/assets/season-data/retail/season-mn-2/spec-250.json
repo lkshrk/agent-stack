@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "spec_id": 250,
+  "spec": "Blood Death Knight",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear simulation.",
+  "sources": [
+    {
+      "url": "https://www.icy-veins.com/wow/blood-death-knight-pve-tank-gems-enchants-consumables",
+      "updated": "2026-08-10"
+    },
+    {
+      "url": "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables",
+      "updated": "2026-09-04"
+    }
+  ],
+  "stat_guidance": {
+    "deathbringer": "Strength > Crit = Versatility = Mastery > Haste.",
+    "sanlayn": "Strength > Haste > Crit = Versatility = Mastery.",
+    "tank_context": "Crit also supplies parry; Mastery supplies physical Blood Shield mitigation.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244005",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "feet": "item:243953",
+      "legs": "item:244641",
+      "rings": "item:243957",
+      "weapon": "spell:326801"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240908"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "flask": "item:241326",
+      "combat_potion": "item:241288",
+      "food": "item:242275",
+      "feast": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "alternatives": {
+    "combat_potion": "item:241308"
+  },
+  "content_overrides": [
+    {
+      "condition": "San'layn hero tree",
+      "replacements": {
+        "gems.remaining": "item:240906",
+        "consumables.flask": "item:241324"
+      },
+      "sources": [
+        "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Deathbringer on higher target counts",
+      "replacements": {
+        "enchants.weapon": "spell:53344"
+      },
+      "sources": [
+        "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Default gems/flask assume Deathbringer; San'layn overrides are below.",
+    "Runeforge choice changes with build and target count. Light's Potential is a listed potion alternative."
+  ],
+  "unresolved": [
+    "Exact item qualities, tooltip restrictions and consumable timings not independently checked."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown."
+}

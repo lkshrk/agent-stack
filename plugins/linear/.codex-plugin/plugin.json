@@ -1,0 +1,37 @@
+{
+  "name": "linear",
+  "version": "1.0.0",
+  "description": "Linear issue intake, refinement, implementation and closeout, status and setup checks, and reconciliation workflows for AI-assisted delivery, using Linear statuses as the workflow state.",
+  "author": {
+    "name": "lkshrk"
+  },
+  "license": "MIT",
+  "keywords": [
+    "linear",
+    "issue-triage",
+    "workflow",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Linear",
+    "shortDescription": "Create, inspect, refine, implement, reconcile and close Linear issues.",
+    "longDescription": "Workflow skills for Linear-driven delivery: intake (technical and plain-language), refinement into an eleven-section issue template checked by a local validator, implementation in issue worktrees with bounded review rounds and verified closeout on main, status and setup checks with migration from v1, and reconciliation of issue-linked git work.",
+    "developerName": "lkshrk",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Create a Linear issue from this rough report",
+      "Help a non-technical person file a Linear issue",
+      "What is the current phase of this Linear issue?",
+      "Check whether my Linear workspace is ready",
+      "Refine this Linear issue into a plan",
+      "Batch process ready Linear implementation issues",
+      "Deliver this Linear feature end to end",
+      "Close this merged Linear issue"
+    ]
+  }
+}

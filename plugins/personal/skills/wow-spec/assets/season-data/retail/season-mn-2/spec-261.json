@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "spec_id": 261,
+  "spec": "Subtlety Rogue",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/subtlety-rogue/stats-races-and-consumables",
+      "updated": "2026-08-19"
+    },
+    {
+      "url": "https://www.icy-veins.com/wow/subtlety-rogue-pve-dps-gems-enchants-consumables",
+      "updated": "2026-08-10",
+      "scope": "Shoulder enchant only; remaining baseline follows Method."
+    }
+  ],
+  "stat_guidance": {
+    "trickster": "Agility > Mastery > Haste toward 700 rating > Critical Strike > Versatility.",
+    "deathstalker": "Agility > Haste toward 1050 rating > Mastery > Critical Strike > Versatility.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:244641",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "main_hand": "item:244029",
+      "off_hand": "item:244031"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241326",
+      "flask_alternative": "item:241322",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:242273",
+      "food_alternative": "item:242277",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Haste ratings are guide targets, not universal hard caps.",
+    "Use one Acuity and one Arcane Mastery enchant; hand assignment is not specified by source.",
+    "Amirdrassil's Grace shoulder fills Method's omission using Icy Veins. Icy Veins differs on weapon enchants; the stored weapon pair remains Method's recommendation."
+  ],
+  "unresolved": [
+    "Poison selection and interaction with oil not verified.",
+    "Exact item quality ranks and full use/cooldown restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+}

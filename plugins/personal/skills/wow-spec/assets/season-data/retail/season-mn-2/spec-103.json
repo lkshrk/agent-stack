@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "spec_id": 103,
+  "spec": "Feral Druid",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/feral-druid/stats-races-and-consumables",
+      "updated": "2026-10-01"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Agility above secondaries. No universal secondary ordering or target breakpoint; changing gear can change priorities.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:244641",
+      "feet": "item:243983",
+      "rings": "item:243957",
+      "weapon": "item:273072",
+      "head_alternative": "item:243951",
+      "shoulders_alternative": "item:244021"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240892",
+      "gem_alternative": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085",
+      "flask_haste_alternative": "item:241324",
+      "flask_versatility_alternative": "item:241320",
+      "flask_mastery_alternative": "item:241326",
+      "combat_potion_risky_alternative": "item:241292"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Sim ring and weapon choices; Masterful Peridot or Quick Amethyst are fallback gems.",
+    "Avoidance and Leech are comparable utility options.",
+    "Choose flask by simulation; Magisters is the guide default. Rampant Abandon is a risky alternative: move out of its silence puddle."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full use restrictions are unverified.",
+    "Consumable durations and cooldown-sharing require tooltip verification."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities; no personal optimization or independent full tooltip verification."
+}

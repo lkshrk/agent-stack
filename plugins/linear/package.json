@@ -1,0 +1,16 @@
+{
+  "name": "linear",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "validate": "bun scripts/validate_issue.ts examples/issue.md",
+    "skills:sync": "bun scripts/sync_skill_references.ts",
+    "skills:sync:check": "bun scripts/sync_skill_references.ts --check"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
+}

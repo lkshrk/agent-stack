@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "spec_id": 267,
+  "spec": "Destruction Warlock",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/destruction-warlock/stats-races-and-consumables",
+      "updated": "2026-08-15"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Secondary stats: Haste > Critical Strike approximately Mastery > Versatility",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243948",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "feet": "item:243983",
+      "legs": "item:240133",
+      "rings": "item:243957",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240967",
+      "remaining": "item:240890",
+      "red": "item:240906",
+      "purple": "item:240900",
+      "blue": "item:240916"
+    },
+    "consumables": {
+      "flask": "item:241324",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:242275",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "General guide baseline; use a personal simulation for gear-dependent choices.",
+    "Use one Deadly Peridot plus Flawless Quick versions of other gem colours before filling remaining sockets with Deadly Peridot.",
+    "Leech enchants are guide preferences; encounter mechanics may favour other tertiary stats.",
+    "Flask of the Shattered Sun and Potion of Recklessness are alternatives for balancing gear stats; sim before substituting.",
+    "Guide's Quick other-colour family resolved to Quick Garnet, Quick Amethyst and Quick Lapis; retain Deadly Peridot as the green gem/remaining-socket option."
+  ],
+  "unresolved": [
+    "Exact crafting-quality ranks and complete use restrictions are not independently verified."
+  ],
+  "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
+  "derivation_notes": [
+    "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
+  ]
+}

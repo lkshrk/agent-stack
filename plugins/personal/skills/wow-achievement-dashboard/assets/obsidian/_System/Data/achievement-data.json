@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "is_demo": false,
+  "account": null,
+  "snapshot_date": null,
+  "account_ap": null,
+  "task_sources": [
+    "{{ROOT}}/_System/Task Records/Execution.md",
+    "{{ROOT}}/_System/Task Records/Research.md",
+    "{{ROOT}}/_System/Task Records/Imported completions.md"
+  ],
+  "research_source": "{{ROOT}}/_System/Task Records/Research.md",
+  "characters": [],
+  "tasks": [],
+  "shopping": [],
+  "shopping_note": "No purchase research imported.",
+  "validation": {
+    "reconciled": false,
+    "completed_records": null,
+    "calculated_completed_ap": null
+  }
+}

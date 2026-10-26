@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "spec_id": 251,
+  "spec": "Frost Death Knight",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/frost-death-knight/talents",
+      "updated": "2026-09-27"
+    },
+    {
+      "url": "https://www.method.gg/guides/frost-death-knight/stats-races-and-consumables",
+      "updated": "2026-09-27"
+    }
+  ],
+  "stat_guidance": {
+    "single_target": "Strength > Crit > Mastery >= Haste > Versatility.",
+    "mplus": "Strength > Crit > Mastery >= Haste > Versatility.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243981",
+      "shoulders": "item:243961",
+      "chest": "item:243977",
+      "feet": "item:244009",
+      "legs": "item:244641",
+      "rings": "item:243987"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "dual_stat_example": "item:240898"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:271884",
+      "food": "item:242275",
+      "feast": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "alternatives": {
+    "ring": "item:243959",
+    "diamond": "item:240966",
+    "runeforge_fallen_crusader": "spell:53344",
+    "runeforge_razorice": "spell:53343",
+    "runeforge_stoneskin_gargoyle": "spell:62158"
+  },
+  "content_overrides": [
+    {
+      "condition": "Dual-wield Breath of Sindragosa raid/cleave build with Arctic Assault",
+      "replacements": {"enchants.main_hand": "spell:53344", "enchants.off_hand": "spell:62158"},
+      "sources": ["https://www.method.gg/guides/frost-death-knight/talents"]
+    },
+    {
+      "condition": "Dual-wield Frostbane M+ build",
+      "replacements": {"enchants.main_hand": "spell:53343", "enchants.off_hand": "spell:53344"},
+      "sources": ["https://www.method.gg/guides/frost-death-knight/talents"]
+    }
+  ],
+  "conditions": [
+    "Magisters flask recommendation follows guide text; erroneous link to Shattered Sun corrected using Wowhead item 241322. Flask choice remains gear-dependent.",
+    "Sim gem combinations; dual-stat gem is an example, not a universal best.",
+    "Powerful diamond is an alternative whose value depends on gem colours and gear.",
+    "Runeforges depend on build: apply the matching dual-wield override; other configurations need a specific recommendation."
+  ],
+  "unresolved": [
+    "Exact item qualities, tooltip restrictions and consumable timings not independently checked."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown."
+}

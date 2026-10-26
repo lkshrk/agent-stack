@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "spec_id": 253,
+  "spec": "Beast Mastery Hunter",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; not personalized optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables",
+      "updated": "2026-09-05"
+    },
+    {
+      "url": "https://www.method.gg/guides/elemental-shaman/stats-races-and-consumables",
+      "updated": "2026-09-01"
+    },
+    {
+      "url": "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables",
+      "updated": "2026-09-03"
+    }
+  ],
+  "stat_guidance": {
+    "single_target": "Weapon damage > Agility > Mastery > Haste >= Crit > Versatility.",
+    "aoe": "Weapon damage > Agility > Mastery > Crit > Versatility = Haste.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243990",
+      "chest": "item:243977",
+      "legs": "item:244640",
+      "feet": "item:243952",
+      "rings": "item:243959",
+      "weapon": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240898"
+    },
+    "consumables": {
+      "food": "item:242747",
+      "flask": "item:241322",
+      "combat_potion": "item:271887",
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243733",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Liquid Luster: use six seconds before the pull. Potion of Recklessness is an alternative when Mastery is highest.",
+    "Shattered Sun is another listed flask option.",
+    "Guide stat overview contradicts its ranking on Agility; simulate gear rather than assuming fixed weights.",
+    "Rite of the Hash'ey application item corroborated by Elemental guide; Hunter guide links its spell."
+  ],
+  "unresolved": [
+    "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
+    "No personal simulation."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+}

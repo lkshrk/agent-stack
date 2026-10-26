@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "spec_id": 1480,
+  "spec": "Devourer Demon Hunter",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/devourer-demon-hunter/stats-races-and-consumables",
+      "updated": "2026-09-18"
+    }
+  ],
+  "stat_guidance": {
+    "baseline": "Intellect > Mastery > Haste >= Critical Strike >> Versatility.",
+    "targets": "Around 1200 Mastery and 800 Haste are geared starting targets, not hard caps.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:240133",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "main_hand": "item:273072",
+      "off_hand": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240967",
+      "amethyst": "item:240900",
+      "peridot": "item:240892",
+      "garnet": "item:240908",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "combat_potion": "item:241288",
+      "combat_potion_alternative": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "food_alternative": "item:242275",
+      "main_hand_oil": "item:243734",
+      "off_hand_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Intellect spec: use spellthread, not Agility armor kit.",
+    "Powerful setup uses three colours: Amethyst, Garnet, Peridot; fill remaining with Quick Amethyst.",
+    "If Recklessness does not grant Mastery or Crit, compare Light’s Potential."
+  ],
+  "unresolved": [
+    "Exact item quality ranks and full use/cooldown restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+}

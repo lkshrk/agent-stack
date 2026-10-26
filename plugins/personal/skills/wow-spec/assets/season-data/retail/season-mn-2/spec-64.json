@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "spec_id": 64,
+  "spec": "Frost Mage",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/frost-mage/stats-races-and-consumables",
+      "updated": "2026-08-11"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Intellect > Mastery approximately Critical Strike > Haste > Versatility",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "feet": "item:243953",
+      "legs": "item:240133",
+      "rings": "item:243957",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240908"
+    },
+    "consumables": {
+      "flask": "item:241326",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "General guide baseline; use a personal simulation for gear-dependent choices."
+  ],
+  "unresolved": [
+    "Exact crafting-quality ranks and complete use restrictions are not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities. Unknown item facts remain explicit; incomplete gem/slot coverage is not a complete setup."
+}

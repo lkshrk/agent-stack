@@ -1,0 +1,7 @@
+# Choose the output
+
+Default new todo lists, plans and static indexes to **plain Markdown (.md) files** when the user has not chosen a format. Briefly mention the alternative once: “I’ll save this as a Markdown checklist—no Obsidian setup needed. If you use Obsidian, I can put it in your vault instead.” Then proceed; do not turn the format choice into a required confirmation. Honor an explicit choice or an established Obsidian/Markdown workflow rather than silently migrating it. Reuse a supplied or established folder; ask where to save only when the destination cannot be inferred. Do not repeatedly ask existing users to choose a format.
+
+For plain Markdown, use relative standard Markdown links, ordinary checkboxes and heading links; do not require wiki links, Obsidian block links, Dataview, plugin setup, credentials or integrations. The following vault/plugin/query instructions apply only to Obsidian. Any requested Markdown dashboard or index is static and shows generation and source dates; checkbox changes affect summaries only on explicit refresh.
+
+Adapt `Plans/`, `Lists/` and `_System/` to a maintained collection, with user-facing guides separate from supporting data. A one-off checklist stays one readable file in the chosen folder: no mandatory dashboard, Start Here or empty directory tree. Its checklist remains canonical; register it if an index already exists. In plain Markdown use a normal end-of-file supporting-details section instead of an Obsidian callout.

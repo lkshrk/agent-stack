@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "spec_id": 105,
+  "spec": "Restoration Druid",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/restoration-druid/stats-races-and-consumables",
+      "updated": "2026-09-13"
+    }
+  ],
+  "stat_guidance": {
+    "raid": "Item level > Haste = Mastery > Critical Strike >= Versatility.",
+    "mplus": "Dedicated M+ section: item level > Haste > Mastery > Versatility > Critical Strike.",
+    "conflict": "Guide also lists Haste = Mastery for M+ earlier; do not treat either as precise weights.",
+    "high_keys": "With sufficient healing, emphasize Haste then Versatility for damage and survival; more Mastery supports healing.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243951",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "legs": "item:240094",
+      "feet": "item:243983",
+      "rings": "item:244015",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240982",
+      "remaining": "item:240892",
+      "gem_alternative": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241324",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:242273",
+      "weapon_oil": "item:243733",
+      "mana_potion": "item:241300",
+      "food_alternative": "item:255846"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Use Lightfused Mana Potion when mana recovery is needed; cooldown interaction is unverified.",
+    "Quick Amethyst and Harandar Celebration are listed alternatives."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full use restrictions are unverified.",
+    "Consumable durations and cooldown-sharing require tooltip verification."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities; no personal optimization or independent full tooltip verification."
+}

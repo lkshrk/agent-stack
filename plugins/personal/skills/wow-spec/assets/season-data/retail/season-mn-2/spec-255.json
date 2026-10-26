@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "spec_id": 255,
+  "spec": "Survival Hunter",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; not personalized optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables",
+      "updated": "2026-09-03"
+    }
+  ],
+  "stat_guidance": {
+    "single_target": "Agility > Mastery > Crit = Haste > Versatility.",
+    "aoe": "Agility > Mastery > Haste > Crit > Versatility.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243951",
+      "shoulders": "item:244021",
+      "chest": "item:243975",
+      "legs": "item:244641",
+      "feet": "item:243983",
+      "rings": "item:243959",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240967",
+      "remaining": "item:240898"
+    },
+    "consumables": {
+      "food": "item:255845",
+      "flask": "item:241322",
+      "combat_potion": "item:241292",
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Melee setup; do not substitute a ranged scope.",
+    "Guide also lists Refulgent Weightstone; weapon-type eligibility needs verification before replacing oil.",
+    "Powerful diamond's colour optimization is not explained in this guide."
+  ],
+  "unresolved": [
+    "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
+    "No personal simulation."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+}

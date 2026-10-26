@@ -18,8 +18,13 @@ Both read and write the knowledge vault through its normal workflow.
 | `agents/polly/` | Polly orchestrator and its workers, adapted from Omnigent's example |
 | `config/omnigent/` | Omnigent server configuration: runner image, model gateway, per-harness models |
 | `config/hermes/` | Hermes managed `config.yaml`, `SOUL.md`, learning snapshot script |
+| `plugins/runner/` | Plugin `runner`: skills `upgrade-deps`, `project-tool-allowlist`, `ai-context-generator` |
+| `plugins/linear/` | Plugin `linear`: Linear workflow skills (`linear-intake`, `-refine`, `-implement`, `-reconcile`, `-status`) with their validators, templates and tests |
+| `plugins/personal/` | Plugin `personal`: machine-maintenance, documentation and World of Warcraft skills |
+| `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests (`agent-stack`) for Claude Code and Codex |
+| `config/pr-agent/` | PR-Agent review policy (`pr-agent.toml`) and reviewer guide (`review.md`), loaded by the h-cloud init container |
 
-Everything here ships inside images. Deployment manifests, secrets, databases and routes live in the h-cloud repository.
+Everything here ships inside images, except `config/pr-agent/`, which h-cloud fetches at runtime, and `plugins/`, which clients install from this repository as the `agent-stack` marketplace (`claude plugin marketplace add lkshrk/agent-stack`). Deployment manifests, secrets, databases and routes live in the h-cloud repository.
 
 ## Credentials
 

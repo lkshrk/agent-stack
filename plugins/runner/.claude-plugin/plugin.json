@@ -1,0 +1,13 @@
+{
+  "name": "runner",
+  "version": "1.0.0",
+  "description": "Skills for the Omnigent runner: dependency upgrades, project tool allowlists and AI context generation.",
+  "skills": [
+    "./skills/upgrade-deps",
+    "./skills/project-tool-allowlist",
+    "./skills/ai-context-generator"
+  ],
+  "author": {
+    "name": "lkshrk"
+  }
+}

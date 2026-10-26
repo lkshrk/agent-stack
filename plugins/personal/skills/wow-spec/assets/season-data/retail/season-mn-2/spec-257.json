@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "spec_id": 257,
+  "spec": "Holy Priest",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/holy-priest/stats-races-and-consumables",
+      "updated": "2026-09-17"
+    }
+  ],
+  "stat_guidance": {
+    "raid": "Item level/Intellect, then Critical Strike > Mastery > Versatility > Haste.",
+    "mplus": "Haste > Versatility = Critical Strike > Mastery.",
+    "notes": "M+ prioritizes damage/survival; raid Mastery depends on effective healing.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243948",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "legs": "item:240155",
+      "feet": "item:243953",
+      "rings": "item:243987",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240969",
+      "remaining": "item:240908"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "food": "item:242275",
+      "flask": "item:241326",
+      "combat_potion": "item:241308",
+      "mana_potion": "item:241300",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Mythic+ gems",
+      "replacement": {
+        "gems.remaining": "item:240890"
+      },
+      "alternatives": {
+        "gems.remaining": [
+          "item:240894"
+        ]
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Raid alternative gem",
+      "replacement": {
+        "gems.remaining": "item:240898"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Prefer Mastery flask",
+      "replacement": {
+        "consumables.flask": "item:241322"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Progression: dangerous AoE hits",
+      "replacement": {
+        "enchants.head": "item:244005",
+        "enchants.shoulders": "item:243991"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Extra mana needed",
+      "replacement": {
+        "enchants.chest": "item:244003"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Channel safely for mana",
+      "replacement": {
+        "consumables.mana_potion": "item:241294"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-priest/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Combat and mana potions share cooldown; guide favors Light's Potential with Apotheosis. Ring enchant should balance current gear."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

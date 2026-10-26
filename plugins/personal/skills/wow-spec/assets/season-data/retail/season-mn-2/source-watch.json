@@ -1,0 +1,1593 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-04T10:34:40.484127+00:00",
+  "season": "season-mn-2",
+  "sources": {
+    "https://nether.wowhead.com/tooltip/item/240094": {
+      "kind": "tooltip",
+      "spec_ids": [
+        105
+      ],
+      "sha256": "e410560f379be71ca2bade5b574666c875fb4d5d27fb505a4e998b97d89eb787"
+    },
+    "https://nether.wowhead.com/tooltip/item/240133": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        64,
+        102,
+        258,
+        262,
+        265,
+        266,
+        267,
+        1467,
+        1473,
+        1480
+      ],
+      "sha256": "edf634facf4d8dbd28d23cf2283a9f24c4f7e60d637b2c76ce86c21f58e441ae"
+    },
+    "https://nether.wowhead.com/tooltip/item/240155": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        65,
+        256,
+        257,
+        264,
+        270,
+        1468
+      ],
+      "sha256": "3fd7eec0279ac3d822cc2fa256fc3a109905fb4db051e6ac5f88f71ce37830b4"
+    },
+    "https://nether.wowhead.com/tooltip/item/240890": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        66,
+        71,
+        73,
+        104,
+        256,
+        257,
+        259,
+        260,
+        264,
+        266,
+        267,
+        270,
+        581,
+        1467
+      ],
+      "sha256": "8b4e8e65ab992cdb7af6afcc810f91520b41e78f80337aba747f6a09eaf5e5cd"
+    },
+    "https://nether.wowhead.com/tooltip/item/240892": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        65,
+        70,
+        72,
+        103,
+        105,
+        256,
+        258,
+        262,
+        269,
+        577,
+        1468,
+        1480
+      ],
+      "sha256": "ba2242b147c2748c771654a12881da4d6e6c087e9047664e35f106dd7108875b"
+    },
+    "https://nether.wowhead.com/tooltip/item/240894": {
+      "kind": "tooltip",
+      "spec_ids": [
+        104,
+        257,
+        268
+      ],
+      "sha256": "b01eec8190ec803d172f52ca7e1ea286050ff972abb3813862ecee0acc2bf9d7"
+    },
+    "https://nether.wowhead.com/tooltip/item/240897": {
+      "kind": "tooltip",
+      "spec_ids": [
+        265
+      ],
+      "sha256": "54b1062fbe61b9b70487db85eeeac2ff08936b7aa8af3932a8f201b702f326e4"
+    },
+    "https://nether.wowhead.com/tooltip/item/240898": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251,
+        252,
+        253,
+        255,
+        257,
+        258,
+        266,
+        268
+      ],
+      "sha256": "0c96dc409cb50960e2161c607b973eebf2f6fe3639b22d3097b58487aad3087e"
+    },
+    "https://nether.wowhead.com/tooltip/item/240900": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        65,
+        70,
+        73,
+        102,
+        103,
+        105,
+        256,
+        261,
+        262,
+        263,
+        267,
+        577,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "e8d33d7ac8152caa0081c18c3e34560127cc1a8983fdeff852a09d7a1b28a3be"
+    },
+    "https://nether.wowhead.com/tooltip/item/240906": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        73,
+        250,
+        256,
+        258,
+        259,
+        260,
+        266,
+        267,
+        269,
+        1467
+      ],
+      "sha256": "fcec6bc844c173aeb2b6c14dea1968480789fde768b908f65d05242ce4832986"
+    },
+    "https://nether.wowhead.com/tooltip/item/240908": {
+      "kind": "tooltip",
+      "spec_ids": [
+        64,
+        250,
+        254,
+        257,
+        262,
+        577,
+        1480
+      ],
+      "sha256": "2c14c1f9aaf99499d8ec57959ef9a5065f319b7d4ed70090861445d8a672b0d8"
+    },
+    "https://nether.wowhead.com/tooltip/item/240910": {
+      "kind": "tooltip",
+      "spec_ids": [
+        264,
+        268,
+        1468
+      ],
+      "sha256": "d7ea043a9fd977cfcd9a1311ff417b587233976b344027deb75e05802dd004f1"
+    },
+    "https://nether.wowhead.com/tooltip/item/240914": {
+      "kind": "tooltip",
+      "spec_ids": [
+        264,
+        266,
+        268
+      ],
+      "sha256": "824dc4a91608597dac55c098c29c5443db16b431b6eb77f3030891e1c305fda7"
+    },
+    "https://nether.wowhead.com/tooltip/item/240916": {
+      "kind": "tooltip",
+      "spec_ids": [
+        73,
+        267
+      ],
+      "sha256": "c397553b41bf5a799da4e814414892079bd653442c407019fb6ece79faff3ed1"
+    },
+    "https://nether.wowhead.com/tooltip/item/240918": {
+      "kind": "tooltip",
+      "spec_ids": [
+        262,
+        577,
+        1468
+      ],
+      "sha256": "02fe5a59bcaf25ee30d7cc6fd7c4eb8b414fd356a96bef065dfbc35604d978b0"
+    },
+    "https://nether.wowhead.com/tooltip/item/240966": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251,
+        252
+      ],
+      "sha256": "606a40de6179abd394c87b4198c5cd0902214804dfa9b6710449523ef46fe4b9"
+    },
+    "https://nether.wowhead.com/tooltip/item/240967": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        73,
+        255,
+        262,
+        266,
+        267,
+        268,
+        577,
+        1468,
+        1480
+      ],
+      "sha256": "a07c33b3cae72d44b5157e4a0b0736fbdaebe3492ce4a6c9e80bfd250b654fe5"
+    },
+    "https://nether.wowhead.com/tooltip/item/240969": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        256,
+        257,
+        264,
+        1468
+      ],
+      "sha256": "5b3b2fdae6b07786d1c146f375bb41ee16de570acd87968fe961f97bf85adc39"
+    },
+    "https://nether.wowhead.com/tooltip/item/240982": {
+      "kind": "tooltip",
+      "spec_ids": [
+        105,
+        270
+      ],
+      "sha256": "4dde04a076f05e4a7372ad79aafa9692d9120503f590745b761aa05610fca2c4"
+    },
+    "https://nether.wowhead.com/tooltip/item/240983": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        64,
+        66,
+        70,
+        71,
+        72,
+        73,
+        102,
+        103,
+        104,
+        250,
+        251,
+        252,
+        253,
+        254,
+        258,
+        259,
+        260,
+        261,
+        263,
+        265,
+        268,
+        269,
+        581,
+        1467,
+        1473
+      ],
+      "sha256": "add574bccb722bd756f167ccc9d490d90489b3a0a32897653526bc895a34b08d"
+    },
+    "https://nether.wowhead.com/tooltip/item/241288": {
+      "kind": "tooltip",
+      "spec_ids": [
+        64,
+        66,
+        70,
+        71,
+        102,
+        104,
+        250,
+        251,
+        252,
+        254,
+        258,
+        263,
+        266,
+        269,
+        577,
+        581,
+        1467,
+        1473,
+        1480
+      ],
+      "sha256": "0404d54af9b0a11b2883a433d98d4e081c08719972b7c637b7335691cdc0bacd"
+    },
+    "https://nether.wowhead.com/tooltip/item/241292": {
+      "kind": "tooltip",
+      "spec_ids": [
+        103,
+        255
+      ],
+      "sha256": "7b7d1ccf5a59040a4a87b13f871629f1ec668612e21d4bd82ddca6db83ec196e"
+    },
+    "https://nether.wowhead.com/tooltip/item/241294": {
+      "kind": "tooltip",
+      "spec_ids": [
+        256,
+        257
+      ],
+      "sha256": "1ac75a8fa2568a0fd7f9aa21db0eeb0541af1e5bd39ada52bd405726af0f9069"
+    },
+    "https://nether.wowhead.com/tooltip/item/241300": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        105,
+        256,
+        257,
+        270,
+        1468
+      ],
+      "sha256": "4df470ff9f82862d82ba32c3712c698111be0fda5282e90d8e82ecfbaa9c0403"
+    },
+    "https://nether.wowhead.com/tooltip/item/241304": {
+      "kind": "tooltip",
+      "spec_ids": [
+        70,
+        73,
+        259,
+        263,
+        264,
+        266,
+        268,
+        581
+      ],
+      "sha256": "cf8162e6a267f245729e39b56a67dfcbc22c586014884ecc31d7c065c2d0e127"
+    },
+    "https://nether.wowhead.com/tooltip/item/241308": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        70,
+        72,
+        73,
+        103,
+        105,
+        250,
+        256,
+        257,
+        259,
+        260,
+        261,
+        262,
+        264,
+        265,
+        267,
+        268,
+        270,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "632f50e6a5d4e96d5a45e81e077433c174f824992a9d3ab07ec1f7aee699f11a"
+    },
+    "https://nether.wowhead.com/tooltip/item/241320": {
+      "kind": "tooltip",
+      "spec_ids": [
+        73,
+        103,
+        268
+      ],
+      "sha256": "354df676e13c78cb22ee273a063a98b583f5b3b2e64f2904f39244c45f5d69af"
+    },
+    "https://nether.wowhead.com/tooltip/item/241322": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        65,
+        70,
+        102,
+        103,
+        251,
+        252,
+        253,
+        255,
+        257,
+        258,
+        261,
+        262,
+        263,
+        269,
+        577,
+        1468,
+        1480
+      ],
+      "sha256": "6a73c764a8ec3817b36ba9e4b940eb078e21d840d03d9e2b5f7cbbbcfb4b3a71"
+    },
+    "https://nether.wowhead.com/tooltip/item/241324": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        66,
+        71,
+        72,
+        103,
+        104,
+        105,
+        250,
+        256,
+        259,
+        260,
+        265,
+        267,
+        269,
+        270,
+        581
+      ],
+      "sha256": "89deb20b9412fd4b164c6a7283a7af9bef79767d674737cd18eac638a0635fb1"
+    },
+    "https://nether.wowhead.com/tooltip/item/241325": {
+      "kind": "tooltip",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "9ab367fd6aa9f8b239e9d2c8260e2a282092421526f2706d022ea56ac97b8411"
+    },
+    "https://nether.wowhead.com/tooltip/item/241326": {
+      "kind": "tooltip",
+      "spec_ids": [
+        64,
+        102,
+        103,
+        250,
+        254,
+        257,
+        260,
+        261,
+        264,
+        266,
+        269,
+        577,
+        1467,
+        1473
+      ],
+      "sha256": "a460200f8deb453dd93ed76b766a967bbc4881a5cb089cc0fb35d8c93c040579"
+    },
+    "https://nether.wowhead.com/tooltip/item/242272": {
+      "kind": "tooltip",
+      "spec_ids": [
+        71,
+        72
+      ],
+      "sha256": "2800ccb233b4ca7aa5791e4df181bbe4c5776d95a83f7480c3388821d4a366e1"
+    },
+    "https://nether.wowhead.com/tooltip/item/242273": {
+      "kind": "tooltip",
+      "spec_ids": [
+        105,
+        261
+      ],
+      "sha256": "686630cf2923962c1f09dc52876e3dd5477e0811d237b292ab24648df0ad3994"
+    },
+    "https://nether.wowhead.com/tooltip/item/242275": {
+      "kind": "tooltip",
+      "spec_ids": [
+        70,
+        102,
+        250,
+        251,
+        252,
+        256,
+        257,
+        263,
+        265,
+        267,
+        577,
+        581,
+        1480
+      ],
+      "sha256": "d52ca1e108d44979a4894446c46ebca7e5da1c84e6fdc59645e3e305f9a29ba8"
+    },
+    "https://nether.wowhead.com/tooltip/item/242277": {
+      "kind": "tooltip",
+      "spec_ids": [
+        261
+      ],
+      "sha256": "8a79e83389b0998b439fa6eac88b6c068e423591d08a305fb9503f41e93e1c6d"
+    },
+    "https://nether.wowhead.com/tooltip/item/242285": {
+      "kind": "tooltip",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "a0c250fb83915b18f57e68e536159e9ad0b0414aadf1a02b4a8716d553752aef"
+    },
+    "https://nether.wowhead.com/tooltip/item/242286": {
+      "kind": "tooltip",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "ba6ad34a462e3c5e1377b906318cc9744fa842d632f28ae4c0f6dc50c603e71d"
+    },
+    "https://nether.wowhead.com/tooltip/item/242289": {
+      "kind": "tooltip",
+      "spec_ids": [
+        266
+      ],
+      "sha256": "8383e268c338627f55c426a6b22e7a6e0617ad79e3e7e84ac25fcd8975568f92"
+    },
+    "https://nether.wowhead.com/tooltip/item/242747": {
+      "kind": "tooltip",
+      "spec_ids": [
+        253,
+        254,
+        1468
+      ],
+      "sha256": "76eea704748b521b0151a12fa526571a82f7cbbd14fcb90c4e1041e415fcf317"
+    },
+    "https://nether.wowhead.com/tooltip/item/243733": {
+      "kind": "tooltip",
+      "spec_ids": [
+        105,
+        253,
+        254
+      ],
+      "sha256": "14bb42edf526ae76455954135ae544207fd34f3079aff7fa2d825190404d17ef"
+    },
+    "https://nether.wowhead.com/tooltip/item/243734": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        70,
+        71,
+        72,
+        73,
+        102,
+        103,
+        104,
+        250,
+        251,
+        252,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262,
+        265,
+        266,
+        267,
+        268,
+        269,
+        270,
+        577,
+        581,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "b9d6d7788f9edd617710c6469530b58a088714635c27872c0e70c1511f10aeae"
+    },
+    "https://nether.wowhead.com/tooltip/item/243948": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        66,
+        104,
+        256,
+        257,
+        267,
+        270,
+        581
+      ],
+      "sha256": "815858fad73bdf730b7b7bbcf58bcaeeaf959e3b599b0303f78d38191337931c"
+    },
+    "https://nether.wowhead.com/tooltip/item/243950": {
+      "kind": "tooltip",
+      "spec_ids": [
+        263
+      ],
+      "sha256": "24cceb89f43b2e78f9ba8e60abac72fc7369bd4b7ef6240bef4f350e40ee5095"
+    },
+    "https://nether.wowhead.com/tooltip/item/243951": {
+      "kind": "tooltip",
+      "spec_ids": [
+        73,
+        102,
+        103,
+        105,
+        255,
+        259,
+        260,
+        264,
+        268,
+        1468
+      ],
+      "sha256": "2bff1564ef48f1d155a709cde9f4e6db9064df41f543b9bb48d1a3b4ea3e9717"
+    },
+    "https://nether.wowhead.com/tooltip/item/243952": {
+      "kind": "tooltip",
+      "spec_ids": [
+        253,
+        254
+      ],
+      "sha256": "f0f11f9674292f793c412181249a5cab8f339320e87dc1f3dc58ca50c6b4635f"
+    },
+    "https://nether.wowhead.com/tooltip/item/243953": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        70,
+        71,
+        72,
+        102,
+        250,
+        256,
+        257,
+        261,
+        262,
+        265,
+        266,
+        269,
+        577,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "6947688b9fd3aad5a31c876ac1b6e2384b88cc4a7f0c68f836043b66ae20e2c2"
+    },
+    "https://nether.wowhead.com/tooltip/item/243956": {
+      "kind": "tooltip",
+      "spec_ids": [
+        254,
+        258
+      ],
+      "sha256": "da66dd5597af3b0f75cb179541969293a02e591be1369cc561518997e91d55d3"
+    },
+    "https://nether.wowhead.com/tooltip/item/243957": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        70,
+        71,
+        72,
+        73,
+        102,
+        103,
+        250,
+        252,
+        259,
+        260,
+        261,
+        262,
+        263,
+        265,
+        266,
+        267,
+        268,
+        269,
+        577,
+        1467,
+        1480
+      ],
+      "sha256": "f73d63d8423f8561c7194a05bb6c0eff16e5172275f3b85a0d2c81034f8a1338"
+    },
+    "https://nether.wowhead.com/tooltip/item/243959": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        251,
+        253,
+        255,
+        1468,
+        1473
+      ],
+      "sha256": "a5eaff7fc2c8ae7fa7785a9dc0c674d993fa8f8fa77302b79be069f1fc2c3bb9"
+    },
+    "https://nether.wowhead.com/tooltip/item/243961": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251,
+        252
+      ],
+      "sha256": "a1364a0b687a7d83dbc98ad3de9a83f01df30b29601ba8d465ba0706811d0370"
+    },
+    "https://nether.wowhead.com/tooltip/item/243962": {
+      "kind": "tooltip",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "6b5ac57c7ed68d576d52efa9acca8052e47854f190f8e20c8d3f2c5293a2d02f"
+    },
+    "https://nether.wowhead.com/tooltip/item/243963": {
+      "kind": "tooltip",
+      "spec_ids": [
+        266
+      ],
+      "sha256": "bfd05e7a5fe79afa173745c2d876cfa9399ce30ad3d8fcb7d1cc958916a7fc27"
+    },
+    "https://nether.wowhead.com/tooltip/item/243971": {
+      "kind": "tooltip",
+      "spec_ids": [
+        264,
+        266
+      ],
+      "sha256": "8e2fe87fd115c4ef221e5025fa027c9fb936f629cd7bf80d9282c2780ab429a5"
+    },
+    "https://nether.wowhead.com/tooltip/item/243973": {
+      "kind": "tooltip",
+      "spec_ids": [
+        72,
+        73,
+        258,
+        259,
+        581
+      ],
+      "sha256": "417967ed04a12227722a63c410d848b7fc89bb362098eed166ec57a4b8a798fc"
+    },
+    "https://nether.wowhead.com/tooltip/item/243975": {
+      "kind": "tooltip",
+      "spec_ids": [
+        255
+      ],
+      "sha256": "d91106388ce02ffdc735681fd324a094977060b8c117742628a563869847bb31"
+    },
+    "https://nether.wowhead.com/tooltip/item/243976": {
+      "kind": "tooltip",
+      "spec_ids": [
+        263
+      ],
+      "sha256": "ffe8f3d6eaa44b9b9ee0ac24a484dac23f1819b06c4ef47c7ade6db31a8b4643"
+    },
+    "https://nether.wowhead.com/tooltip/item/243977": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        66,
+        70,
+        71,
+        72,
+        73,
+        102,
+        103,
+        104,
+        105,
+        250,
+        251,
+        252,
+        253,
+        254,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262,
+        264,
+        265,
+        266,
+        267,
+        268,
+        269,
+        577,
+        581,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "5952dc436236081ae738e2fe84078af76e19b7b7d1f3f7b89288ae38909c5b06"
+    },
+    "https://nether.wowhead.com/tooltip/item/243981": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251,
+        252,
+        258
+      ],
+      "sha256": "f45365b951b42999908e0c745c0ef96f320b2e94f8d9df503bd39532aba2812d"
+    },
+    "https://nether.wowhead.com/tooltip/item/243983": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        66,
+        102,
+        103,
+        104,
+        105,
+        255,
+        259,
+        260,
+        263,
+        264,
+        267,
+        268,
+        270,
+        581,
+        1468
+      ],
+      "sha256": "3a0b7b27990bd3aa23a78f4f6d550d2b13992662c1c493739429d444fb6df2aa"
+    },
+    "https://nether.wowhead.com/tooltip/item/243987": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251,
+        257,
+        264
+      ],
+      "sha256": "5f7d65e0a7ae7a42034bfc9c6181c014091e92917939db87f6248fa9a5191a70"
+    },
+    "https://nether.wowhead.com/tooltip/item/243989": {
+      "kind": "tooltip",
+      "spec_ids": [
+        71,
+        72
+      ],
+      "sha256": "1be92d6388e9cc3af5bdec9d26582f615a745e1978d671db84bc40f6120dc7da"
+    },
+    "https://nether.wowhead.com/tooltip/item/243990": {
+      "kind": "tooltip",
+      "spec_ids": [
+        253,
+        254,
+        265
+      ],
+      "sha256": "e49cd49a4e321456061a0aa316266573b4ff7def3926ef969db3ce0a9d729882"
+    },
+    "https://nether.wowhead.com/tooltip/item/243991": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        70,
+        102,
+        103,
+        250,
+        256,
+        257,
+        261,
+        262,
+        269,
+        577,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "852df38db7980b0d319ae92b41e3dc0a3b0e0d42250950a37e1bd28af0cf0638"
+    },
+    "https://nether.wowhead.com/tooltip/item/244003": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        256,
+        257,
+        270,
+        1468
+      ],
+      "sha256": "04d28837942509e1b49f5e8e932ec300489c0ca2c78cb681804b4da91153ec31"
+    },
+    "https://nether.wowhead.com/tooltip/item/244005": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        70,
+        250,
+        256,
+        257,
+        262,
+        269
+      ],
+      "sha256": "0675441e63ac410227f75d050a1fe77bcb56346ad98011ffc67f96b9fc9ea653"
+    },
+    "https://nether.wowhead.com/tooltip/item/244007": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        64,
+        71,
+        72,
+        102,
+        103,
+        253,
+        254,
+        261,
+        265,
+        266,
+        577,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "b06e3d9a614c78f2e5f2b60c867c8ce239a11f6dcbf0797dfa82ad7836ba004b"
+    },
+    "https://nether.wowhead.com/tooltip/item/244008": {
+      "kind": "tooltip",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "c0ceb110a1878936770d07fb23abf09d9cda77a11f04c31a92819d494c4fe9cb"
+    },
+    "https://nether.wowhead.com/tooltip/item/244009": {
+      "kind": "tooltip",
+      "spec_ids": [
+        73,
+        251,
+        252
+      ],
+      "sha256": "cf99dda1a35c70de9d1b1d0140fd62a4ddfdbf61c667724d7d115e78f026d85b"
+    },
+    "https://nether.wowhead.com/tooltip/item/244015": {
+      "kind": "tooltip",
+      "spec_ids": [
+        66,
+        73,
+        104,
+        105,
+        256,
+        270,
+        581
+      ],
+      "sha256": "8718baa88ed6c6991e39f83a16b1c397716112f8c8ee9e5866cda7dacc819557"
+    },
+    "https://nether.wowhead.com/tooltip/item/244021": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        66,
+        73,
+        103,
+        104,
+        105,
+        255,
+        256,
+        257,
+        259,
+        260,
+        263,
+        264,
+        267,
+        268,
+        270,
+        581,
+        1468
+      ],
+      "sha256": "17c2fefd9072027e9a43f33e5165190675a4d113d60be086092570a120735c98"
+    },
+    "https://nether.wowhead.com/tooltip/item/244029": {
+      "kind": "tooltip",
+      "spec_ids": [
+        63,
+        64,
+        65,
+        66,
+        73,
+        102,
+        104,
+        105,
+        254,
+        255,
+        256,
+        257,
+        260,
+        261,
+        265,
+        267,
+        268,
+        270,
+        1467,
+        1468
+      ],
+      "sha256": "aaa2c0b42fd6becc713da444ebd42dbbd195d9cfdc12aa9d7dfb1fb3dc5a6ab2"
+    },
+    "https://nether.wowhead.com/tooltip/item/244031": {
+      "kind": "tooltip",
+      "spec_ids": [
+        70,
+        72,
+        258,
+        261,
+        269,
+        1473
+      ],
+      "sha256": "ccb2a3cd32f8d88019448a9988edd66f3a8a75448b58e603ef1ee75d205b6df3"
+    },
+    "https://nether.wowhead.com/tooltip/item/244640": {
+      "kind": "tooltip",
+      "spec_ids": [
+        253,
+        254,
+        263
+      ],
+      "sha256": "6af24ef7827c43e36c7bc4cfbfff40082467e4a27b7b2bee19e685bc64df1242"
+    },
+    "https://nether.wowhead.com/tooltip/item/244641": {
+      "kind": "tooltip",
+      "spec_ids": [
+        66,
+        70,
+        73,
+        103,
+        104,
+        250,
+        251,
+        252,
+        255,
+        259,
+        260,
+        261,
+        268,
+        269,
+        577,
+        581
+      ],
+      "sha256": "39e2e8f3538380846fde659017d8e13c376266442ac33154fd8c536cf2530814"
+    },
+    "https://nether.wowhead.com/tooltip/item/244643": {
+      "kind": "tooltip",
+      "spec_ids": [
+        71,
+        72
+      ],
+      "sha256": "9608e119ae91f2b5a043d142ad92bc97ecc78f469c4b41013b02ab45645346a2"
+    },
+    "https://nether.wowhead.com/tooltip/item/255845": {
+      "kind": "tooltip",
+      "spec_ids": [
+        66,
+        71,
+        72,
+        73,
+        104,
+        255,
+        259,
+        262,
+        268,
+        269,
+        1467,
+        1473
+      ],
+      "sha256": "ed17872201198455d60dae89bb17b6a5d2177822901e19289dbf6c2996e5ed00"
+    },
+    "https://nether.wowhead.com/tooltip/item/255846": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        66,
+        73,
+        103,
+        104,
+        105,
+        250,
+        251,
+        252,
+        259,
+        260,
+        268,
+        269,
+        577,
+        1467,
+        1473,
+        1480
+      ],
+      "sha256": "201d98757ca17930c88c1e2758b03d0b5c6857329ea3af62c14d9c7d73779571"
+    },
+    "https://nether.wowhead.com/tooltip/item/255847": {
+      "kind": "tooltip",
+      "spec_ids": [
+        102
+      ],
+      "sha256": "f88fc6bbc674007d22066b0aa3d54b4cfbb6fa12de50d033f93c3aa5a3a582c5"
+    },
+    "https://nether.wowhead.com/tooltip/item/259085": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        66,
+        70,
+        103,
+        104,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        259,
+        260,
+        261,
+        262,
+        263,
+        264,
+        265,
+        266,
+        267,
+        269,
+        270,
+        577,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "62b922e2415da07ada9aefb70e43d38267a8f3b1ea6a23cb5ee2d90330310985"
+    },
+    "https://nether.wowhead.com/tooltip/item/266985": {
+      "kind": "tooltip",
+      "spec_ids": [
+        65,
+        264,
+        270,
+        1468
+      ],
+      "sha256": "41e5cd8b1264aa00c8ab199190e6ff8c42f24cbfdbdf9b21819993acd1277158"
+    },
+    "https://nether.wowhead.com/tooltip/item/266996": {
+      "kind": "tooltip",
+      "spec_ids": [
+        270
+      ],
+      "sha256": "ce432b75a5bd40bb39c0b8d6de53198dbd5e46f129561eaed3c59d7f0433c392"
+    },
+    "https://nether.wowhead.com/tooltip/item/271884": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        63,
+        64,
+        65,
+        66,
+        71,
+        72,
+        102,
+        103,
+        104,
+        105,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255,
+        256,
+        257,
+        258,
+        260,
+        261,
+        262,
+        265,
+        267,
+        269,
+        270,
+        577,
+        1467,
+        1468,
+        1473,
+        1480
+      ],
+      "sha256": "375c862b9b12d523beb1430aacd93eb89b916209285eb61302d3505442ffad03"
+    },
+    "https://nether.wowhead.com/tooltip/item/271887": {
+      "kind": "tooltip",
+      "spec_ids": [
+        253
+      ],
+      "sha256": "ceb637355a24c1cdba172ac8e7e30c2d8b7474d37a3c4ba88409b9ba3d52b9ab"
+    },
+    "https://nether.wowhead.com/tooltip/item/273072": {
+      "kind": "tooltip",
+      "spec_ids": [
+        62,
+        70,
+        71,
+        103,
+        253,
+        262,
+        263,
+        577,
+        1480
+      ],
+      "sha256": "5fbd752b152dfd5e889e0d3047810f59f9b6fd0d929ef7ae368c11e8ee755997"
+    },
+    "https://nether.wowhead.com/tooltip/spell/326801": {
+      "kind": "tooltip",
+      "spec_ids": [
+        250
+      ],
+      "sha256": "89838806b6dd9c04a8f9181ce1ffcbc90fd123bdec3ea4d7eb96d1e08e3a7bae"
+    },
+    "https://nether.wowhead.com/tooltip/spell/327082": {
+      "kind": "tooltip",
+      "spec_ids": [
+        252
+      ],
+      "sha256": "d5524d14ada87598e3972fe98ece6fcee9af3c48a6f1f3836abadb1b076992a7"
+    },
+    "https://nether.wowhead.com/tooltip/spell/433568": {
+      "kind": "tooltip",
+      "spec_ids": [
+        66
+      ],
+      "sha256": "e676db53034bc072cd97da42f1860e436405d415a285bba50a6f638cb3856dec"
+    },
+    "https://nether.wowhead.com/tooltip/spell/53343": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251
+      ],
+      "sha256": "71ca4a37e98728df18889db91bd94cbe47abaae17d9e2437f8cc8ba86c19ce9b"
+    },
+    "https://nether.wowhead.com/tooltip/spell/53344": {
+      "kind": "tooltip",
+      "spec_ids": [
+        250,
+        251
+      ],
+      "sha256": "4e1366aa99a1f8a18817c0b065cd385badc3c2e21cf7c81f133a22fcabb93366"
+    },
+    "https://nether.wowhead.com/tooltip/spell/62158": {
+      "kind": "tooltip",
+      "spec_ids": [
+        251
+      ],
+      "sha256": "9601916a3a8f8f209fa65d77cec108c2cad3ec22ae64f8c1b124a9985ee68ee0"
+    },
+    "https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11": {
+      "kind": "seasons",
+      "spec_ids": [],
+      "sha256": "e18d797685a14410d9081afdb9ae7db69df5bc75ce2c1b7bab70041da5b503ea"
+    },
+    "https://www.icy-veins.com/wow/affliction-warlock-pve-dps-gems-enchants-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        265
+      ],
+      "error": "HTTP 403"
+    },
+    "https://www.icy-veins.com/wow/blood-death-knight-pve-tank-gems-enchants-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        250
+      ],
+      "error": "HTTP 403"
+    },
+    "https://www.icy-veins.com/wow/demonology-warlock-pve-dps-gems-enchants-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        266
+      ],
+      "error": "HTTP 403"
+    },
+    "https://www.icy-veins.com/wow/subtlety-rogue-pve-dps-gems-enchants-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        261
+      ],
+      "error": "HTTP 403"
+    },
+    "https://www.kalamazi.gg/guides/affliction": {
+      "kind": "guide",
+      "spec_ids": [
+        265
+      ],
+      "error": "No usable guide body; access challenge or layout change"
+    },
+    "https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        265
+      ],
+      "sha256": "42c7e65329d5316d1fe6e6c07159a3a4be8318ec9652d781ccd81113abc5018f"
+    },
+    "https://www.method.gg/guides/arcane-mage/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        62
+      ],
+      "sha256": "149b461de5ab366ce72f36bb820718827a8291afea2468352741520b14085069"
+    },
+    "https://www.method.gg/guides/arms-warrior/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        71
+      ],
+      "sha256": "e17d36819efadbe180508d57626668f472a4e442548da5599f72f958f18781dd"
+    },
+    "https://www.method.gg/guides/assassination-rogue/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        259
+      ],
+      "sha256": "966b7be3b5cc333ecce825d305b73be07ac8f64395221085fe63a1eab71b0370"
+    },
+    "https://www.method.gg/guides/augmentation-evoker/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        1473
+      ],
+      "sha256": "6be4b1d4ef525a603745ffdfccb38738017f69102f963b8cc51a18a1dd395322"
+    },
+    "https://www.method.gg/guides/balance-druid/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        102
+      ],
+      "sha256": "ba48341ceab93fbd73661c09cea81ac9b3f021ddca55616ced52f61cc1ba5eae"
+    },
+    "https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        253
+      ],
+      "sha256": "f882b5a7baf602168be6b818f5f4ef6f5c071ac3c2290cad108d4537780bd42d"
+    },
+    "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        250
+      ],
+      "sha256": "1459ea3e87023a3b884b6e5f07c08f9a60579ed4e621272e37c2f51aba33ee0c"
+    },
+    "https://www.method.gg/guides/brewmaster-monk/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        268
+      ],
+      "sha256": "855e93dda0e3dad64670b7c9e9a0294e5fd104921416c3ef3b82a14e1414d907"
+    },
+    "https://www.method.gg/guides/demonology-warlock/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        266
+      ],
+      "sha256": "e98e0c51488eb1f2c0de07b18d47538398a084a7a675b6488baa3508945e4258"
+    },
+    "https://www.method.gg/guides/destruction-warlock/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        267
+      ],
+      "sha256": "0dc3563f70fb7bdb2a15e5ef770c1ce403735309689321d20807e1d456f5a893"
+    },
+    "https://www.method.gg/guides/devastation-evoker/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        1467
+      ],
+      "sha256": "edf443a196cdff1f17bf3ab35994c31754f3fa07df318c3fd23335f97b8dac47"
+    },
+    "https://www.method.gg/guides/devourer-demon-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        1480
+      ],
+      "sha256": "cadbfd727200721800e94d66e29b9976e77ca878f7b461546d1f90685a57eadb"
+    },
+    "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        256
+      ],
+      "sha256": "200526321395ee14b6ef5f63c8de359cafa4ebb40d7a4f54477aae67818b7093"
+    },
+    "https://www.method.gg/guides/elemental-shaman/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        253,
+        262
+      ],
+      "sha256": "501a31fa6eeccf42bf8ca1c04cb875a56a33feb8863358cfa8af902842899f74"
+    },
+    "https://www.method.gg/guides/enhancement-shaman/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        263
+      ],
+      "sha256": "4201113681f80de818760de5660aa7cdda4b2c3f0a9566d31a2f5dec082148e4"
+    },
+    "https://www.method.gg/guides/feral-druid/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        103
+      ],
+      "sha256": "98d07419b50824a9e701380a98d7cc8f3cee72cf5e33689a3ef50f02d7fdfb91"
+    },
+    "https://www.method.gg/guides/fire-mage/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        63
+      ],
+      "sha256": "9ae4aca4c5063cb07c98b453e7d1727a60247135de61f5ced42030609ae38ba8"
+    },
+    "https://www.method.gg/guides/frost-death-knight/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        251
+      ],
+      "sha256": "3e34f5f68441f78d52ef29d0daeee80c998a2db6bed84895a55a34cf8267b3eb"
+    },
+    "https://www.method.gg/guides/frost-death-knight/talents": {
+      "kind": "guide",
+      "spec_ids": [
+        251
+      ],
+      "sha256": "d68ea52e24c0055342905da6b3da4efdd8b0a3ab12da1a38eef07e98952d61eb"
+    },
+    "https://www.method.gg/guides/frost-mage/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        64
+      ],
+      "sha256": "b395169026582ad5c87496fa2784929a17a25a26eedcc9f5a3ef9723a2aa7603"
+    },
+    "https://www.method.gg/guides/fury-warrior/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        72
+      ],
+      "sha256": "f51ecc545296e5df71e9413a2e84ad89e26a7dbe9ff1b686c3709e7328b07b07"
+    },
+    "https://www.method.gg/guides/guardian-druid/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        104
+      ],
+      "sha256": "8a0ded0192654dd6f8c1c1575770cc6f29697cd9d47526facf9e488fd04d078f"
+    },
+    "https://www.method.gg/guides/havoc-demon-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        577
+      ],
+      "sha256": "fa1d254a779eff46c4e80de73eb493a98b286a7729e4c17d30582f4e6c0bf2f2"
+    },
+    "https://www.method.gg/guides/holy-paladin/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        65
+      ],
+      "sha256": "2aa953a97b695441b569f5fbea406785119b5ed4749bf562a74eb4cefb41c026"
+    },
+    "https://www.method.gg/guides/holy-priest/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        257
+      ],
+      "sha256": "1cdbeb41b98c446fe4e400e19d55c999993c6a595b1485b24dadadca583d64c3"
+    },
+    "https://www.method.gg/guides/marksmanship-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        254
+      ],
+      "sha256": "edc027532f68d2aae69fb7fa71018a3e63344451dc612e68de0102b1946da064"
+    },
+    "https://www.method.gg/guides/mistweaver-monk/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        270
+      ],
+      "sha256": "786e577c57d6d4a963fbff8a8e0bc23a74c755b556a2a8a11aa75c1a1e293de3"
+    },
+    "https://www.method.gg/guides/outlaw-rogue/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        260
+      ],
+      "sha256": "30fe35704def4d4178ae2d4e8f6830203ebcf32080c6534e28d9d2729607101e"
+    },
+    "https://www.method.gg/guides/preservation-evoker/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        1468
+      ],
+      "sha256": "41855f8d26587cf2b33284c1217524b8bbce984410d44a6c549555619946ea05"
+    },
+    "https://www.method.gg/guides/protection-paladin/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        66
+      ],
+      "sha256": "266640d9c806fe9e174dff9ad7dffee3f299921e58b32db5d0706f09311a6f3c"
+    },
+    "https://www.method.gg/guides/protection-warrior/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        73
+      ],
+      "sha256": "939d8dc128d969260860d7c175cf4e681a877527a95e72a97b82f2c1507b97af"
+    },
+    "https://www.method.gg/guides/restoration-druid/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        105
+      ],
+      "sha256": "103ce7f4cf322bc5be7aa3c046904cc44a008b25c9857bd7466a4a2160994346"
+    },
+    "https://www.method.gg/guides/restoration-shaman/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        264
+      ],
+      "sha256": "e1a26d4f4e162d7609803868084c91c9686cf3b4583887bc7f1a1d0a43eb64b4"
+    },
+    "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        70
+      ],
+      "sha256": "78ebff9d00fed6fded3d6f6739c7aaa2755ca3342caaa05f4c1070e026f0c6aa"
+    },
+    "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "2e5756b8c60004f69fe103a406daf8bba47bde50b4d42ac482b9277be1ad1900"
+    },
+    "https://www.method.gg/guides/subtlety-rogue/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        261
+      ],
+      "sha256": "db0b73a755c2aa1296ad18b1aa522dd8c9693a89e62e81e1e3be80b13696a260"
+    },
+    "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        253,
+        254,
+        255
+      ],
+      "sha256": "59a868b9029548f176310ba47717df606a4bc4d8ba4040a6447f44efded382b5"
+    },
+    "https://www.method.gg/guides/unholy-death-knight/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        252
+      ],
+      "sha256": "10dd44c043d9137502704c7e3cc5e58390781cca8e319132b31f54d8c15372df"
+    },
+    "https://www.method.gg/guides/vengeance-demon-hunter/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        581
+      ],
+      "sha256": "032fb68d1a984cb952684e1e7577014cc82c93db5ddef4bef0c17b67ba27fa8e"
+    },
+    "https://www.method.gg/guides/windwalker-monk/stats-races-and-consumables": {
+      "kind": "guide",
+      "spec_ids": [
+        269
+      ],
+      "sha256": "89847830f30ada9ba24833bf264b54905bafaa7ac67c3beb35a8b5b7397d3253"
+    },
+    "https://www.raidbots.com/static/data/live/talents.json": {
+      "kind": "roster",
+      "spec_ids": [],
+      "sha256": "9ca5ec7055f7cc67bbd334921086c563168e3b0207b4744c51c0191f43180925"
+    }
+  }
+}

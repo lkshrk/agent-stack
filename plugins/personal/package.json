@@ -1,0 +1,12 @@
+{
+  "name": "personal",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "skills:sync": "bun scripts/sync_skill_references.ts",
+    "skills:sync:check": "bun scripts/sync_skill_references.ts --check"
+  }
+}

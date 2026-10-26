@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "game": "retail",
+  "expansion": "Midnight",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "roster_source": "https://www.raidbots.com/static/data/live/talents.json",
+  "season_source": "https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11",
+  "spec_count": 40,
+  "catalogue_record_count": 90,
+  "coverage": "All current Retail specs have guide-backed stat, gem, enchant and consumable records. Conditional choices and unknown quality/cooldown restrictions are preserved in each record.",
+  "specs": [
+    {
+      "spec_id": 250,
+      "class": "Death Knight",
+      "spec": "Blood",
+      "file": "spec-250.json"
+    },
+    {
+      "spec_id": 251,
+      "class": "Death Knight",
+      "spec": "Frost",
+      "file": "spec-251.json"
+    },
+    {
+      "spec_id": 252,
+      "class": "Death Knight",
+      "spec": "Unholy",
+      "file": "spec-252.json"
+    },
+    {
+      "spec_id": 1480,
+      "class": "Demon Hunter",
+      "spec": "Devourer",
+      "file": "spec-1480.json"
+    },
+    {
+      "spec_id": 577,
+      "class": "Demon Hunter",
+      "spec": "Havoc",
+      "file": "spec-577.json"
+    },
+    {
+      "spec_id": 581,
+      "class": "Demon Hunter",
+      "spec": "Vengeance",
+      "file": "spec-581.json"
+    },
+    {
+      "spec_id": 102,
+      "class": "Druid",
+      "spec": "Balance",
+      "file": "spec-102.json"
+    },
+    {
+      "spec_id": 103,
+      "class": "Druid",
+      "spec": "Feral",
+      "file": "spec-103.json"
+    },
+    {
+      "spec_id": 104,
+      "class": "Druid",
+      "spec": "Guardian",
+      "file": "spec-104.json"
+    },
+    {
+      "spec_id": 105,
+      "class": "Druid",
+      "spec": "Restoration",
+      "file": "spec-105.json"
+    },
+    {
+      "spec_id": 1473,
+      "class": "Evoker",
+      "spec": "Augmentation",
+      "file": "spec-1473.json"
+    },
+    {
+      "spec_id": 1467,
+      "class": "Evoker",
+      "spec": "Devastation",
+      "file": "spec-1467.json"
+    },
+    {
+      "spec_id": 1468,
+      "class": "Evoker",
+      "spec": "Preservation",
+      "file": "spec-1468.json"
+    },
+    {
+      "spec_id": 253,
+      "class": "Hunter",
+      "spec": "Beast Mastery",
+      "file": "spec-253.json"
+    },
+    {
+      "spec_id": 254,
+      "class": "Hunter",
+      "spec": "Marksmanship",
+      "file": "spec-254.json"
+    },
+    {
+      "spec_id": 255,
+      "class": "Hunter",
+      "spec": "Survival",
+      "file": "spec-255.json"
+    },
+    {
+      "spec_id": 62,
+      "class": "Mage",
+      "spec": "Arcane",
+      "file": "spec-62.json"
+    },
+    {
+      "spec_id": 63,
+      "class": "Mage",
+      "spec": "Fire",
+      "file": "spec-63.json"
+    },
+    {
+      "spec_id": 64,
+      "class": "Mage",
+      "spec": "Frost",
+      "file": "spec-64.json"
+    },
+    {
+      "spec_id": 268,
+      "class": "Monk",
+      "spec": "Brewmaster",
+      "file": "spec-268.json"
+    },
+    {
+      "spec_id": 270,
+      "class": "Monk",
+      "spec": "Mistweaver",
+      "file": "spec-270.json"
+    },
+    {
+      "spec_id": 269,
+      "class": "Monk",
+      "spec": "Windwalker",
+      "file": "spec-269.json"
+    },
+    {
+      "spec_id": 65,
+      "class": "Paladin",
+      "spec": "Holy",
+      "file": "spec-65.json"
+    },
+    {
+      "spec_id": 66,
+      "class": "Paladin",
+      "spec": "Protection",
+      "file": "spec-66.json"
+    },
+    {
+      "spec_id": 70,
+      "class": "Paladin",
+      "spec": "Retribution",
+      "file": "spec-70.json"
+    },
+    {
+      "spec_id": 256,
+      "class": "Priest",
+      "spec": "Discipline",
+      "file": "spec-256.json"
+    },
+    {
+      "spec_id": 257,
+      "class": "Priest",
+      "spec": "Holy",
+      "file": "spec-257.json"
+    },
+    {
+      "spec_id": 258,
+      "class": "Priest",
+      "spec": "Shadow",
+      "file": "spec-258.json"
+    },
+    {
+      "spec_id": 259,
+      "class": "Rogue",
+      "spec": "Assassination",
+      "file": "spec-259.json"
+    },
+    {
+      "spec_id": 260,
+      "class": "Rogue",
+      "spec": "Outlaw",
+      "file": "spec-260.json"
+    },
+    {
+      "spec_id": 261,
+      "class": "Rogue",
+      "spec": "Subtlety",
+      "file": "spec-261.json"
+    },
+    {
+      "spec_id": 262,
+      "class": "Shaman",
+      "spec": "Elemental",
+      "file": "spec-262.json"
+    },
+    {
+      "spec_id": 263,
+      "class": "Shaman",
+      "spec": "Enhancement",
+      "file": "spec-263.json"
+    },
+    {
+      "spec_id": 264,
+      "class": "Shaman",
+      "spec": "Restoration",
+      "file": "spec-264.json"
+    },
+    {
+      "spec_id": 265,
+      "class": "Warlock",
+      "spec": "Affliction",
+      "file": "spec-265.json"
+    },
+    {
+      "spec_id": 266,
+      "class": "Warlock",
+      "spec": "Demonology",
+      "file": "spec-266.json"
+    },
+    {
+      "spec_id": 267,
+      "class": "Warlock",
+      "spec": "Destruction",
+      "file": "spec-267.json"
+    },
+    {
+      "spec_id": 71,
+      "class": "Warrior",
+      "spec": "Arms",
+      "file": "spec-71.json"
+    },
+    {
+      "spec_id": 72,
+      "class": "Warrior",
+      "spec": "Fury",
+      "file": "spec-72.json"
+    },
+    {
+      "spec_id": 73,
+      "class": "Warrior",
+      "spec": "Protection",
+      "file": "spec-73.json"
+    }
+  ]
+}
