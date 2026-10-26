@@ -62,6 +62,9 @@ RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
 COPY images/omnigent-host/bin/ /opt/agent/bin/
 COPY images/omnigent-host/claude/ /opt/agent/claude-home/
 COPY images/omnigent-host/codex/ /opt/agent/codex-home/
+COPY .claude-plugin/ /opt/agent/marketplace/.claude-plugin/
+COPY .agents/ /opt/agent/marketplace/.agents/
+COPY plugins/ /opt/agent/marketplace/plugins/
 COPY images/omnigent-host/profile.d/agent-home.sh /etc/profile.d/zz-agent-home.sh
 COPY images/omnigent-host/gitconfig /etc/gitconfig.d/agent
 RUN chmod 0755 /opt/agent/bin/* \

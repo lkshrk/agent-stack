@@ -18,7 +18,7 @@ git -C "$official" checkout --quiet 465f09344424225c25d438f2e052732c3d688d2f
 
 add_pinned mksglu/context-mode 442f1eb6c7cdad3f0cb2411d00756f9e5cf2b587
 
-add_pinned lkshrk/agent-marketplace 5eaef5ad5677a53b9830b30f1fd0c3bf8d741a68
+claude plugin marketplace add /opt/agent/marketplace
 
 for plugin in \
   typescript-lsp@claude-plugins-official \
@@ -28,7 +28,7 @@ for plugin in \
   kotlin-lsp@claude-plugins-official \
   lua-lsp@claude-plugins-official \
   swift-lsp@claude-plugins-official \
-  useful-skills@lkshrk \
+  runner@agent-stack \
   context-mode@context-mode; do
   claude plugin install "$plugin" --scope user
 done
