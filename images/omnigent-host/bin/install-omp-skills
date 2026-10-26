@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Build-time only: assembles the omp skill set into $1, mirroring the workstation's shared-skill deployment.
+set -euo pipefail
+
+dest=$1
+mkdir -p "$dest"
+
+fetch() {
+  local repo=$1 sha=$2 dir
+  dir=$(mktemp -d)
+  git clone --quiet --filter=blob:none "https://github.com/${repo}.git" "$dir"
+  git -C "$dir" checkout --quiet "$sha"
+  printf '%s' "$dir"
+}
+
+ponytail=$(fetch DietrichGebert/ponytail 09c434ab73ca43761c5d8b0c5d341926c2fba710)
+shiplight=$(fetch ShiplightAI/agent-skills-v2 98b77bd5b69f9848f535602628e2f800711a438c)
+context_mode=$(fetch mksglu/context-mode 442f1eb6c7cdad3f0cb2411d00756f9e5cf2b587)
+
+copy_skills() {
+  local skill
+  for skill in "$1"/*/; do
+    [ -f "$skill/SKILL.md" ] && cp -a "${skill%/}" "$dest/"
+  done
+  return 0
+}
+
+copy_skills "$ponytail/skills"
+cp -a "$shiplight/shiplight" "$dest/shiplight"
+copy_skills "$context_mode/skills"
+for plugin in linear personal runner; do
+  copy_skills "/opt/agent/marketplace/plugins/$plugin/skills"
+done
+
+rm -rf "$ponytail" "$shiplight" "$context_mode"

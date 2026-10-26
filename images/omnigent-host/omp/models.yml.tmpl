@@ -1,0 +1,20 @@
+providers:
+  local-agents:
+    baseUrl: ${LITELLM_BASE_URL}
+    apiKey: LITELLM_API_KEY
+    auth: apiKey
+    authHeader: true
+    api: openai-completions
+    discovery:
+      type: litellm
+    modelOverrides:
+      claude-opus:
+        api: anthropic-messages
+      claude-sonnet:
+        api: anthropic-messages
+      claude-sonnet-high:
+        api: anthropic-messages
+      claude-haiku:
+        api: anthropic-messages
+      claude-fable:
+        api: anthropic-messages

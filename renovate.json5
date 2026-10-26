@@ -31,6 +31,20 @@
     },
     {
       customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG OMP_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'npm',
+      depNameTemplate: '@oh-my-pi/pi-coding-agent',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG CONTEXT_MODE_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'npm',
+      depNameTemplate: 'context-mode',
+    },
+    {
+      customType: 'regex',
       description: 'GitHub release tools whose checksum must be updated by hand alongside the version',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
       matchStrings: [
@@ -81,6 +95,7 @@
       matchDepNames: [
         '@anthropic-ai/claude-code',
         '@openai/codex',
+        '@oh-my-pi/pi-coding-agent',
         'ghcr.io/omnigent-ai/omnigent-host',
         'ghcr.io/omnigent-ai/omnigent-server-kubernetes',
         'docker.io/nousresearch/hermes-agent',
