@@ -1,0 +1,83 @@
+name: build-image
+description: Build one image from images/<image>/Dockerfile and push it to GHCR outside pull requests
+
+inputs:
+  image:
+    description: Directory under images/, e.g. omnigent-host
+    required: true
+  version:
+    description: Release tag the image is published under, e.g. v1.2.3; empty for a SHA-tagged build
+    required: false
+    default: ""
+  token:
+    description: Token with packages write access
+    required: true
+  app:
+    description: h-cloud app a release deploys this image to; empty to skip the deploy
+    required: false
+    default: ""
+
+outputs:
+  digest:
+    description: Digest of the built image
+    value: ${{ steps.build.outputs.digest }}
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      if: github.event_name != 'pull_request'
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+    - name: Release version without the leading v, the runner tag the server image pins
+      id: version
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: echo "semver=${VERSION#v}" >>"$GITHUB_OUTPUT"
+    - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      id: meta
+      with:
+        images: ghcr.io/${{ github.repository }}/${{ inputs.image }}
+        tags: |
+          type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+          type=raw,value=latest,enable=${{ inputs.version != '' }}
+          type=sha,format=short
+    - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      id: build
+      with:
+        context: .
+        file: images/${{ inputs.image }}/Dockerfile
+        platforms: linux/amd64
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
+        cache-from: type=gha,scope=${{ inputs.image }}
+        cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+    - name: Create h-cloud deployment token
+      if: inputs.version != '' && inputs.app != ''
+      id: deploy-token
+      uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+      with:
+        domain: sts.h-cloud.io
+        scope: lkshrk
+        identity: h-cloud-dispatch
+    - name: Deploy released image through h-cloud
+      if: inputs.version != '' && inputs.app != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.deploy-token.outputs.token }}
+        APP: ${{ inputs.app }}
+        IMAGE: ghcr.io/${{ github.repository }}/${{ inputs.image }}
+        VERSION: ${{ inputs.version }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: |
+        jq -n --arg app "$APP" --arg image "$IMAGE" --arg tag "${VERSION#v}@${DIGEST}" \
+          '{event_type: "image-update", client_payload: {app: $app, image: $image, tag: $tag}}' \
+          | gh api --method POST repos/lkshrk/h-cloud/dispatches --input -
