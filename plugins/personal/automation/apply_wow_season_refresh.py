@@ -10,7 +10,7 @@ import re
 import subprocess
 from urllib.parse import urlparse
 
-from check_wow_season_updates import active_bundle, observe, refs, targets, watch_record
+from check_wow_season_updates import active_bundle, fingerprint, observe, refs, targets, watch_record
 from enrich_wow_catalog import enrich
 from prediff_wow_specs import classify, live_guides, needs_advance
 
@@ -57,10 +57,13 @@ def identity_checks(old, candidate):
         if not re.fullmatch(r'(item|spell):\d+', key):
             raise ValueError('Invalid changed catalogue key')
         url = 'https://nether.wowhead.com/tooltip/' + key.replace(':', '/')
-        response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True, check=True)
-        data = json.loads(response.stdout)
-        from check_wow_season_updates import fingerprint
-        checked[key] = {'name': data['name'], 'url': url, 'sha256': fingerprint('tooltip', response.stdout)}
+        response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True)
+        if response.returncode:
+            raise ValueError('Tooltip lookup failed for ' + key)
+        try:
+            checked[key] = {'name': json.loads(response.stdout)['name'], 'url': url, 'sha256': fingerprint('tooltip', response.stdout)}
+        except (ValueError, KeyError, TypeError):
+            raise ValueError('Tooltip for ' + key + ' is not usable') from None
     return checked
 
 
@@ -143,8 +146,7 @@ def validate(old, candidate, result, observation, checked=None):
     if any(url not in wanted for url in accepted):
         raise ValueError('Cannot accept an unrelated source')
     current_sources = copy.deepcopy(observation['current']['sources'])
-    # Replacement guides were not present during the pre-agent capture. Observe
-    # only accepted new citations, with spec ownership derived from the candidate.
+    # Replacement guides were absent from the pre-agent capture; observe accepted new citations.
     for url in dict.fromkeys(accepted):
         added_specs = set(wanted[url]['spec_ids']) - set(previous_targets.get(url, {}).get('spec_ids', []))
         if wanted[url]['kind'] == 'guide' and (url not in previous_targets or added_specs):
@@ -213,16 +215,28 @@ def drop_negligible(old, docs):
     return kept
 
 
+ENRICHABLE = ('effect', 'duration_seconds', 'cooldown_seconds', 'quality_rank')
+
+
+def catalogue_edit_allowed(before, after):
+    if before is None:
+        return True
+    changed = {k for k in before.keys() | after.keys() if before.get(k) != after.get(k)}
+    return all(k in ENRICHABLE and before.get(k) is None for k in changed)
+
+
 def merge_parts(old, parts):
-    """Combine independent per-spec Claude runs into one candidate bundle and one legacy-shaped result."""
+    """Combine per-spec Claude runs into one candidate bundle, a legacy-shaped result and the spec ids by outcome."""
     merged = copy.deepcopy(old)
     records = merged['catalog.json']['records']
-    accepted, unresolved, summaries, unchanged, updated = [], [], [], [], []
+    old_records = old['catalog.json']['records']
+    accepted, unresolved, summaries, touched = [], [], [], set()
+    by_outcome = {'unchanged': [], 'updated': [], 'unresolved': []}
     for result, candidate in parts:
         spec_id, name = result['spec_id'], f'spec-{result["spec_id"]}.json'
         if name not in old:
             raise ValueError('Result for an unknown spec: ' + name)
-        if result['outcome'] not in ['updated', 'unchanged', 'unresolved']:
+        if result['outcome'] not in by_outcome:
             raise ValueError('Unsupported per-spec outcome')
         for other, value in candidate.items():
             if other in [name, 'catalog.json']:
@@ -235,38 +249,67 @@ def merge_parts(old, parts):
         accepted += result['accepted_sources']
         unresolved += result['unresolved_sources']
         summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
+        by_outcome[result['outcome']].append(spec_id)
         if result['outcome'] == 'unresolved':
             continue
         for key, record in candidate['catalog.json']['records'].items():
-            if record == old['catalog.json']['records'].get(key):
+            if record == old_records.get(key):
                 continue
-            if key in records and records[key] != old['catalog.json']['records'].get(key) and records[key] != record:
+            if not catalogue_edit_allowed(old_records.get(key), record):
+                raise ValueError('Existing catalogue record may only gain enrichment fields: ' + key)
+            if key in touched and records[key] != record:
                 raise ValueError('Conflicting catalogue edits for ' + key)
             records[key] = record
+            touched.add(key)
         if result['outcome'] == 'updated':
             merged[name] = candidate[name]
-            updated.append(spec_id)
-        else:
-            before = {k: v for k, v in old[name].items() if k != 'unresolved'}
-            if {k: v for k, v in candidate[name].items() if k != 'unresolved'} != before:
-                raise ValueError('An unchanged outcome must not edit the spec: ' + name)
-            unchanged.append(spec_id)
+        elif {k: v for k, v in candidate[name].items() if k != 'unresolved'} != {k: v for k, v in old[name].items() if k != 'unresolved'}:
+            raise ValueError('An unchanged outcome must not edit the spec: ' + name)
     merged['index.json']['catalogue_record_count'] = len(records)
-    blocked = set(unresolved)
-    accepted = [url for url in dict.fromkeys(accepted) if url not in blocked]
+    accepted = [url for url in dict.fromkeys(accepted) if url not in set(unresolved)]
     result = {'status': 'partial' if unresolved else 'complete',
               'summary': '\n'.join(summaries) or 'No Claude runs were needed.',
               'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved))}
-    return merged, result, unchanged, updated
+    return merged, result, by_outcome
 
 
 def load_parts(directory):
-    parts = []
+    """Yield (spec_id, loaded part or None, failure reason or None) for every per-spec folder."""
+    loaded = []
     for folder in sorted(directory.iterdir()) if directory and directory.is_dir() else []:
-        result_file = folder / 'result.json'
-        if result_file.is_file() and (folder / 'candidate').is_dir():
-            parts.append((json.loads(result_file.read_text()), load_bundle(folder / 'candidate')))
-    return parts
+        number = re.search(r'(\d+)$', folder.name)
+        spec_id = int(number.group(1)) if number else None
+        try:
+            if not (folder / 'result.json').is_file() or not (folder / 'candidate').is_dir():
+                raise ValueError('Missing result or candidate')
+            result = json.loads((folder / 'result.json').read_text())
+            spec_id = result.get('spec_id', spec_id)
+            loaded.append((spec_id, (result, load_bundle(folder / 'candidate')), None))
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            loaded.append((spec_id, None, str(error)[:200]))
+    return loaded
+
+
+def accept_parts(old, loaded, observation):
+    """Validate every part on its own; a rejected part is dropped and its spec reported with the reason."""
+    good, rejected, checked = [], {}, {}
+    for spec_id, part, failure in loaded:
+        try:
+            if failure:
+                raise ValueError(failure)
+            merged, result, _ = merge_parts(old, [part])
+            proofs = identity_checks(old, merged)
+            seen = copy.deepcopy(observation)
+            for key, proof in proofs.items():
+                owners = [d['spec_id'] for n, d in merged.items() if n.startswith('spec-') and key in refs(d)]
+                seen['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
+            validate(old, merged, result, seen, proofs)
+        except (ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            rejected[spec_id] = str(error)[:200]
+            continue
+        good.append(part)
+        checked.update(proofs)
+    return good, rejected, checked
 
 
 def fetch_guides(docs, spec_ids):
@@ -341,17 +384,25 @@ def main(argv=None):
     old = load_bundle(bundle)
     observation = json.loads(args.observation.read_text())
     today = date.today().isoformat()
-    candidate, result, ai_unchanged, ai_updated = merge_parts(old, load_parts(args.parts))
-    checked = identity_checks(old, candidate)
+    good, rejected, checked = accept_parts(old, load_parts(args.parts), observation)
+    candidate, result, outcomes = merge_parts(old, good)
     for key, proof in checked.items():
-        spec_ids = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
-        observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(spec_ids), 'sha256': proof['sha256']}
+        owners = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
+        observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
     docs = copy.deepcopy(drop_negligible(old, validate(old, candidate, result, observation, checked)))
+    skipped = set(outcomes['unresolved']) | set(rejected)
+    for spec_id, reason in rejected.items():
+        name = f'spec-{spec_id}.json'
+        if name in docs:
+            note = 'Automated refresh rejected: ' + reason
+            docs[name]['unresolved'] = [u for u in docs[name].get('unresolved', []) if not u.startswith('Automated refresh rejected')] + [note]
     all_ids = [e['spec_id'] for e in docs['index.json']['specs']]
-    rest = [i for i in all_ids if i not in ai_updated]
+    rest = [i for i in all_ids if i not in skipped]
     fresh = fetch_guides(docs, set(rest))
-    advanced = advance_verified(docs, [i for i in rest if i not in ai_unchanged], fresh, today, True)
-    advanced += advance_verified(docs, [i for i in ai_unchanged if i in rest], {**fresh, **observation['current']['sources']}, today, False)
+    sources = {**observation['current']['sources'], **fresh}
+    direct = [i for i in rest if i not in outcomes['updated'] and i not in outcomes['unchanged']]
+    advanced = advance_verified(docs, direct, sources, today, True)
+    advanced += advance_verified(docs, outcomes['updated'] + outcomes['unchanged'], sources, today, False)
     if any(docs[n] != old.get(n) for n in docs):
         record_informational(docs, observation)
     enriched = {} if args.no_enrich else enrich(docs['catalog.json'], today)
@@ -361,6 +412,8 @@ def main(argv=None):
         for name in changed:
             (bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
     lines = [result['summary']]
+    if rejected:
+        lines += ['', 'Rejected per-spec results (previous values kept): ' + '; '.join(f'{i}: {r}' for i, r in sorted(rejected.items(), key=str))]
     if advanced:
         lines += ['', f'Advice unchanged, verification advanced for {len(advanced)} specs: ' + ', '.join(map(str, sorted(advanced)))]
     if enriched:
@@ -368,8 +421,9 @@ def main(argv=None):
     deferred = observation.get('prediff', {}).get('deferred', [])
     if deferred:
         lines += ['', 'Specs with differences not processed this run (retried next run): ' + ', '.join(map(str, deferred))]
-    output = ({'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
-                      'advanced': sorted(advanced), 'ai_updated': ai_updated, 'enriched': sorted(enriched)})
+    output = {'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
+                      'advanced': sorted(advanced), 'ai_updated': outcomes['updated'], 'rejected': {str(k): v for k, v in rejected.items()},
+               'enriched': sorted(enriched)}
     print(json.dumps(output))
     return output
 

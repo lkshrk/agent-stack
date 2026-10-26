@@ -330,6 +330,8 @@ class PipelineRuns(unittest.TestCase):
         edited['recommendations']['consumables']['flask'] = 'item:241326'
         output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': edited})])
         self.assertEqual(output['ai_updated'], [265])
+        self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1.5')
+        self.assertEqual(saved['spec-265.json']['sources'][0]['updated'], '2026-10-13')
         self.assertTrue(output['release'])
         self.assertEqual(saved['spec-265.json']['recommendations']['consumables']['flask'], 'item:241326')
 
@@ -341,8 +343,10 @@ class PipelineRuns(unittest.TestCase):
         self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1.5')
         sneaky = copy.deepcopy(old['spec-265.json'])
         sneaky['stat_guidance']['single_target'] = 'Haste first'
-        with self.assertRaisesRegex(ValueError, 'unchanged outcome must not edit'):
-            self.run_pipeline(old, observation, [(self.part('unchanged'), {'spec-265.json': sneaky})])
+        output, saved = self.run_pipeline(old, observation, [(self.part('unchanged'), {'spec-265.json': sneaky})])
+        self.assertIn('unchanged outcome must not edit', output['rejected']['265'])
+        self.assertEqual(saved['spec-265.json']['recommendations'], old['spec-265.json']['recommendations'])
+        self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1')
 
     def test_unresolved_result_keeps_the_old_spec_and_fingerprint(self):
         old, observation = spec_fixture(flask='item:241324')
@@ -353,6 +357,7 @@ class PipelineRuns(unittest.TestCase):
         self.assertEqual(output['status'], 'partial')
         self.assertEqual(saved['spec-265.json'], old['spec-265.json'])
         self.assertEqual(saved['source-watch.json']['sources'][LIVE_GUIDE]['sha256'], 'a' * 64)
+        self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1')
 
     def test_a_run_cannot_edit_another_spec(self):
         old, observation = spec_fixture()
@@ -361,8 +366,80 @@ class PipelineRuns(unittest.TestCase):
         old['index.json']['specs'].append({'spec_id': 266, 'file': 'spec-266.json'})
         old['index.json']['spec_count'] = 2
         tampered = {**old['spec-266.json'], 'stat_guidance': {'x': 'y'}}
-        with self.assertRaisesRegex(ValueError, 'outside its scope'):
-            self.run_pipeline(old, observation, [(self.part('updated'), {'spec-266.json': tampered})])
+        output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-266.json': tampered})])
+        self.assertIn('outside its scope', output['rejected']['265'])
+        self.assertEqual(saved['spec-266.json']['stat_guidance'], old['spec-266.json']['stat_guidance'])
+
+    def two_specs(self):
+        old, observation = spec_fixture(flask='item:241324')
+        old['spec-266.json'] = {**copy.deepcopy(old['spec-265.json']), 'spec_id': 266,
+                                'recommendations': {**old['spec-265.json']['recommendations'],
+                                                    'consumables': {'flask': 'item:241326'}}}
+        old['index.json']['specs'].append({'spec_id': 266, 'file': 'spec-266.json'})
+        old['index.json']['spec_count'] = 2
+        observation['current']['sources'][LIVE_GUIDE]['spec_ids'] = [265, 266]
+        return old, observation
+
+    def test_one_rejected_part_does_not_block_other_updates_or_advances(self):
+        old, observation = self.two_specs()
+        fixed = copy.deepcopy(old['spec-265.json'])
+        fixed['recommendations']['consumables']['flask'] = 'item:241326'
+        bad = {**self.part('updated', spec_id=266), 'accepted_sources': [LIVE_GUIDE]}
+        wrecked = {**old['index.json'], 'spec_count': 9}
+        output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': fixed}),
+                                                             (bad, {'index.json': wrecked})])
+        self.assertEqual(output['ai_updated'], [265])
+        self.assertEqual(list(output['rejected']), ['266'])
+        self.assertEqual(saved['spec-265.json']['recommendations']['consumables']['flask'], 'item:241326')
+        self.assertTrue(any('rejected' in note for note in saved['spec-266.json']['unresolved']))
+        self.assertEqual(saved['spec-266.json']['verified_patch'], '12.1')
+        self.assertIn('266', output['summary'])
+
+    def test_malformed_part_is_rejected_not_fatal(self):
+        old, observation = self.two_specs()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'base').mkdir(); (root / 'parts' / 'wow-spec-266' / 'candidate').mkdir(parents=True)
+            for name, doc in old.items():
+                (root / 'base' / name).write_text(json.dumps(doc))
+            (root / 'parts' / 'wow-spec-266' / 'candidate' / 'evil.py').write_text('x')
+            (root / 'parts' / 'wow-spec-266' / 'result.json').write_text(json.dumps(self.part('updated', spec_id=266)))
+            (root / 'observation.json').write_text(json.dumps(observation))
+            with patch('apply_wow_season_refresh.fetch_guides', return_value=observation['current']['sources']), \
+                    patch('sys.stdout', new_callable=io.StringIO):
+                output = apply_main(['--bundle', str(root / 'base'), '--parts', str(root / 'parts'),
+                                     '--observation', str(root / 'observation.json'), '--no-enrich'])
+        self.assertIn('Unexpected candidate path', output['rejected']['266'])
+        self.assertEqual(output['advanced'], [])
+
+    def test_tooltip_lookup_failure_rejects_only_that_part(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old)
+        edited['catalog.json']['records']['item:999'] = {**old['catalog.json']['records']['item:1'], 'item_id': 999, 'name': 'New'}
+        edited['spec-265.json']['recommendations']['consumables']['flask'] = 'item:999'
+        edited['index.json']['catalogue_record_count'] = 6
+        down = subprocess.CompletedProcess([], 22, '', 'curl: (22) 404')
+        with patch('apply_wow_season_refresh.subprocess.run', return_value=down):
+            output, saved = self.run_pipeline(old, observation, [(self.part('updated'), edited)])
+        self.assertIn('Tooltip lookup failed', output['rejected']['265'])
+        self.assertEqual(saved['spec-265.json']['recommendations'], old['spec-265.json']['recommendations'])
+        self.assertNotIn('item:999', saved['catalog.json']['records'])
+
+    def test_existing_catalogue_records_only_gain_enrichment_fields(self):
+        old, observation = spec_fixture(flask='item:241324')
+        old['catalog.json']['records']['item:241326']['effect'] = None
+        proof = {'item:241326': {'name': 'Flask', 'url': 'https://nether.wowhead.com/tooltip/item/241326', 'sha256': 'f' * 64}}
+        for label, edit, accepted in [('rename', {'name': 'Renamed'}, False), ('sources', {'sources': ['https://x.test/']}, False),
+                                      ('fill', {'effect': 'Increases Haste'}, True)]:
+            for outcome in ('updated', 'unchanged'):
+                with self.subTest(label=label, outcome=outcome):
+                    edited = copy.deepcopy(old)
+                    edited['catalog.json']['records']['item:241326'].update(edit)
+                    with patch('apply_wow_season_refresh.identity_checks', return_value=proof):
+                        output, _ = self.run_pipeline(old, observation, [(self.part(outcome), edited)])
+                    self.assertEqual('265' in output['rejected'], not accepted)
+                    if not accepted:
+                        self.assertIn('enrichment fields', output['rejected']['265'])
 
     def test_unavailable_guide_leaves_the_spec_untouched(self):
         old, observation = spec_fixture()

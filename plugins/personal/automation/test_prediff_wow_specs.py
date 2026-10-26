@@ -49,7 +49,7 @@ class PreDiff(unittest.TestCase):
         docs['spec-265.json']['recommendations']['consumables']['flask'] = 'item:241324'
         docs['spec-265.json']['stat_guidance']['single_target'] = 'Haste > Crit > Mastery > Versatility'
         found = diff_spec(docs['spec-265.json'], {GUIDE: live()})
-        self.assertEqual(found['items_no_longer_listed'], [241324])
+        self.assertEqual(found['items_no_longer_listed'], {'consumables': [241324]})
         self.assertEqual(found['stat_priority']['live'], ['crit>haste=mastery>vers'])
 
     def test_top_listed_pick_per_slot_is_extracted_from_the_fixture(self):
@@ -105,6 +105,35 @@ class PreDiff(unittest.TestCase):
         baseline = {GUIDE: {'sha256': guides[GUIDE]['sha256']}}
         self.assertFalse(needs_advance(settled['spec-265.json'], guides, baseline))
 
+    def test_an_item_dropped_from_its_own_section_is_a_change_even_if_listed_elsewhere(self):
+        docs = documents()
+        docs['spec-265.json']['recommendations']['gems']['unique'] = 'item:244007'
+        found = diff_spec(docs['spec-265.json'], {GUIDE: live()})
+        self.assertEqual(found['items_no_longer_listed'], {'gems': [244007]})
+
+    def test_unparsed_top_picks_cannot_look_unchanged(self):
+        page = PAGE.replace('<strong>Head:</strong>', '<strong>Helm</strong>')
+        for slot in ('Shoulders', 'Chest', 'Boots', 'Legs', 'Rings', 'Weapon'):
+            page = page.replace(f'<strong>{slot}:</strong>', f'<strong>{slot}</strong>')
+        found = diff_spec(documents()['spec-265.json'], {GUIDE: live(page)})
+        self.assertTrue(found['top_picks_unparsed'])
+        self.assertEqual(classify(documents(), {GUIDE: live(page)})[265]['status'], 'changed')
+
+    def test_layout_variants_that_lose_a_part_are_never_unchanged(self):
+        variants = {
+            'gems section renamed': PAGE.replace('id="gems"><h2>Gems</h2>', 'id="jewels"><h2>Jewels</h2>'),
+            'stat ranking reworded': PAGE.replace('Crit &gt; Haste = Mastery &gt; Versatility', 'Crit, then Haste and Mastery'),
+            'consumables renamed': PAGE.replace('id="consumables"><h2>Consumables</h2>', 'id="extras"><h2>Extras</h2>'),
+            'item links stripped': PAGE.replace('/item=', '/thing='),
+        }
+        for label, page in variants.items():
+            with self.subTest(label):
+                digest, extra = analyze('guide', page)
+                sources = {GUIDE: {'kind': 'guide', 'spec_ids': [265], 'sha256': digest, **extra}}
+                verdict = classify(documents(), sources)[265]
+                self.assertNotEqual(verdict['status'], 'unchanged')
+                self.assertTrue(verdict['status'] == 'changed' or 'layout incomplete' in verdict['reason'])
+
     def test_force_sends_unchanged_specs_to_claude_after_the_differing_ones_within_the_cap(self):
         docs = documents()
         for sid in (266, 267):
@@ -126,7 +155,7 @@ class PreDiff(unittest.TestCase):
         observation = {'current': {'sources': {GUIDE: live()}}}
         task = spec_task(docs, observation, 265, summarize(docs, observation), 'bundle/dir')
         self.assertEqual(task['spec_id'], 265)
-        self.assertEqual(task['differences']['items_no_longer_listed'], [241324])
+        self.assertEqual(task['differences']['items_no_longer_listed'], {'consumables': [241324]})
         self.assertIn('item:244007', task['catalog_records'])
         self.assertIn('item:241326', task['catalog_records_missing'])
         self.assertIn(GUIDE, task['live_guides'])

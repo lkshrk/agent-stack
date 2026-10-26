@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 SCHEMA = Path(__file__).with_name('prompts') / 'wow-refresh-result.schema.json'
 TOOLS = 'Read,Write,Edit,Glob,Grep,Bash(bun:*),Bash(curl:*),Bash(python3:*),Bash(jq:*)'
 DISALLOWED = 'Task,Agent,WebFetch,WebSearch'
-MAX_TURNS = 20
+MAX_TURNS = 12
 
 
 def configuration(env):

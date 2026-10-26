@@ -129,3 +129,9 @@ test("publishing validates and applies per-spec results from a fresh job", () =>
   expect(apply).toContain("bun test");
   expect(publish.steps.findIndex((step: any) => step.id === "parts")).toBeLessThan(publish.steps.findIndex((step: any) => step.id === "apply"));
 });
+
+test("the per-run spec cap is clamped to 1..40 and rejects non-numeric input", () => {
+  const step = wow.jobs.inspect.steps.find((item: any) => item.id === "inspect").run;
+  expect(step).toContain("min(max(int(os.environ['MAX_SPECS']), 1), 40)");
+  expect(step).toContain("must be a whole number between 1 and 40");
+});

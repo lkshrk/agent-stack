@@ -42,9 +42,8 @@ def item_ids(text):
     return {int(i) for i in ITEM_ID.findall(text or '')}
 
 
-def spec_items(setup):
-    recommended = {int(k.split(':')[1]) for k in refs(setup.get('recommendations', {})) if k.startswith('item:')}
-    return recommended
+def section_items(setup, section):
+    return {int(k.split(':')[1]) for k in refs(setup.get('recommendations', {}).get(section, {})) if k.startswith('item:')}
 
 
 SLOT_LABELS = [('health potions?', None), ('weapon oils?', None), ('heads?', ('enchants', 'head')),
@@ -77,30 +76,44 @@ def guide_urls(setup):
     return [s['url'] if isinstance(s, dict) else s for s in setup['sources']]
 
 
-def live_guides(setup, sources):
+ITEM_SECTIONS = ('enchants', 'gems', 'consumables')
+
+
+def missing_parts(extract):
+    missing = [s for s in ITEM_SECTIONS if not item_ids(extract.get(s))]
+    return (['stats'] if not stat_lines(extract.get('stats')) else []) + missing
+
+
+def live_guides(setup, sources, complete=True):
     return {u: sources[u] for u in guide_urls(setup)
             if sources.get(u, {}).get('kind') == 'guide' and not sources[u].get('error')
-            and {'enchants', 'gems', 'consumables'} & set(sources[u].get('extract', {}))}
+            and set(ITEM_SECTIONS) & set(sources[u].get('extract', {}))
+            and (not complete or not missing_parts(sources[u]['extract']))}
 
 
 def diff_spec(setup, guides):
-    recommended = spec_items(setup)
-    live = set()
+    live = {s: set() for s in ITEM_SECTIONS}
     live_stats = []
     for guide in guides.values():
         extract = guide['extract']
-        live |= item_ids(' '.join(extract.get(k, '') for k in ('enchants', 'gems', 'consumables', 'gear')))
+        for section in ITEM_SECTIONS:
+            live[section] |= item_ids(extract.get(section))
         found = stat_lines(extract.get('stats'))
         if found:
             live_stats.append(found[0])
     spec_stats = set(stat_lines(json.dumps(setup.get('stat_guidance', {}))))
     differences = {}
+    picks = {}
     for guide in guides.values():
-        for (section, key), live_id in top_picks(guide['extract']).items():
-            ours = setup.get('recommendations', {}).get(section, {}).get(key)
-            if isinstance(ours, str) and ours.startswith('item:') and int(ours[5:]) != live_id:
-                differences.setdefault('top_pick_differs', {})[f'{section}.{key}'] = {'live': live_id, 'spec': int(ours[5:])}
-    removed = sorted(recommended - live)
+        picks.update(top_picks(guide['extract']))
+    for (section, key), live_id in picks.items():
+        ours = setup.get('recommendations', {}).get(section, {}).get(key)
+        if isinstance(ours, str) and ours.startswith('item:') and int(ours[5:]) != live_id:
+            differences.setdefault('top_pick_differs', {})[f'{section}.{key}'] = {'live': live_id, 'spec': int(ours[5:])}
+    if section_items(setup, 'enchants') and not any(section == 'enchants' for section, _ in picks):
+        differences['top_picks_unparsed'] = True
+    removed = {s: sorted(section_items(setup, s) - live[s]) for s in ITEM_SECTIONS}
+    removed = {s: ids for s, ids in removed.items() if ids}
     if removed:
         differences['items_no_longer_listed'] = removed
     if spec_stats:
@@ -118,7 +131,10 @@ def classify(documents, sources):
         info = {'guides': [{'url': u, 'patch': g.get('meta', {}).get('patch'), 'updated': g.get('meta', {}).get('updated')}
                            for u, g in guides.items()]}
         if not guides:
-            result[entry['spec_id']] = {**info, 'status': 'unavailable', 'differences': {}}
+            partial = live_guides(setup, sources, complete=False)
+            reason = {u: missing_parts(g['extract']) for u, g in partial.items()}
+            result[entry['spec_id']] = {**info, 'status': 'unavailable', 'differences': {},
+                                        'reason': 'Guide layout incomplete: ' + json.dumps(reason) if reason else 'No readable guide'}
             continue
         differences = diff_spec(setup, guides)
         result[entry['spec_id']] = {**info, 'status': 'changed' if differences else 'unchanged', 'differences': differences}

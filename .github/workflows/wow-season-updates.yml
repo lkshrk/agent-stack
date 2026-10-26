@@ -62,7 +62,10 @@ jobs:
           data = json.load(open('wow-source-observation.json'))
           force = os.environ['FORCE_REFRESH'] == 'true'
           data['force_refresh'] = force
-          cap = max(0, int(os.environ['MAX_SPECS']))
+          try:
+              cap = min(max(int(os.environ['MAX_SPECS']), 1), 40)
+          except ValueError:
+              sys.exit('::error::WOW_REFRESH_MAX_SPECS must be a whole number between 1 and 40.')
           command = ['python3', 'plugins/personal/automation/prediff_wow_specs.py', '--observation', 'wow-source-observation.json',
                      '--cap', str(cap), '--out', 'wow-prediff.json'] + (['--force'] if force else [])
           subprocess.run(command, check=True)
