@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -111,7 +112,7 @@ func (in *ingress) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing delivery id", http.StatusBadRequest)
 		return
 	}
-	sigKey := "sig:" + r.Header.Get("Linear-Signature")
+	sigKey := "sig:" + strings.ToLower(r.Header.Get("Linear-Signature"))
 	deliveryKey := "delivery:" + id
 	if !in.dedupe.firstSeen(deliveryKey, now) || !in.dedupe.firstSeen(sigKey, now) {
 		w.WriteHeader(http.StatusOK)

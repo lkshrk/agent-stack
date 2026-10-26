@@ -283,3 +283,23 @@ func TestIngressReplayWithFreshDeliveryIDIsDuplicate(t *testing.T) {
 		t.Fatalf("queued %d, want 1", len(in.queue))
 	}
 }
+
+func TestIngressReplayWithUppercasedSignatureIsDuplicate(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	in := &ingress{secret: testSecret, dedupe: newDeduper(7 * time.Hour), queue: make(chan event, 4), now: func() time.Time { return now }}
+	body := fmt.Sprintf(`{"type":"t","webhookTimestamp":%d}`, now.UnixMilli())
+	sig := sign(testSecret, []byte(body))
+	for i, h := range []string{sig, strings.ToUpper(sig)} {
+		hr := httptest.NewRequest(http.MethodPost, "/webhooks/linear", strings.NewReader(body))
+		hr.Header.Set("Linear-Signature", h)
+		hr.Header.Set("Linear-Delivery", fmt.Sprintf("d%d", i))
+		w := httptest.NewRecorder()
+		in.ServeHTTP(w, hr)
+		if w.Code != 200 {
+			t.Fatalf("request %d: %d", i, w.Code)
+		}
+	}
+	if len(in.queue) != 1 {
+		t.Fatalf("queued %d, want 1", len(in.queue))
+	}
+}
