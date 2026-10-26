@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       go: ${{ steps.filter.outputs.go }}
-      images: ${{ steps.filter.outputs.images }}
+      images: ${{ steps.images.outputs.images }}
       policies: ${{ steps.filter.outputs.policies }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,22 +34,52 @@ jobs:
         id: filter
         with:
           filters: |
+            shared: &shared
+              - '.github/workflows/ci.yml'
+              - '.dockerignore'
+            omnigent: &omnigent
+              - 'policies/omnigent/**'
+              - 'bundles/**'
+              - 'config/omnigent/**'
+              - 'images/omnigent-host/codex/**'
             go:
               - 'cmd/**'
               - 'go.mod'
               - 'go.sum'
-            images:
-              - 'images/**'
-              - 'bundles/**'
-              - 'config/**'
-              - 'policies/**'
+            policies:
+              - *omnigent
+            omnigent-host:
+              - *shared
+              - *omnigent
+              - 'images/omnigent-host/**'
+              - '.claude-plugin/**'
+              - '.agents/**'
+              - 'plugins/**'
+            omnigent-server:
+              - *shared
+              - *omnigent
+              - 'images/omnigent-server/**'
+            agent-tools:
+              - *shared
+              - 'images/agent-tools/**'
               - 'cmd/**'
               - 'go.mod'
               - 'go.sum'
-            policies:
-              - 'policies/omnigent/**'
-              - 'bundles/**'
-              - 'config/omnigent/**'
+            hermes:
+              - *shared
+              - 'images/hermes/**'
+              - 'config/hermes/**'
+            hermes-webui:
+              - *shared
+              - 'images/hermes-webui/**'
+              - 'images/hermes/**'
+              - 'config/hermes/**'
+      - name: Images whose build inputs changed
+        id: images
+        env:
+          CHANGES: ${{ steps.filter.outputs.changes }}
+        run: |
+          echo "images=$(jq -c '[.[] | select(IN("omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui"))]' <<<"$CHANGES")" >>"$GITHUB_OUTPUT"
 
   go:
     needs: changes
@@ -74,36 +104,53 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 
+  # Only pushes to main write the registry build cache; pull requests read it anonymously.
   images:
     needs: changes
-    if: needs.changes.outputs.images == 'true' && github.event_name == 'pull_request'
+    if: needs.changes.outputs.images != '[]'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
-        image: [omnigent-host, omnigent-server, agent-tools, hermes, hermes-webui]
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
+    env:
+      CACHE: type=registry,ref=ghcr.io/${{ github.repository }}/${{ matrix.image }}:buildcache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Free runner disk for the runner image, which is loaded into Docker
-        if: matrix.image == 'omnigent-host'
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
-            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/local/share/powershell \
-            /usr/local/share/chromium /usr/local/lib/node_modules /opt/microsoft /opt/google /opt/az
-          sudo docker image prune --all --force
-          sudo docker builder prune --all --force
-          df -h /
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: images/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64
+          target: ${{ startsWith(matrix.image, 'omnigent-') && 'test' || '' }}
           push: false
-          load: ${{ matrix.image == 'hermes-webui' || matrix.image == 'omnigent-server' || matrix.image == 'omnigent-host' }}
+          load: ${{ matrix.image == 'hermes-webui' }}
+          outputs: ${{ matrix.image != 'hermes-webui' && 'type=cacheonly' || '' }}
           tags: agent-stack/${{ matrix.image }}:ci
-          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-from: ${{ env.CACHE }}
+          cache-to: ${{ github.event_name == 'push' && format('{0},mode=max,ignore-error=true', env.CACHE) || '' }}
+      - name: Test a release build of the server, which pins the runner of the same release
+        if: matrix.image == 'omnigent-server'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: images/omnigent-server/Dockerfile
+          platforms: linux/amd64
+          target: test
+          push: false
+          outputs: type=cacheonly
+          build-args: AGENT_STACK_VERSION=9.8.7
+          cache-from: ${{ env.CACHE }}
       - name: Start hermes-webui offline and require a healthy agent
         if: matrix.image == 'hermes-webui'
         run: |
@@ -123,47 +170,9 @@ jobs:
           grep -q 'Dependencies already installed' <(docker logs webui 2>&1)
           grep -q 'Hermes agent critical imports verified' <(docker logs webui 2>&1)
           docker exec -u 10000 webui test -r /etc/hermes/config.yaml
-      - name: Test the agent-stack policies inside the Omnigent server
-        if: matrix.image == 'omnigent-server'
-        run: |
-          docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-server:ci \
-            /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
-      - name: Pin the runner of the same release in a release build of the server
-        if: matrix.image == 'omnigent-server'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: images/omnigent-server/Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: true
-          tags: agent-stack/omnigent-server:ci-release
-          build-args: AGENT_STACK_VERSION=9.8.7
-          cache-from: type=gha,scope=${{ matrix.image }}
-      - name: Check the runner pin of both server builds
-        if: matrix.image == 'omnigent-server'
-        run: |
-          set -euo pipefail
-          pin() { docker run --rm --entrypoint "" "$1" grep -E '^    image: ghcr.io/lkshrk/agent-stack/omnigent-host:' /etc/omnigent/config.yaml; }
-          [ "$(pin agent-stack/omnigent-server:ci-release)" = "    image: ghcr.io/lkshrk/agent-stack/omnigent-host:9.8.7" ]
-          [ "$(pin agent-stack/omnigent-server:ci)" = "$(grep -E '^    image: ghcr.io/lkshrk/agent-stack/omnigent-host:' config/omnigent/config.yaml)" ]
-      - name: Test the agent-stack policies inside the Omnigent runner
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-host:ci \
-            /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
-      - name: Keep the node CLIs working in a project that pins another node
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/node-pin.sh
-      - name: Refuse planted bare repositories in the runner's git
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/git-safety.sh
-      - name: Install the read-only security-review Codex profile
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/codex-profile.sh
+      - name: Runner disk left after the build
+        if: always() && matrix.image == 'omnigent-host'
+        run: df -h /
 
   gate:
     if: always()
