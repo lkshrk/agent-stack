@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import push_branch, push_destination, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, push_branch, push_destination, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
@@ -59,7 +59,7 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
 
 
 def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event], Decision | None]:
-    protected = frozenset(protected_branches or ["main", "master"])
+    protected = frozenset(protected_branches or DEFAULT_PROTECTED)
 
     def policy(event: Event) -> Decision | None:
         name = tool_name(event)
@@ -71,6 +71,8 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
         if arguments.get("_unparseable"):
             return deny("unparseable tool arguments")
         command = shell_command(arguments)
+        if command is None:
+            return deny("shell command is not a string")
         try:
             statements = walk(command)
         except ValueError:

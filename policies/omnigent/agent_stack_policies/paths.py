@@ -59,18 +59,25 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(glob_match(path, p) for p in patterns)
 
 
+def forbidden_matcher(deny: list[str] | None, exempt: list[str] | None) -> Callable[[str], bool]:
+    denied = list(deny or [])
+    exempted = list(exempt or [])
+    return lambda path: _matches_any(path, denied) and not _matches_any(path, exempted)
+
+
+def escapes(path: str) -> bool:
+    return ".." in path.replace("\\", "/").split("/")
+
+
 def path_guard(
     *,
     deny: list[str] | None = None,
     allow_only: list[str] | None = None,
     exempt: list[str] | None = None,
 ) -> Callable[[Event], Decision | None]:
-    denied = list(deny or [])
+    forbidden = forbidden_matcher(deny, exempt)
+    has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
-    exempted = list(exempt or [])
-
-    def forbidden(path: str) -> bool:
-        return _matches_any(path, denied) and not _matches_any(path, exempted)
 
     def check_write(arguments: dict) -> Decision:
         path = next(
@@ -79,7 +86,7 @@ def path_guard(
         )
         if path is None:
             return _deny("write without a path argument")
-        if ".." in path.replace("\\", "/").split("/"):
+        if escapes(path):
             return _deny(f"path {path} tries to escape with '..'")
         if forbidden(path):
             return _deny(f"forbidden path {path}")
@@ -88,10 +95,13 @@ def path_guard(
         return allow()
 
     def check_shell(arguments: dict) -> Decision:
+        command = shell_command(arguments)
+        if command is None:
+            return _deny("shell command is not a string")
         try:
-            statements = walk(shell_command(arguments))
+            statements = walk(command)
         except ValueError:
-            if denied:
+            if has_denied:
                 return _deny("unparseable shell command while forbidden paths are set")
             return allow()
         for tokens in statements:
@@ -112,4 +122,3 @@ def path_guard(
         return check_write(arguments) if tool_name(event) in WRITE_TOOLS else check_shell(arguments)
 
     return policy
-

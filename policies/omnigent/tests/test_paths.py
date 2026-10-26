@@ -195,3 +195,17 @@ class SubstitutionPathTest(unittest.TestCase):
 
     def test_abstains_on_agent_start_probe(self):
         self.assertIsNone(path_guard(deny=[".github/**"])(tool_call_event("sys_agent_start")))
+
+
+class NonStringCommandTest(unittest.TestCase):
+    def test_list_command_joined_and_checked(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        event = tool_call_event("shell", {"command": ["bash", "-lc", "rm .github/workflows/ci.yml"]})
+        self.assertEqual(policy(event)["result"], "DENY")
+        event = tool_call_event("shell", {"command": ["bash", "-lc", "pytest -q"]})
+        self.assertEqual(policy(event)["result"], "ALLOW")
+
+    def test_other_shapes_denied(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        for command in ({"a": 1}, ["bash", 1], 5):
+            self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], "DENY", command)

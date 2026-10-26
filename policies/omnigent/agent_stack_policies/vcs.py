@@ -4,14 +4,10 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import push_branch, shell_command, substituted, walk
-from .paths import SHELL_TOOLS, glob_match
+from ._shell import DEFAULT_PROTECTED, push_branch, resolve, shell_command, substituted, walk
+from .paths import SHELL_TOOLS, escapes, forbidden_matcher, glob_match
 
-_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _VCS = frozenset({"git", "gh"})
-_WRAPPERS = frozenset(
-    {"xargs", "find", "env", "command", "sudo", "doas", "exec", "nohup", "time", "nice", "timeout", "stdbuf"}
-)
 _GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "fetch", "merge-base"})
 _GIT_UNSAFE_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--ext-diff")
 _BRANCH_LIST_FLAGS = frozenset(
@@ -19,9 +15,8 @@ _BRANCH_LIST_FLAGS = frozenset(
 )
 _GH_PR_READ = frozenset({"view", "diff", "checks", "list"})
 _GH_API_WRITE_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
-_PROTECTED = frozenset({"main", "master"})
+_PROTECTED = frozenset(DEFAULT_PROTECTED)
 _GROUPING = frozenset({"(", ")", "{", "}", "$"})
-_KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until"})
 _DOC_EXTS = frozenset(
     {".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".drawio"}
 )
@@ -163,20 +158,14 @@ def _segments(tokens: list[str]) -> list[list[str]]:
 
 
 def _check_statement(tokens: list[str], is_doc: Callable[[str], bool]) -> str | None:
-    i = 0
-    while i < len(tokens) and tokens[i] in _KEYWORDS:
-        i += 1
-    while i < len(tokens) and _ASSIGNMENT.match(tokens[i]):
-        if tokens[i].startswith("GIT_") and tokens[i] not in _ALLOWED_GIT_ENV:
-            return "GIT_* environment overrides other than GIT_PAGER=cat are not allowed"
-        i += 1
-    if i == len(tokens):
-        return None
-    command, rest = _base(tokens[i]), tokens[i + 1 :]
-    if command in _WRAPPERS and any(_base(t) in _VCS for t in rest):
-        return f"git and gh may not run through {command}; run them directly"
+    resolved = resolve(tokens)
+    if any(a.startswith("GIT_") and a not in _ALLOWED_GIT_ENV for a in resolved.assignments):
+        return "GIT_* environment overrides other than GIT_PAGER=cat are not allowed"
+    command, rest = resolved.name, resolved.argv[1:]
     if command not in _VCS:
         return None
+    if resolved.wrappers:
+        return f"git and gh may not run through {resolved.wrappers[0]}; run them directly"
     if any(substituted(t) or set(t) <= set("<>&") for t in rest):
         return f"{command} with command substitution or redirection is not allowed"
     return _check_git(rest, is_doc) if command == "git" else _check_gh(rest)
@@ -189,13 +178,10 @@ def docs_vcs(
     exempt: list[str] | None = None,
 ) -> Callable[[Event], Decision | None]:
     allowed = list(allow_paths)
-    denied = list(deny or [])
-    exempted = list(exempt or [])
+    forbidden = forbidden_matcher(deny, exempt)
 
     def is_doc(path: str) -> bool:
-        if ".." in path.split("/"):
-            return False
-        if any(glob_match(path, p) for p in denied) and not any(glob_match(path, p) for p in exempted):
+        if escapes(path) or forbidden(path):
             return False
         return any(glob_match(path, p) for p in allowed)
 
@@ -205,7 +191,10 @@ def docs_vcs(
             return None
         if arguments.get("_unparseable"):
             return _deny("unparseable tool arguments")
-        command = _STDERR_REDIRECT.sub("", shell_command(arguments))
+        command = shell_command(arguments)
+        if command is None:
+            return _deny("shell command is not a string")
+        command = _STDERR_REDIRECT.sub("", command)
         if _FUSED_REDIRECT.search(command) and re.search(r"\b(git|gh)\b", command):
             return _deny("redirecting git or gh output is not allowed; only `2>&1` or `2>/dev/null` alone")
         try:

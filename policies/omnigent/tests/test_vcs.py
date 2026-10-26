@@ -329,3 +329,31 @@ class DocsVcsTest(unittest.TestCase):
     def test_without_command_allowed(self):
         decision = docs_vcs(allow_paths=ALLOW_PATHS)(tool_call_event("bash", {}))
         self.assertEqual(decision["result"], "ALLOW")
+
+
+class SharedResolverTest(unittest.TestCase):
+    def test_more_wrappers_denied(self):
+        for command in (
+            "setsid git add backend/app/main.py",
+            "ionice -c 3 git add backend/app/main.py",
+            "flock /tmp/l git commit -am x",
+            "stdbuf -oL git push origin HEAD:main",
+            "timeout 30 git status",
+            "nice -n 5 git status",
+            "find . -name '*.py' -exec git add {} +",
+            "parallel git add ::: a.py b.py",
+            "script -qc 'git add -A' /dev/null",
+            "su -c 'git add -A' me",
+            "env -S 'git add -A'",
+            "time git status",
+        ):
+            decision = run(command)
+            self.assertEqual(decision["result"], "DENY", command)
+
+    def test_direct_forms_still_allowed(self):
+        for command in ("git status", "GIT_PAGER=cat git log -1", "git add -- docs/a.md"):
+            self.assertEqual(run(command)["result"], "ALLOW", command)
+
+    def test_non_string_command_denied(self):
+        policy = docs_vcs(allow_paths=ALLOW_PATHS)
+        self.assertEqual(policy(tool_call_event("bash", {"command": {"a": 1}}))["result"], "DENY")
