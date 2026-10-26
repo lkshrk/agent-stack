@@ -30,7 +30,7 @@ jobs:
               - 'go.sum'
             images:
               - 'images/**'
-              - 'agents/**'
+              - 'bundles/**'
               - 'config/**'
               - 'cmd/**'
               - 'go.mod'

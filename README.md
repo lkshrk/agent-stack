@@ -1,31 +1,56 @@
 # agent-stack
 
-Images, agent definitions and deploy manifests for two agents in the h-cloud cluster:
+Everything the h-cloud cluster needs to run its coding agents, built and released from one repository:
 
-- **Omnigent** runs coding sessions. Each session is a Kubernetes Job in `omnigent-sandboxes`, started from the runner image built here. Polly plans and delegates to Claude Code (implementer) and Codex (reviewer); work lands as pull requests.
+- container images (Omnigent runner and server, Hermes, Go tools)
+- Omnigent agent bundles
+- an agent plugin marketplace (`agent-stack`) for Claude Code and Codex
+- small Go services and tools
+- runtime policies fetched by other workloads
+
+Two agents run on this stack:
+
+- **Omnigent** runs coding sessions. Each session is a Kubernetes Job in `omnigent-sandboxes`, started from the runner image. Polly plans and delegates to Claude Code (implementer) and Codex (reviewer); work lands as pull requests.
 - **Hermes** is an always-on general agent reached through a Signal group. It keeps memory in its own home and in OpenViking, and starts Omnigent sessions when code needs to change.
 
-Both read and write the knowledge vault through its normal workflow.
+Deployment manifests, secrets, databases and routes live in the h-cloud repository.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `images/omnigent-host/` | Runner image: Omnigent host + Claude Code + Codex + plugins, LSPs and toolchains for every language in use |
-| `images/omnigent-server/` | Omnigent server with the agent bundles and sandbox configuration baked in |
-| `images/agent-tools/` | Go tools from `cmd/`: `token-minter` (octo-sts GitHub tokens into Secrets) and `signal-shim` (signal-cli HTTP API for Hermes on top of signal-cli-rest-api) |
-| `images/hermes/` | Hermes with its managed configuration, `SOUL.md`, git and the vault tooling |
-| `agents/polly/` | Polly orchestrator and its workers, adapted from Omnigent's example |
-| `config/omnigent/` | Omnigent server configuration: runner image, model gateway, per-harness models |
-| `config/hermes/` | Hermes managed `config.yaml`, `SOUL.md`, learning snapshot script |
-| `plugins/runner/` | Plugin `runner`: skills `upgrade-deps`, `project-tool-allowlist`, `ai-context-generator` |
-| `plugins/linear/` | Plugin `linear`: Linear workflow skills (`linear-intake`, `-refine`, `-implement`, `-reconcile`, `-status`) with their validators, templates and tests |
-| `plugins/personal/` | Plugin `personal`: machine-maintenance, documentation and World of Warcraft skills |
-| `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests (`agent-stack`) for Claude Code and Codex |
-| `config/pr-agent/` | PR-Agent review policy (`pr-agent.toml`) and reviewer guide (`review.md`), loaded by the h-cloud init container |
+| [`images/`](images/README.md) | Dockerfiles and image assets |
+| [`bundles/`](bundles/README.md) | Omnigent agent bundles (`polly`) |
+| [`plugins/`](plugins/README.md) | Plugins `runner`, `linear`, `personal` |
+| [`cmd/`](cmd/README.md) | Go programs: `signal-shim`, `token-minter`, `linear-bridge` |
+| [`config/`](config/README.md) | Omnigent server and Hermes configuration baked into images |
+| [`policies/`](policies/README.md) | Policies other workloads fetch at runtime (PR-Agent) |
+| `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests for Claude Code and Codex |
+| `.github/workflows/` | CI, image build, release and the WoW refresh |
 
-Everything here ships inside images, except `config/pr-agent/`, which h-cloud fetches at runtime, and `plugins/`, which clients install from this repository as the `agent-stack` marketplace (`claude plugin marketplace add lkshrk/agent-stack`). Deployment manifests, secrets, databases and routes live in the h-cloud repository.
+## Plugin marketplace
+
+- Runners: the `runner` plugin is baked into the `omnigent-host` image (`images/omnigent-host/bin/install-claude-plugins`).
+- `linear` and `personal` are installed through apm with `git: lkshrk/agent-stack` and `path: plugins/<name>`.
+- Claude Code on any machine: `claude plugin marketplace add lkshrk/agent-stack`.
 
 ## Credentials
 
-Runners never hold long-lived credentials. LLM traffic goes through the LiteLLM gateway with a per-consumer key. GitHub tokens come from the token minter, are mounted as files and expire after an hour; git and `gh` read the current token on every call.
+Runners never hold long-lived credentials.
+
+- **Models**: all LLM traffic goes through the LiteLLM gateway with a per-consumer key.
+- **Linear**: agents read through the MCP server `linear_read`. Writes go through `linear_app` as the Linear app "Daedalus", behind the guard in h-cloud.
+- **GitHub**: tokens come from `token-minter`, are mounted as files and expire after an hour; git and `gh` read the current token on every call.
+
+## Releases
+
+Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a version and builds the images in `images.yml`. Renovate in h-cloud bumps the image tags.
+
+## CI
+
+| Workflow | Purpose |
+| --- | --- |
+| `ci.yml` | `go vet`, `go test -race`, golangci-lint, and a build of every changed image on pull requests |
+| `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
+| `release.yml` | `semantic-release` on `main`, then calls `images.yml` |
+| `wow-season-updates.yml` | Weekly WoW season refresh with Claude Code. Needs secret `WOW_REFRESH_API_KEY` and variables `WOW_REFRESH_BASE_URL`, `WOW_REFRESH_MODEL`; the key is the LiteLLM key `agent-stack-ci` in the CI team |
