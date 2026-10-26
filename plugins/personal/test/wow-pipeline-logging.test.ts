@@ -44,7 +44,7 @@ test("refresh summary exposes only outcomes and distinguishes skipped AI from fa
   const stages = { inspect: { outcome: "success" }, provider: { outcome: "skipped", outputs: { secret: "NEVER-LOG-THIS" } }, refresh: { outcome: "skipped" } };
   const skipped = summary("refresh", { JOB_STATUS: "success", NEEDED: "false", STAGES: JSON.stringify(stages) });
   expect(skipped).toContain("force_refresh enabled");
-  expect(skipped).toContain("Codex refresh | skipped");
+  expect(skipped).toContain("Claude Code refresh | skipped");
   expect(skipped).not.toContain("NEVER-LOG-THIS");
   stages.refresh.outcome = "failure";
   const failed = summary("refresh", { JOB_STATUS: "failure", NEEDED: "true", STAGES: JSON.stringify(stages) });
@@ -78,11 +78,9 @@ test("summary environments allow only stage outcomes, and required successful re
     expect(text).toContain("Bun setup | failure");
   }
   const condition = wow.jobs.refresh.steps.find((step: any) => step.id === "result").if;
-  for (const outcome of ["success", "failure", "skipped"]) {
-    for (const exists of [true, false]) {
-      const evaluated = condition.replaceAll("always()", "true").replaceAll("steps.refresh.outcome", JSON.stringify(outcome)).replaceAll("hashFiles('wow-refresh-result.json')", JSON.stringify(exists ? "hash" : ""));
-      expect(new Function(`return (${evaluated})`)()).toBe(outcome === "success" || (outcome === "failure" && exists));
-    }
+  for (const exists of [true, false]) {
+    const evaluated = condition.replaceAll("always()", "true").replaceAll("hashFiles('wow-refresh-result.json')", JSON.stringify(exists ? "hash" : ""));
+    expect(new Function(`return (${evaluated})`)()).toBe(exists);
   }
 });
 

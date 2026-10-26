@@ -25,7 +25,7 @@ jobs:
     outputs:
       base_sha: ${{ steps.base.outputs.sha }}
       refresh_needed: ${{ steps.inspect.outputs.needed }}
-      candidate_ready: ${{ steps.refresh.outcome == 'success' }}
+      candidate_ready: ${{ steps.result_file.outcome == 'success' }}
     steps:
       - name: Explain pipeline stages and trigger
         env:
@@ -35,7 +35,7 @@ jobs:
           echo "Trigger: $EVENT; ref: $GITHUB_REF; commit: $GITHUB_SHA"
           echo "Force AI recheck: $FORCE_REFRESH"
           echo "1. Fetch public sources and compare fingerprints with the saved baseline (no AI)."
-          echo "2. Run Codex only when the source check requests it or force_refresh=true."
+          echo "2. Run Claude Code only when the source check requests it or force_refresh=true."
           echo "3. Validate candidate data and stage accepted changes on a branch."
           echo "4. Open a pull request for accepted changes; merging it lets the Release workflow decide on a release."
 
@@ -61,10 +61,10 @@ jobs:
         env:
           FORCE_REFRESH: ${{ inputs.force_refresh || false }}
         run: |
-          python3 plugins/personal/scripts/check_wow_season_updates.py --json > wow-source-observation.json
+          python3 plugins/personal/automation/check_wow_season_updates.py --json > wow-source-observation.json
           python3 - <<'PY'
           import json, os, sys
-          sys.path.insert(0, 'plugins/personal/scripts')
+          sys.path.insert(0, 'plugins/personal/automation')
           from check_wow_season_updates import report
           data = json.load(open('wow-source-observation.json'))
           data['force_refresh'] = os.environ['FORCE_REFRESH'] == 'true'
@@ -90,48 +90,53 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      - name: Configure refresh provider
+      - name: Configure refresh gateway
         if: steps.inspect.outputs.needed == 'true'
         id: provider
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           WOW_REFRESH_BASE_URL: ${{ vars.WOW_REFRESH_BASE_URL }}
           WOW_REFRESH_MODEL: ${{ vars.WOW_REFRESH_MODEL }}
-          WOW_REFRESH_GATEWAY_KEY: ${{ secrets.WOW_REFRESH_API_KEY }}
+          WOW_REFRESH_API_KEY: ${{ secrets.WOW_REFRESH_API_KEY }}
         run: |
-          echo "AI refresh requested; validating provider configuration. Credentials and provider arguments are not logged."
-          python3 plugins/personal/scripts/configure_wow_refresh_provider.py >> "$GITHUB_OUTPUT"
+          echo "AI refresh requested; validating gateway configuration. Credentials and arguments are not logged."
+          python3 plugins/personal/automation/prepare_wow_refresh.py >> "$GITHUB_OUTPUT"
 
       - name: Explain AI refresh scope
         if: steps.inspect.outputs.needed == 'true'
         env:
-          PROVIDER_MODE: ${{ steps.provider.outputs.mode }}
           PROVIDER_MODEL: ${{ steps.provider.outputs.model }}
         run: |
-          echo "Starting Codex refresh with provider mode: $PROVIDER_MODE."
-          echo "Model: ${PROVIDER_MODEL:-Codex action default}"
+          echo "Starting Claude Code refresh through the LiteLLM gateway."
+          echo "Model: $PROVIDER_MODEL"
           echo "Input: wow-source-observation.json and the bundled seasonal records."
           echo "Expected result: candidate data plus wow-refresh-result.json; this job cannot publish changes."
 
-      - name: Refresh affected setup records with Codex
+      - name: Refresh affected setup records with Claude Code
         if: steps.inspect.outputs.needed == 'true'
         id: refresh
-        uses: openai/codex-action@v1
+        uses: anthropics/claude-code-action@v1
         env:
-          WOW_REFRESH_GATEWAY_KEY: ${{ steps.provider.outputs.mode == 'gateway' && secrets.WOW_REFRESH_API_KEY || '' }}
+          ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-haiku
         with:
-          openai-api-key: ${{ steps.provider.outputs.mode == 'openai' && secrets.OPENAI_API_KEY || '' }}
-          prompt-file: .github/codex/prompts/refresh-wow-season.md
-          output-file: wow-refresh-result.json
-          sandbox: workspace-write
-          safety-strategy: drop-sudo
-          model: ${{ steps.provider.outputs.model }}
-          codex-args: ${{ steps.provider.outputs.codex_args }}
+          anthropic_api_key: ${{ secrets.WOW_REFRESH_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: Follow the instructions in plugins/personal/automation/prompts/refresh-wow-season.md.
+          claude_args: ${{ steps.provider.outputs.claude_args }}
+
+      - name: Save structured refresh result
+        id: result_file
+        if: steps.refresh.outcome == 'success'
+        env:
+          RESULT: ${{ steps.refresh.outputs.structured_output }}
+        run: |
+          [ -n "$RESULT" ] || { echo "Claude Code returned no structured result."; exit 1; }
+          printf '%s' "$RESULT" | jq . > wow-refresh-result.json
 
       # Only data is exported from the agent's runner; publishing uses a fresh job.
       - name: Keep candidate data
         id: candidate
-        if: steps.refresh.outcome == 'success'
+        if: steps.result_file.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: wow-refresh-candidate
@@ -141,7 +146,7 @@ jobs:
 
       - name: Keep refresh result
         id: result
-        if: always() && (steps.refresh.outcome == 'success' || (steps.refresh.outcome != 'skipped' && hashFiles('wow-refresh-result.json') != ''))
+        if: always() && hashFiles('wow-refresh-result.json') != ''
         uses: actions/upload-artifact@v7
         with:
           name: wow-refresh-result
@@ -155,7 +160,7 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           NEEDED: ${{ steps.inspect.outputs.needed }}
           STAGES: >-
-            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"observation":{"outcome":"${{ steps.observation.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"candidate":{"outcome":"${{ steps.candidate.outcome }}"},"result":{"outcome":"${{ steps.result.outcome }}"}}
+            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"observation":{"outcome":"${{ steps.observation.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"candidate":{"outcome":"${{ steps.candidate.outcome }}"},"result":{"outcome":"${{ steps.result.outcome }}"}}
         run: |
           python3 - <<'PY'
           import json, os
@@ -163,8 +168,8 @@ jobs:
           lines = ['## Detection and AI refresh: ' + os.environ['JOB_STATUS'], '',
                    '| Stage | Outcome |', '| --- | --- |']
           for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('bun', 'Bun setup'), ('inspect', 'Source fetch and comparison'),
-                             ('observation', 'Observation artifact'), ('provider', 'Provider configuration'),
-                             ('refresh', 'Codex refresh'), ('candidate', 'Candidate artifact'), ('result', 'Result artifact')]:
+                             ('observation', 'Observation artifact'), ('provider', 'Gateway configuration'),
+                             ('refresh', 'Claude Code refresh'), ('result_file', 'Result file'), ('candidate', 'Candidate artifact'), ('result', 'Result artifact')]:
               lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
           if os.environ['NEEDED'] == 'false':
               lines += ['', 'AI refresh skipped: no triggering source drift and force_refresh=false. Provider setup, candidate generation and publishing are intentionally skipped.',
@@ -232,7 +237,7 @@ jobs:
         run: |
           echo "Validating candidate against trusted source observations and base $BASE_SHA."
           echo "Only accepted seasonal data changes may be applied; unsupported observations retain previous values."
-          python3 plugins/personal/scripts/apply_wow_season_refresh.py \
+          python3 plugins/personal/automation/apply_wow_season_refresh.py \
             --candidate "$RUNNER_TEMP/wow-candidate" \
             --result "$RUNNER_TEMP/wow-result/wow-refresh-result.json" \
             --observation "$RUNNER_TEMP/wow-observation/wow-source-observation.json" \
