@@ -24,7 +24,7 @@ Deployment manifests, secrets, databases and routes live in the h-cloud reposito
 | [`plugins/`](plugins/README.md) | Plugins `runner`, `linear`, `personal` |
 | [`cmd/`](cmd/README.md) | Go programs: `signal-shim`, `token-minter`, `linear-bridge` |
 | [`config/`](config/README.md) | Omnigent server and Hermes configuration baked into images |
-| [`policies/`](policies/README.md) | Policies other workloads fetch at runtime (PR-Agent) |
+| [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime and the Omnigent policy package baked into the Omnigent images |
 | `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests for Claude Code and Codex |
 | `.github/workflows/` | CI, image build, release and the WoW refresh |
 
