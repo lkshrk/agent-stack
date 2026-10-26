@@ -9,8 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import drop_negligible, load_bundle, main as apply_main, merge_parts, validate
-from check_wow_season_updates import analyze
+from apply_wow_season_refresh import (advance_verified, drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
+                                      source_mapping_errors, validate)
+from check_wow_season_updates import active_bundle, analyze
 
 
 def fixture():
@@ -270,6 +271,100 @@ def spec_fixture(flask='item:241326'):
     old['source-watch.json'] = {'captured_at': 'old', 'sources': {LIVE_GUIDE: {'kind': 'guide', 'spec_ids': [265], 'sha256': 'a' * 64}}}
     observation['current']['sources'] = {LIVE_GUIDE: live_guide()}
     return old, observation
+
+
+class DataQuality(unittest.TestCase):
+    def validated(self, mutate):
+        old, observation, result = fixture()
+        candidate = copy.deepcopy(old)
+        mutate(candidate['catalog.json']['records']['item:1'])
+        return old, candidate, result, observation
+
+    def test_unevaluated_expressions_and_item_ids_cannot_be_published(self):
+        for effect in ['Restores 1 health.', 'gain ( 64 * .9) Mastery', 'gain ( 64 ) Haste', 'restore ( 3930 * 10) mana']:
+            old, candidate, result, observation = self.validated(lambda r, e=effect: r.update(effect=e))
+            with self.assertRaises(ValueError, msg=effect):
+                validate(old, candidate, result, observation)
+
+    def test_numeric_field_equal_to_the_item_id_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, '(?i)item id'):
+            record_errors('item:241304', {'item_id': 241304, 'duration_seconds': 241304})
+
+    def test_plain_numbers_and_parentheses_pass(self):
+        record_errors('item:7', {'item_id': 7, 'effect': 'Restores 2000 health (1).', 'duration_seconds': 30})
+
+    def test_current_bundle_has_consistent_sources_and_clean_records(self):
+        from prediff_wow_specs import load_documents
+        documents = load_documents(active_bundle())
+        self.assertEqual(source_mapping_errors(documents), [])
+        for key, record in documents['catalog.json']['records'].items():
+            record_errors(key, record)
+
+    def test_clearing_recheck_is_published_and_adding_it_is_rejected(self):
+        old, observation, result = fixture()
+        old['spec-265.json']['recheck'] = 'sources corrected'
+        candidate = copy.deepcopy(old)
+        del candidate['spec-265.json']['recheck']
+        docs = drop_negligible(old, validate(old, candidate, result, observation))
+        self.assertNotIn('recheck', docs['spec-265.json'])
+        fresh, observation, result = fixture()
+        flagged = copy.deepcopy(fresh)
+        flagged['spec-265.json']['recheck'] = 'agent flag'
+        with self.assertRaisesRegex(ValueError, 'recheck'):
+            validate(fresh, flagged, result, observation)
+
+    def test_flagged_spec_with_unchanged_advice_is_cleared_and_verified_through_the_pipeline(self):
+        old, observation, result = fixture()
+        old['spec-265.json']['recheck'] = 'sources corrected'
+        old['spec-265.json']['verified_at'] = '2020-01-01'
+        candidate = copy.deepcopy(old)
+        del candidate['spec-265.json']['recheck']
+        docs = drop_negligible(old, validate(old, candidate, result, observation))
+        guides = {u: {**v, 'meta': {'patch': '12.2'}, 'extract': {'enchants': '[item:1]', 'gems': '[item:1]',
+                  'consumables': '[item:1]', 'stats': 'Crit > Haste > Mastery > Versatility'}}
+                  for u, v in observation['current']['sources'].items()}
+        done = advance_verified(docs, [265], guides, '2026-10-26', False)
+        self.assertEqual(done, [265])
+        self.assertEqual((docs['spec-265.json']['verified_at'], docs['spec-265.json']['verified_patch']), ('2026-10-26', '12.2'))
+        self.assertNotIn('recheck', docs['spec-265.json'])
+
+    def mapping_fixture(self):
+        guide = 'https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables'
+        return {'index.json': {'specs': [{'spec_id': 253, 'class': 'Hunter', 'spec': 'Beast Mastery', 'file': 'spec-253.json'}]},
+                'spec-253.json': {'sources': [{'url': guide}, {'url': 'https://murlok.io/hunter/beast-mastery/m+'}]},
+                'source-watch.json': {'sources': {guide: {'kind': 'guide', 'spec_ids': [253]}}}}, guide
+
+    def test_matching_mapping_passes(self):
+        documents, _ = self.mapping_fixture()
+        self.assertEqual(source_mapping_errors(documents), [])
+
+    def test_guide_of_another_spec_is_reported(self):
+        documents, _ = self.mapping_fixture()
+        foreign = 'https://www.method.gg/guides/survival-hunter/stats-races-and-consumables'
+        documents['spec-253.json']['sources'].append({'url': foreign})
+        documents['source-watch.json']['sources'][foreign] = {'kind': 'guide', 'spec_ids': [253]}
+        self.assertTrue(any('survival-hunter' in e for e in source_mapping_errors(documents)))
+
+    def test_other_spec_murlok_page_is_reported(self):
+        documents, _ = self.mapping_fixture()
+        documents['spec-253.json']['sources'][1] = {'url': 'https://murlok.io/hunter/survival/m+'}
+        self.assertTrue(any('murlok' in e for e in source_mapping_errors(documents)))
+
+    def test_watch_and_spec_sources_must_agree_both_ways(self):
+        documents, guide = self.mapping_fixture()
+        documents['source-watch.json']['sources'][guide]['spec_ids'] = []
+        self.assertEqual(len(source_mapping_errors(documents)), 1)
+        documents['source-watch.json']['sources'][guide]['spec_ids'] = [253, 254]
+        self.assertEqual(len(source_mapping_errors(documents)), 1)
+        documents['source-watch.json']['sources']['https://www.method.gg/guides/orphan'] = {'kind': 'guide', 'spec_ids': [253]}
+        self.assertEqual(len(source_mapping_errors(documents)), 2)
+
+    def test_candidate_with_mismatched_mapping_is_rejected(self):
+        old, observation, result = fixture()
+        old['index.json']['specs'][0].update({'class': 'Warlock', 'spec': 'Affliction'})
+        old['spec-265.json']['sources'] = [{'url': 'https://www.method.gg/guides/example'}]
+        with self.assertRaisesRegex(ValueError, 'Source mapping'):
+            validate(old, old, result, observation)
 
 
 class PipelineRuns(unittest.TestCase):
