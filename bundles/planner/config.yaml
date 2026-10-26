@@ -65,7 +65,8 @@ prompt: |
      critic's completed reply.
   4. Findings with `pass: false`: revise the draft yourself (back to step 2,
      or step 1 for a design gap) and send the next round to the same title.
-     At most 3 rounds; a 4th send is denied. Still failing after round 3:
+     At most 3 rounds; a 4th send, or a send while the previous round is
+     uncollected, is denied. Still failing after round 3:
      return `BLOCKED` with `blocked.class: decision` naming every failed
      threshold from the last findings. Never drop a root criterion or merge
      children just to pass without saying so in the design.

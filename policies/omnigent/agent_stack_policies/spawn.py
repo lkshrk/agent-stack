@@ -18,6 +18,11 @@ def _reply_pattern(agent: str | None) -> re.Pattern:
     return re.compile(r"\[System: sub-agent task \S+ completed \u2014 " + name + r"(?::[^\n]*?)? returned: ")
 
 
+def _first_entry_is_reply(text: str, reply: re.Pattern) -> bool:
+    """Only the first inbox entry counts: with one round outstanding it is the critic's, and output can't forge it."""
+    return reply.match(text.lstrip()) is not None
+
+
 def _result_text(event: Event) -> str:
     data = event.get("data")
     if isinstance(data, dict):
@@ -53,19 +58,21 @@ def max_dispatches_per_session(
         dispatched, collected = state.get(DISPATCH_STATE_KEY, 0), state.get(COLLECT_STATE_KEY, 0)
         if not isinstance(dispatched, int) or not isinstance(collected, int):
             return None
-        count = min(len(reply.findall(_result_text(event))), dispatched - collected)
-        if count < 1:
+        if dispatched <= collected or not _first_entry_is_reply(_result_text(event), reply):
             return None
-        return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": count}])
+        return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
 
     def policy(event: Event) -> Decision | None:
         if collectors and _result_tool(event, collectors):
             return collect(event)
         if tool_call(event, tools) is None:
             return None
-        count = session_state(event).get(DISPATCH_STATE_KEY, 0)
+        state = session_state(event)
+        count = state.get(DISPATCH_STATE_KEY, 0)
         if not isinstance(count, int) or count >= limit:
             return deny(f"dispatch cap of {limit} per session reached")
+        if collectors and awaiting(state):
+            return deny("an earlier dispatch is still uncollected; read its reply with sys_read_inbox first")
         return allow(
             state_updates=[{"key": DISPATCH_STATE_KEY, "action": "increment", "value": 1}]
         )
