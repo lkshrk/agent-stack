@@ -4,10 +4,20 @@ import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_spawn
+from . import assert_not_ask, test_merge, test_paths, test_spawn, test_tools
 
-EVENTS_BY_MODULE = {"agent_stack_policies.spawn": test_spawn.EVENTS}
-DEFAULT_PARAMS = {"agent_stack_policies.spawn": {"limit": 3}}
+EVENTS_BY_MODULE = {
+    "agent_stack_policies.spawn": test_spawn.EVENTS,
+    "agent_stack_policies.paths": test_paths.EVENTS,
+    "agent_stack_policies.tools": test_tools.EVENTS,
+    "agent_stack_policies.merge": test_merge.EVENTS,
+}
+DEFAULT_PARAMS = {
+    "agent_stack_policies.spawn": {"limit": 3},
+    "agent_stack_policies.paths": {"deny": [".github/workflows/**"], "allow_only": ["docs/**"]},
+    "agent_stack_policies.tools": {"patterns": ["mcp__*linear_app-*"]},
+    "agent_stack_policies.merge": {},
+}
 
 
 def resolve(handler):

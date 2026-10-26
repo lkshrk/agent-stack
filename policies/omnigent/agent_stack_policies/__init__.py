@@ -14,4 +14,42 @@ POLICY_REGISTRY: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "handler": "agent_stack_policies.paths.path_guard",
+        "kind": "factory",
+        "name": "path_guard",
+        "description": "Deny writes and shell access to forbidden paths.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "deny": {"type": "array", "items": {"type": "string"}},
+                "allow_only": {"type": "array", "items": {"type": "string"}},
+                "exempt": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "handler": "agent_stack_policies.tools.deny_tools",
+        "kind": "factory",
+        "name": "deny_tools",
+        "description": "Deny tools whose name matches a glob pattern.",
+        "params_schema": {
+            "type": "object",
+            "properties": {"patterns": {"type": "array", "items": {"type": "string"}}},
+            "required": ["patterns"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "handler": "agent_stack_policies.merge.no_merge",
+        "kind": "factory",
+        "name": "no_merge",
+        "description": "Deny PR merges, pushes to protected branches and force-pushes.",
+        "params_schema": {
+            "type": "object",
+            "properties": {"protected_branches": {"type": "array", "items": {"type": "string"}}},
+            "additionalProperties": False,
+        },
+    },
 ]

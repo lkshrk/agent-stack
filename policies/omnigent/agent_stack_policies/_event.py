@@ -39,10 +39,10 @@ def tool_name(event: Event) -> str | None:
 
 
 def tool_call(event: Event, names: Collection[str]) -> dict | None:
+    """Callers must test `is None`: `{}` is a valid match with no arguments."""
     name = tool_name(event)
     if name is None or name not in names:
         return None
-    # unparseable arguments on a matching call return a sentinel so callers can fail closed
     arguments = _first(event["data"], ("arguments", "input", "args"))
     if arguments is None:
         return {}
