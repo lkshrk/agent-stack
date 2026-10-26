@@ -41,7 +41,7 @@ jobs:
 
       - name: Check out repository
         id: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -55,6 +55,8 @@ jobs:
       - name: Set up Bun
         id: bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
 
       - name: Fetch sources, compare fingerprints and explain AI run decision
         id: inspect
@@ -203,7 +205,7 @@ jobs:
     steps:
       - name: Check out trusted base
         id: checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.refresh.outputs.base_sha }}
 
@@ -231,6 +233,8 @@ jobs:
       - name: Set up Bun
         id: bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
 
       - name: Validate and apply data-only changes
         id: apply
