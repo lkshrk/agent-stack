@@ -197,6 +197,59 @@ class SubstitutionPathTest(unittest.TestCase):
         self.assertIsNone(path_guard(deny=[".github/**"])(tool_call_event("sys_agent_start")))
 
 
+def patch(*headers):
+    return "*** Begin Patch\n" + "".join(f"{h}\n+x\n" for h in headers) + "*** End Patch"
+
+
+class ApplyPatchTest(unittest.TestCase):
+    def setUp(self):
+        self.policy = path_guard(deny=[WORKFLOWS, "AGENTS.md", "**/.env"], exempt=["**/.env.example"])
+
+    def verdict(self, arguments):
+        return self.policy(tool_call_event("apply_patch", arguments))["result"]
+
+    def test_every_header_checked(self):
+        for header in (
+            "*** Add File: .github/workflows/x.yml",
+            "*** Update File: AGENTS.md",
+            "*** Delete File: deploy/.env",
+            "*** Update File: src/a.py\n*** Move to: .github/workflows/a.yml",
+        ):
+            with self.subTest(header=header):
+                self.assertEqual(self.verdict({"command": patch("*** Add File: src/ok.py", header)}), "DENY")
+
+    def test_allowed_paths(self):
+        arguments = {"input": patch("*** Add File: src/a.py", "*** Update File: deploy/.env.example")}
+        self.assertEqual(self.verdict(arguments), "ALLOW")
+        self.assertEqual(self.verdict({"patch": patch("*** Delete File: docs/old.md")}), "ALLOW")
+
+    def test_argument_shapes(self):
+        self.assertEqual(self.verdict({"command": ["apply_patch", patch("*** Add File: AGENTS.md")]}), "DENY")
+        self.assertEqual(self.verdict({"command": ["apply_patch", patch("*** Add File: src/a.py")]}), "ALLOW")
+        changes = [{"path": "src/a.py", "kind": {"type": "update", "move_path": ".github/workflows/a.yml"}}]
+        self.assertEqual(self.verdict({"changes": changes}), "DENY")
+        self.assertEqual(self.verdict({"changes": [{"path": "src/a.py", "kind": {"type": "add"}}]}), "ALLOW")
+
+    def test_escape_and_allow_only(self):
+        self.assertEqual(self.verdict({"command": patch("*** Add File: ../x.py")}), "DENY")
+        docs = path_guard(allow_only=["docs/**"])
+        decision = docs(tool_call_event("apply_patch", {"command": patch("*** Add File: src/a.py")}))
+        self.assertEqual(decision["result"], "DENY")
+
+    def test_unreadable_patch_denied(self):
+        for arguments in (
+            {},
+            {"command": "*** Begin Patch\n*** End Patch"},
+            {"command": "*** Add File: \n"},
+            {"command": 5},
+            {"changes": []},
+            {"changes": [{"kind": "add"}]},
+            {"other": patch("*** Add File: src/a.py")},
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertEqual(self.verdict(arguments), "DENY")
+
+
 class NonStringCommandTest(unittest.TestCase):
     def test_list_command_joined_and_checked(self):
         policy = path_guard(deny=[WORKFLOWS])

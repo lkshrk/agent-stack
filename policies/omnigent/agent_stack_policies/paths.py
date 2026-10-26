@@ -6,13 +6,17 @@ from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
 from ._shell import shell_command, walk
 
+PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
     {"Write", "Edit", "MultiEdit", "NotebookEdit", "sys_os_write", "sys_os_edit", "write", "edit"}
-)
+) | PATCH_TOOLS
 SHELL_TOOLS = frozenset({"sys_os_shell", "Bash", "bash", "Shell", "terminal", "shell"})
 PATH_KEYS = ("file_path", "path", "notebook_path")
+PATCH_KEYS = ("command", "input", "patch")
 
 _FLAG_PREFIX = re.compile(r"^--[^=\s]+=")
+_PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): *(.*?)\s*$", re.MULTILINE)
+_PATCH_BEGIN = "*** Begin Patch"
 
 
 def _normalise(path: str) -> str:
@@ -69,6 +73,31 @@ def escapes(path: str) -> bool:
     return ".." in path.replace("\\", "/").split("/")
 
 
+def patch_paths(arguments: dict) -> list[str] | None:
+    """Every path an apply_patch call touches, or None when the patch can't be read."""
+    changes = arguments.get("changes")
+    if isinstance(changes, list):
+        paths = []
+        for change in changes:
+            if not isinstance(change, dict) or not isinstance(change.get("path"), str):
+                return None
+            paths.append(change["path"])
+            kind = change.get("kind")
+            move = kind.get("move_path") if isinstance(kind, dict) else None
+            if isinstance(move, str):
+                paths.append(move)
+        return paths or None
+    text = next((arguments[k] for k in PATCH_KEYS if k in arguments), None)
+    if isinstance(text, list):
+        text = next((part for part in text if isinstance(part, str) and _PATCH_BEGIN in part), None)
+    if not isinstance(text, str):
+        return None
+    paths = _PATCH_PATH.findall(text)
+    if not paths or not all(paths):
+        return None
+    return paths
+
+
 def path_guard(
     *,
     deny: list[str] | None = None,
@@ -79,6 +108,15 @@ def path_guard(
     has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
 
+    def check_path(path: str) -> Decision | None:
+        if escapes(path):
+            return _deny(f"path {path} tries to escape with '..'")
+        if forbidden(path):
+            return _deny(f"forbidden path {path}")
+        if allowed_only is not None and not _matches_any(path, allowed_only):
+            return _deny(f"path {path} is outside allowed paths")
+        return None
+
     def check_write(arguments: dict) -> Decision:
         path = next(
             (arguments[k] for k in PATH_KEYS if isinstance(arguments.get(k), str) and arguments[k]),
@@ -86,12 +124,16 @@ def path_guard(
         )
         if path is None:
             return _deny("write without a path argument")
-        if escapes(path):
-            return _deny(f"path {path} tries to escape with '..'")
-        if forbidden(path):
-            return _deny(f"forbidden path {path}")
-        if allowed_only is not None and not _matches_any(path, allowed_only):
-            return _deny(f"path {path} is outside allowed paths")
+        return check_path(path) or allow()
+
+    def check_patch(arguments: dict) -> Decision:
+        paths = patch_paths(arguments)
+        if paths is None:
+            return _deny("apply_patch without a readable patch; name every file in an `*** Add/Update/Delete File:` line")
+        for path in paths:
+            decision = check_path(path)
+            if decision:
+                return decision
         return allow()
 
     def check_shell(arguments: dict) -> Decision:
@@ -119,6 +161,9 @@ def path_guard(
             return None
         if arguments.get("_unparseable"):
             return _deny("unparseable tool arguments")
-        return check_write(arguments) if tool_name(event) in WRITE_TOOLS else check_shell(arguments)
+        name = tool_name(event)
+        if name in PATCH_TOOLS:
+            return check_patch(arguments)
+        return check_write(arguments) if name in WRITE_TOOLS else check_shell(arguments)
 
     return policy
