@@ -43,6 +43,19 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     "doas": (frozenset({"-u", "-C"}), 0),
     "xargs": (frozenset(_XARGS_VALUES), 0),
 }
+_UV_VALUES = frozenset({
+    "--extra", "--no-extra", "--group", "--no-group", "--only-group", "--no-editable-package", "--env-file", "-w",
+    "--with", "--with-editable", "--with-requirements", "--package", "--python-platform", "--index",
+    "--default-index", "-i", "--index-url", "--extra-index-url", "-f", "--find-links", "--index-strategy",
+    "--keyring-provider", "-P", "--upgrade-package", "--upgrade-group", "--resolution", "--prerelease",
+    "--prerelease-package", "--fork-strategy", "--exclude-newer", "--exclude-newer-package", "--no-sources-package",
+    "--reinstall-package", "--link-mode", "-C", "--config-setting", "--config-settings-package",
+    "--no-build-isolation-package", "--no-build-package", "--no-binary-package", "--cache-dir", "--refresh-package",
+    "-p", "--python", "--color", "--allow-insecure-host", "--directory", "--project", "--config-file", "--from",
+    "-c", "--constraints", "-b", "--build-constraints", "--overrides", "--torch-backend",
+})
+_MISE_VALUES = frozenset({"-C", "--cd", "-E", "--env", "-j", "--jobs", "--log-level"})
+_PYTHON_SPEC = re.compile(r"[@=<>!~\[]")
 _LAUNCH_OPTIONS = frozenset({"-p", "--package", "-c", "--call"})
 _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": {"exec", "x"}, "bun": {"x"}}
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
@@ -168,6 +181,21 @@ def _launch(args: list[str], nested: list[str]) -> list[str]:
     return [_package(operands[0]), *operands[1:]] if operands else []
 
 
+def _uv(args: list[str], tool: bool) -> list[str]:
+    start, _ = _scan(args, _UV_VALUES)
+    operands = args[start:]
+    if tool and operands:
+        return [_PYTHON_SPEC.split(operands[0], 1)[0], *operands[1:]]
+    return operands
+
+
+def _mise_exec(args: list[str], nested: list[str]) -> list[str]:
+    split = args.index("--") if "--" in args else len(args)
+    commands = _command_options(args[:split], frozenset({"-c", "--command"}))
+    nested.extend(commands)
+    return [] if commands else args[split + 1 :]
+
+
 def _shell_inputs(args: list[str], nested: list[str]) -> bool:
     """Collect `-c` and here-string bodies; True when the shell runs a script from stdin."""
     i = 0
@@ -210,6 +238,20 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
         return _launch(args, nested)
     if name in _LAUNCH_SUBCOMMANDS and args[:1] and args[0] in _LAUNCH_SUBCOMMANDS[name]:
         return _launch(args[1:], nested)
+    if name == "uvx":
+        return _uv(args, tool=True)
+    if name == "uv":
+        start, _ = _scan(args, _UV_VALUES)
+        rest = args[start:]
+        if rest[:1] == ["run"]:
+            return _uv(rest[1:], tool=False)
+        if rest[:2] == ["tool", "run"]:
+            return _uv(rest[2:], tool=True)
+        return None
+    if name == "mise":
+        start, _ = _scan(args, _MISE_VALUES)
+        rest = args[start:]
+        return _mise_exec(rest[1:], nested) if rest[:1] in (["exec"], ["x"]) else None
     if name == "env":
         start, found = _scan(args, frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}))
         operands = args[start:]

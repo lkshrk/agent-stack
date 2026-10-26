@@ -31,6 +31,15 @@ class ResolveTest(unittest.TestCase):
             "pnpm dlx tool@3 run": ["tool", "run"],
             "timeout 5 env A=1 nice git push": ["git", "push"],
             "! git push": ["git", "push"],
+            "uv run git push": ["git", "push"],
+            "uv run --with rich -p 3.12 --frozen git push": ["git", "push"],
+            "uv run --directory=backend -- git push": ["git", "push"],
+            "uv tool run --from foo git push": ["git", "push"],
+            "uvx --with rich -p 3.12 git push": ["git", "push"],
+            "uvx tool@1.2 run": ["tool", "run"],
+            "mise exec -- git push": ["git", "push"],
+            "mise x node@20 -C backend -- git push": ["git", "push"],
+            "mise --cd backend exec -- git push": ["git", "push"],
         }
         for command, expected in cases.items():
             with self.subTest(command=command):
@@ -53,11 +62,18 @@ class ResolveTest(unittest.TestCase):
             "parallel ::: 'git push' 'git pull'": ["git push", "git pull"],
             "sh <<< 'git push'": ["git push"],
             "watch -n 1 git status": ["git status"],
+            "mise exec -c 'git push'": ["git push"],
+            "mise x node@20 --command='git push'": ["git push"],
         }
         for command, expected in cases.items():
             with self.subTest(command=command):
                 self.assertEqual(resolve(parse(command)[0]).nested, expected)
         self.assertEqual(argv("env -S 'git push origin'"), ["git", "push", "origin"])
+
+    def test_launcher_without_a_command(self):
+        self.assertEqual(argv("mise exec node@20"), [])
+        self.assertEqual(argv("uv sync --frozen"), ["uv", "sync", "--frozen"])
+        self.assertEqual(argv("mise install"), ["mise", "install"])
 
     def test_stdin_exec(self):
         for command in ("sh", "bash -s", "bash -e", "bash < x.sh", "zsh -x", "parallel"):
