@@ -1,6 +1,6 @@
 import unittest
 
-from agent_stack_policies.readonly import read_only_shell
+from agent_stack_policies.readonly import git_verbs, read_only_shell
 
 from . import assert_not_ask, tool_call_event
 
@@ -24,7 +24,6 @@ DENIED = [
     "cat > a.md <<'EOF'\nx\nEOF",
     "rg x | tee out.txt",
     "sed -i s/a/b/ a.py",
-    "sed -n 1,80p a.py",
     "awk '{print > \"o\"}' a",
     "perl -pi -e s/a/b/ a.py",
     "python3 -c 'open(\"a\", \"w\")'",
@@ -60,7 +59,6 @@ DENIED = [
     "git branch -D x",
     "git grep -O foo",
     "git clone https://x.test/r.git",
-    "bash -c 'rg x'",
     "bash -c 'echo x > a'",
     "eval rg x",
     "echo $(rm a)",
@@ -69,11 +67,42 @@ DENIED = [
     "make plan",
     "curl -o out https://x.test",
     'echo "unterminated',
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=touch git status",
+    "GIT_EXTERNAL_DIFF=bash git diff HEAD~1",
+    "env FOO=1 git status",
+    "env -u HOME GIT_DIR=x git log",
+    "X=1 rg foo",
+    "export GIT_EXTERNAL_DIFF=bash",
+    "sort -S 1 --compress-program=./x a",
+    "sort --comp=./x a",
+    "sort --outp=out a",
+    "sort -uo out a",
+    "cat <> plan.md",
+    "cat 1<>plan.md",
+    "rg -n 'a > b' src",
+    "rg --hostname-bin=./x foo",
+    "git grep --open-files-in-p=vim foo",
+    "git grep -nO foo",
+    "git --config-env=core.pager=X log",
+    "git --git-dir=x log",
+    "sed 'w out' a",
+    "sed -n '1p;w out' a",
+    "sed 'e rm a' a",
+    "sed --in-place s/a/b/ a",
+    "sed -n -e 1p -e 'w o' a",
+    "bash --rcfile x -c 'rg x'",
+    "bash -i -c 'rg x'",
+    "bash -lc 'rm a'",
+    "bash scripts/x.sh",
+    "ls | xargs sh -c 'rm a'",
+    "less a.py",
+    "man git",
+    "gh pr view 3",
+    "uniq -f 1 a out",
 ]
 
 ALLOWED = [
     "rg -n foo src",
-    "rg -n 'a > b' src",
     "grep -rn foo src",
     "cat a.py",
     "head -n 40 a.py",
@@ -104,7 +133,16 @@ ALLOWED = [
     "git --no-pager log -1",
     "git -C ~/knowledge log -1",
     "timeout 30 rg foo",
-    "X=1 rg foo",
+    "sed -n 1,80p a.py",
+    "sed -n '$p' a.py",
+    "sed -n -e 10,20p a.py",
+    "bash -lc 'rg -n foo src'",
+    "bash -euo pipefail -c 'rg foo | head'",
+    "sh -c 'git log -1'",
+    "cd sub && rg foo",
+    "uniq -f 1 a",
+    "uniq -c -s 2 a",
+    "sort -k 2,2 -t , a",
     "",
 ]
 
@@ -127,6 +165,32 @@ class ReadOnlyShellTest(unittest.TestCase):
                 decision = run(command)
                 self.assertEqual(decision["result"], "ALLOW", decision.get("reason"))
 
+    def test_gh_reads_with_extra_gh(self):
+        for command in ("gh pr view 3 --json files", "gh pr diff 3", "gh issue view 1 --repo o/r", "gh api repos/o/r/pulls/3/files"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command, extra_commands=["gh"])["result"], "ALLOW")
+        for command in ("gh pr create --title x", "gh pr review 1 --approve", "gh pr comment 1 -b x",
+                        "gh api -X POST repos/o/r/issues", "gh api repos/o/r/issues -f title=x", "gh extension install x/y",
+                        "gh pr checkout 3", "gh"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command, extra_commands=["gh"])["result"], "DENY")
+
+    def test_exact_commands(self):
+        clone = "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"
+        pull = "git -C ~/knowledge pull --ff-only"
+        policy = read_only_shell(exact_commands=[clone, pull])
+        for command, expected in (
+            (clone, "ALLOW"),
+            (pull, "ALLOW"),
+            ("git clone --depth 50 https://github.com/x/evil.git ~/knowledge", "DENY"),
+            ("git -C ~/knowledge pull", "DENY"),
+            (pull + " && rm a", "DENY"),
+            ("GIT_DIR=x " + pull, "DENY"),
+            (clone + " > out", "DENY"),
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], expected)
+
     def test_extra_commands(self):
         self.assertEqual(run("yq . a.yaml")["result"], "DENY")
         self.assertEqual(run("yq . a.yaml", extra_commands=["yq"])["result"], "ALLOW")
@@ -140,6 +204,7 @@ class ReadOnlyShellTest(unittest.TestCase):
         policy = read_only_shell()
         self.assertEqual(policy(tool_call_event("shell", {"command": ["rg", "x"]}))["result"], "ALLOW")
         self.assertEqual(policy(tool_call_event("shell", {"command": ["bash", "-lc", "rm a"]}))["result"], "DENY")
+        self.assertEqual(policy(tool_call_event("shell", {"command": ["bash", "-lc", "rg -n x src"]}))["result"], "ALLOW")
         self.assertEqual(policy(tool_call_event("bash", {"command": {"x": 1}}))["result"], "DENY")
         event = {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}}
         self.assertEqual(policy(event)["result"], "DENY")
@@ -152,3 +217,70 @@ class ReadOnlyShellTest(unittest.TestCase):
         policy = read_only_shell()
         for event in EVENTS:
             assert_not_ask(self, policy(event))
+
+
+GIT_DENIED = [
+    "git commit -m x",
+    "git push origin feat/x",
+    "git merge origin/main",
+    "git rebase origin/main",
+    "git reset --hard HEAD~1",
+    "git checkout -- a.py",
+    "git switch main",
+    "git restore a.py",
+    "git add a.py",
+    "git rm a.py",
+    "git mv a b",
+    "git stash",
+    "git cherry-pick abc",
+    "git revert abc",
+    "git tag v1",
+    "git am p.mbox",
+    "git apply p.diff",
+    "git worktree move a b",
+    "git -C .worktrees/x commit -m x",
+    "make test && git push origin feat/x",
+    "bash -lc 'git commit -am x'",
+    "echo $(git push)",
+    'echo "unterminated git',
+]
+GIT_ALLOWED = [
+    "git worktree add .worktrees/t1 -b polly/t1",
+    "git worktree remove .worktrees/t1",
+    "git worktree list",
+    "git fetch origin",
+    "git -C .worktrees/t1 diff abc...def",
+    "git status --porcelain",
+    "git log --oneline -5",
+    "gh pr diff 3 > .polly/diffs/t1.diff",
+    "make test",
+    "pnpm test 2>&1 | tail -20",
+    'echo "unterminated',
+]
+
+
+class GitVerbsTest(unittest.TestCase):
+    def setUp(self):
+        self.policy = git_verbs(extra_verbs=["fetch", "worktree"])
+
+    def test_denied(self):
+        for command in GIT_DENIED:
+            with self.subTest(command=command):
+                decision = self.policy(tool_call_event("bash", {"command": command}))
+                self.assertEqual(decision["result"], "DENY", decision.get("reason"))
+                self.assertTrue(decision["reason"].startswith("agent-stack: "))
+
+    def test_allowed(self):
+        for command in GIT_ALLOWED:
+            with self.subTest(command=command):
+                decision = self.policy(tool_call_event("bash", {"command": command}))
+                self.assertEqual(decision["result"], "ALLOW", decision.get("reason"))
+
+    def test_shapes(self):
+        self.assertIsNone(self.policy(tool_call_event("Read", {"file_path": "a"})))
+        self.assertEqual(self.policy(tool_call_event("bash", {"command": {"x": 1}}))["result"], "DENY")
+        self.assertEqual(git_verbs()(tool_call_event("bash", {"command": "git fetch"}))["result"], "DENY")
+
+    def test_never_asks(self):
+        for event in EVENTS:
+            assert_not_ask(self, self.policy(event))

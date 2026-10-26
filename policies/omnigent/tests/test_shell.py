@@ -61,6 +61,8 @@ class ResolveTest(unittest.TestCase):
             "flock /tmp/l -c 'git push'": ["git push"],
             "parallel ::: 'git push' 'git pull'": ["git push", "git pull"],
             "sh <<< 'git push'": ["git push"],
+            "bash -euo pipefail -c 'git push'": ["git push"],
+            "bash -O extglob -c 'git push'": ["git push"],
             "watch -n 1 git status": ["git status"],
             "mise exec -c 'git push'": ["git push"],
             "mise x node@20 --command='git push'": ["git push"],

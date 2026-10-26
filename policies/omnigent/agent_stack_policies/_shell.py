@@ -223,7 +223,7 @@ def _shell_inputs(args: list[str], nested: list[str]) -> bool:
                 return False
             if arg.startswith("-") and "s" in arg[1:]:
                 return True
-            i += 1
+            i += 2 if arg[-1] in "oO" else 1
             continue
         if arg.startswith("--"):
             i += 1

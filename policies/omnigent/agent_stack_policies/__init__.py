@@ -124,12 +124,26 @@ POLICY_REGISTRY: list[dict] = [
         "kind": "factory",
         "name": "read_only_shell",
         "description": (
-            "Allow only listed read commands in the shell (rg, cat, git read verbs and similar), "
-            "with no output redirection to files."
+            "Allow only listed read commands in the shell (rg, cat, sed -n ranges, git read verbs and similar), "
+            "with no environment assignments and no output redirection to files; exact_commands are allowed verbatim."
         ),
         "params_schema": {
             "type": "object",
-            "properties": {"extra_commands": {"type": "array", "items": {"type": "string"}}},
+            "properties": {
+                "extra_commands": {"type": "array", "items": {"type": "string"}},
+                "exact_commands": {"type": "array", "items": {"type": "string"}},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "handler": "agent_stack_policies.readonly.git_verbs",
+        "kind": "factory",
+        "name": "git_verbs",
+        "description": "Allow git in the shell only with read verbs plus extra_verbs (for example fetch, worktree).",
+        "params_schema": {
+            "type": "object",
+            "properties": {"extra_verbs": {"type": "array", "items": {"type": "string"}}},
             "additionalProperties": False,
         },
     },
