@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from check_wow_season_updates import analyze
-from prediff_wow_specs import classify, diff_spec, needs_advance, spec_task, stat_lines, summarize
+from prediff_wow_specs import classify, diff_spec, needs_advance, spec_task, stat_lines, summarize, top_picks
 
 GUIDE = 'https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables'
 PAGE = (Path(__file__).parent / 'fixtures/method-affliction-warlock.html').read_text()
@@ -51,6 +51,28 @@ class PreDiff(unittest.TestCase):
         found = diff_spec(docs['spec-265.json'], {GUIDE: live()})
         self.assertEqual(found['items_no_longer_listed'], [241324])
         self.assertEqual(found['stat_priority']['live'], ['crit>haste=mastery>vers'])
+
+    def test_top_listed_pick_per_slot_is_extracted_from_the_fixture(self):
+        picks = top_picks(analyze('guide', PAGE)[1]['extract'])
+        self.assertEqual(picks[('enchants', 'head')], 244007)
+        self.assertEqual(picks[('enchants', 'shoulders')], 243991)
+        self.assertEqual(picks[('enchants', 'feet')], 243953)
+        self.assertEqual(picks[('consumables', 'food')], 242275)
+        self.assertEqual(picks[('consumables', 'flask')], 241326)
+        self.assertEqual(picks[('consumables', 'combat_potion')], 241308)
+        self.assertEqual(picks[('gems', 'unique')], 240967)
+        self.assertNotIn(('consumables', 'healing_potion'), picks)
+
+    def test_a_different_top_pick_sends_the_spec_to_claude_even_if_the_old_item_is_still_listed(self):
+        docs = documents()
+        docs['spec-265.json']['recommendations']['consumables']['food'] = 'item:255846'
+        found = diff_spec(docs['spec-265.json'], {GUIDE: live()})
+        self.assertEqual(found['top_pick_differs'], {'consumables.food': {'live': 242275, 'spec': 255846}})
+        self.assertNotIn('items_no_longer_listed', found)
+
+    def test_slots_the_spec_does_not_track_are_not_compared(self):
+        docs = documents()
+        self.assertEqual(diff_spec(docs['spec-265.json'], {GUIDE: live()}), {})
 
     def test_prose_only_stat_guidance_is_not_compared(self):
         docs = documents(stat_guidance={'mplus': 'Haste approximately Critical Strike'})

@@ -47,6 +47,32 @@ def spec_items(setup):
     return recommended
 
 
+SLOT_LABELS = [('health potions?', None), ('weapon oils?', None), ('heads?', ('enchants', 'head')),
+               ('shoulders?', ('enchants', 'shoulders')), ('chest', ('enchants', 'chest')),
+               ('boots|feet', ('enchants', 'feet')), ('legs?', ('enchants', 'legs')), ('rings?', ('enchants', 'rings')),
+               ('weapons?', ('enchants', 'weapon')), ('food', ('consumables', 'food')),
+               ('flasks?|phials?', ('consumables', 'flask')), ('potions?', ('consumables', 'combat_potion')),
+               ('augment runes?|runes?', ('consumables', 'optional_augment_rune'))]
+LABEL = re.compile(r'(?<![\w-])(?:' + '|'.join(f'(?P<l{i}>{p})' for i, (p, _) in enumerate(SLOT_LABELS)) + r'):', re.I)
+
+
+def top_picks(extract):
+    picks = {}
+    for section in ('enchants', 'consumables'):
+        text = extract.get(section, '')
+        marks = list(LABEL.finditer(text))
+        for number, mark in enumerate(marks):
+            slot = SLOT_LABELS[int(mark.lastgroup[1:])][1]
+            end = marks[number + 1].start() if number + 1 < len(marks) else len(text)
+            first = ITEM_ID.search(text[mark.end():end])
+            if slot and first and slot[0] == section:
+                picks.setdefault(slot, int(first.group(1)))
+    gem = ITEM_ID.search(extract.get('gems', ''))
+    if gem:
+        picks[('gems', 'unique')] = int(gem.group(1))
+    return picks
+
+
 def guide_urls(setup):
     return [s['url'] if isinstance(s, dict) else s for s in setup['sources']]
 
@@ -69,6 +95,11 @@ def diff_spec(setup, guides):
             live_stats.append(found[0])
     spec_stats = set(stat_lines(json.dumps(setup.get('stat_guidance', {}))))
     differences = {}
+    for guide in guides.values():
+        for (section, key), live_id in top_picks(guide['extract']).items():
+            ours = setup.get('recommendations', {}).get(section, {}).get(key)
+            if isinstance(ours, str) and ours.startswith('item:') and int(ours[5:]) != live_id:
+                differences.setdefault('top_pick_differs', {})[f'{section}.{key}'] = {'live': live_id, 'spec': int(ours[5:])}
     removed = sorted(recommended - live)
     if removed:
         differences['items_no_longer_listed'] = removed
