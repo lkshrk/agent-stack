@@ -213,6 +213,37 @@ CASES: list[Case] = [
     Case("security-review", "response", None, fenced("security-valid.json"), "ALLOW"),
     Case("security-review", "response", None, fenced("security-invalid-pass-high.json"), "DENY"),
     Case("security-review", "response", None, fenced("security-invalid-pass-high.json"), "DENY", turn_final=True),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "docs/setup.md", "oldText": "a", "newText": "b"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "docs/adr/0007-queue.md", "content": "x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "README.md", "oldText": "a", "newText": "b"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "CHANGELOG.md", "oldText": "a", "newText": "b"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "frontend/README", "oldText": "a", "newText": "b"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "backend/app/main.py", "oldText": "a", "newText": "b"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "backend/app/main.py", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "docs/../backend/app/main.py", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "AGENTS.md", "oldText": "a", "newText": "b"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_edit", {"path": "CLAUDE.md", "oldText": "a", "newText": "b"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".pilot/notes.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".github/workflows/README.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "src/notes.md", "content": "x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "src/docs/x.py", "content": "x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ backend/app/main.py"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ AGENTS.md"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:feat/x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push --force origin HEAD:feat/x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:main"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr merge 5"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_read", {"path": "backend/app/main.py"}, "ALLOW"),
+    Case("documenter", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+    Case("documenter", "tool_call", "litellm-tools__linear_app-save_comment", {"body": "x"}, "DENY"),
+    Case("documenter", "tool_call", "mcp__litellm-tools__linear-save_comment", {"body": "x"}, "DENY"),
+    Case("documenter", "tool_call", "result_check__validate_result", {"kind": "documenter", "text": "x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_policy_registry", {}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 300}),
+    Case("documenter", "response", None, "Docs updated.", "DENY", turn_final=True),
+    Case("documenter", "response", None, fenced("documenter-valid.json"), "ALLOW", turn_final=True),
+    Case("documenter", "response", None, fenced("documenter-invalid-delta-no-pr.json"), "DENY", turn_final=True),
 ]
 
 
@@ -339,6 +370,49 @@ class BundleVerdictTest(unittest.TestCase):
         servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
         self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
         self.assertEqual([s.name for s in spec.skills], ["security-audit"])
+
+    def test_documenter_delta_run_allowed(self):
+        result = {
+            "status": "DONE",
+            "mode": "delta",
+            "changed_files": ["docs/setup.md", "README.md"],
+            "stale": [],
+            "pr": "https://github.com/routivo/routivo-monorepo/pull/7",
+        }
+        response = "Docs updated for #7.\n```json\n" + json.dumps(result, indent=2) + "\n```"
+        run = [
+            ("sys_os_shell", {"command": "gh pr view 7 --repo routivo/routivo-monorepo --json files,headRefName"}),
+            ("sys_os_shell", {"command": "gh pr diff 7 --repo routivo/routivo-monorepo"}),
+            ("sys_os_shell", {"command": "git rev-parse --abbrev-ref HEAD"}),
+            ("sys_os_read", {"path": "docs/setup.md"}),
+            ("sys_os_read", {"path": "README.md"}),
+            ("sys_os_read", {"path": "backend/app/settings.py"}),
+            ("sys_os_shell", {"command": "rg -n ORDERS_QUEUE backend docs README.md"}),
+            ("sys_os_edit", {"path": "docs/setup.md", "oldText": "a", "newText": "b"}),
+            ("sys_os_edit", {"path": "README.md", "oldText": "a", "newText": "b"}),
+            ("sys_os_shell", {"command": "git add docs/setup.md README.md"}),
+            ("sys_os_shell", {"command": 'git commit -m "docs: document the ORDERS_QUEUE setting"'}),
+            ("sys_os_shell", {"command": "git push origin HEAD:feat/x"}),
+            ("result_check__validate_result", {"kind": "documenter", "text": response}),
+        ]
+        self.assertEqual(run_sequence("documenter", run), ["ALLOW"] * len(run))
+        final = Case("documenter", "response", None, response, "ALLOW", turn_final=True)
+        self.assertEqual(verdict(BUNDLES / "documenter", final), "ALLOW")
+
+    def test_documenter_flags(self):
+        from omnigent.spec import load
+
+        spec = load(BUNDLES / "documenter", expand_env=False)
+        self.assertEqual(spec.executor.model, "claude-sonnet")
+        self.assertEqual(spec.executor.config["harness"], "claude-sdk")
+        self.assertIs(spec.spawn, False)
+        self.assertIs(spec.async_enabled, False)
+        self.assertIs(spec.timers, False)
+        self.assertIsNotNone(spec.os_env)
+        self.assertEqual(spec.guardrails.ask_timeout, 300)
+        servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
+        self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
+        self.assertEqual(sorted(s.name for s in spec.skills), ["docs-audit", "docs-delta"])
 
     def test_polly_spawn_disabled(self):
         from omnigent.spec import load
