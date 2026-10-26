@@ -16,6 +16,7 @@ ARG KOTLIN_LSP_VERSION=0.0.27
 ARG KOTLIN_LSP_SHA256=6787185abb0e7f3b527484bb6cc4a881ce42b2e39320626937e65839751075e9
 ARG MISE_VERSION=v2026.10.15
 ARG PLAYWRIGHT_VERSION=1.60.0
+ARG PROJECT_NODE_VERSION=24.21.0
 
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -46,7 +47,9 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mi
  && chmod 0755 /usr/local/bin/mise
 
 COPY images/omnigent-host/mise.toml /etc/mise/config.toml
+# Preinstalled, not global: a project that pins it gets it offline, everything else keeps the base node.
 RUN mise install \
+ && mise install "node@${PROJECT_NODE_VERSION}" \
  && mise reshim \
  && rm -rf /opt/mise/cache \
  && chmod -R a+rX /opt/mise

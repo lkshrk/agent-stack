@@ -1,5 +1,4 @@
 [tools]
-node = "24.21.0"
 go = "1.27.3"
 rust = { version = "1.99.1", components = "clippy,rustfmt,rust-src" }
 bun = "1.4.4"
@@ -36,3 +35,5 @@ gitleaks = "8.30.1"
 
 [settings]
 experimental = true
+# The sandbox user cannot write /opt/mise; without this a project pinning a missing node breaks every node CLI.
+auto_install = false

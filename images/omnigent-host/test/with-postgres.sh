@@ -32,4 +32,11 @@ check "exit code 7 is kept" "$?" 7
 after=$(find /tmp -maxdepth 1 -name 'pg.*' | sort)
 check "no /tmp/pg.* left behind" "$after" "$before"
 
+if pgrep -u "$(id -u)" postgres >/dev/null; then
+  echo "FAIL postgres still running"
+  fail=1
+else
+  echo "ok   no postgres left running"
+fi
+
 exit "$fail"
