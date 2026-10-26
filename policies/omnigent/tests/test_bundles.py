@@ -193,6 +193,24 @@ CASES: list[Case] = [
     Case("planner", "response", None, "Here is the plan.", "DENY", turn_final=True),
     Case("planner", "response", None, fenced("planner-valid.json"), "ALLOW", turn_final=True),
     Case("planner", "response", None, fenced("planner-invalid-uncovered.json"), "DENY", turn_final=True),
+    Case("security-review", "tool_call", "Write", {"file_path": "src/a.py", "content": "x"}, "DENY"),
+    Case("security-review", "tool_call", "Edit", {"file_path": "src/a.py", "old_string": "a", "new_string": "b"}, "DENY"),
+    Case("security-review", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: a.py\n+x\n*** End Patch"}, "DENY"),
+    Case("security-review", "tool_call", "apply_patch", {"changes": [{"path": "/ws/a.py", "kind": {"type": "add"}}]}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "gh pr review 3 --approve"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "gh pr comment 3 --body x"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "git push origin feat/x"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "gitleaks detect --no-git --source ."}, "ALLOW"),
+    Case("security-review", "tool_call", "Bash", {"command": "rg -n subprocess src"}, "ALLOW"),
+    Case("security-review", "tool_call", "mcp__codebase-memory-mcp__delete_project", {"project": "x"}, "DENY"),
+    Case("security-review", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+    Case("security-review", "tool_call", "result_check__validate_result", {"kind": "security", "text": "x"}, "ALLOW"),
+    Case("security-review", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 300}),
+    Case("security-review", "response", None, "Reviewing the diff now.", "ALLOW"),
+    Case("security-review", "response", None, fenced("security-valid.json"), "ALLOW"),
+    Case("security-review", "response", None, fenced("security-invalid-pass-high.json"), "DENY"),
+    Case("security-review", "response", None, fenced("security-invalid-pass-high.json"), "DENY", turn_final=True),
 ]
 
 
@@ -281,6 +299,42 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(servers, [("code_graph", "codebase-memory-mcp", []), ("result_check", *python)])
         skills = sorted(s.name for s in spec.skills)
         self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-critic", "plan-decompose"])
+
+    def test_security_review_normal_run_allowed(self):
+        response = "Security review of #3.\n```json\n" + (FIXTURES / "security-valid.json").read_text() + "\n```"
+        run = [
+            ("Bash", {"command": "gh pr view 3 --repo routivo/routivo-monorepo --json files,baseRefOid,headRefOid"}),
+            ("Bash", {"command": "gh pr diff 3 --repo routivo/routivo-monorepo"}),
+            ("Bash", {"command": "gh pr diff 3"}),
+            ("Bash", {"command": "git diff --name-only abc123 def456"}),
+            ("Bash", {"command": "gitleaks detect --no-git --redact --no-banner --source src/a.py"}),
+            ("Bash", {"command": "gitleaks detect --no-git --redact --no-banner --source src/b.py"}),
+            ("Bash", {"command": "uvx semgrep scan --config p/default --error src/a.py src/b.py"}),
+            ("Bash", {"command": "uv run --with pip-audit pip-audit"}),
+            ("Bash", {"command": "pnpm audit --prod"}),
+            ("Bash", {"command": "sed -n 1,80p src/a.py"}),
+            ("Bash", {"command": "rg -n shell=True src"}),
+            ("Bash", {"command": "git show def456:src/a.py"}),
+            ("result_check__validate_result", {"kind": "security", "text": response.replace('"fail"', '"pass"')}),
+            ("result_check__validate_result", {"kind": "security", "text": response}),
+        ]
+        self.assertEqual(run_sequence("security-review", run), ["ALLOW"] * len(run))
+        final = Case("security-review", "response", None, response, "ALLOW")
+        self.assertEqual(verdict(BUNDLES / "security-review", final), "ALLOW")
+
+    def test_security_review_flags(self):
+        from omnigent.spec import load
+
+        spec = load(BUNDLES / "security-review", expand_env=False)
+        self.assertEqual(spec.executor.model, "gpt-sol")
+        self.assertEqual(spec.executor.config["harness"], "codex-native")
+        self.assertIs(spec.spawn, False)
+        self.assertIs(spec.async_enabled, False)
+        self.assertIs(spec.timers, False)
+        self.assertEqual(spec.guardrails.ask_timeout, 300)
+        servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
+        self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
+        self.assertEqual([s.name for s in spec.skills], ["security-audit"])
 
     def test_polly_spawn_disabled(self):
         from omnigent.spec import load

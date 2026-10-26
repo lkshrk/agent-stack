@@ -272,3 +272,38 @@ class CliTest(unittest.TestCase):
                 self.assertEqual(result.main(["security"]), 0)
             finally:
                 sys.stdin = old
+
+
+def nested(depth, leaf="x"):
+    value = leaf
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+class DepthTest(unittest.TestCase):
+    def test_over_deep_result_is_an_error_not_a_raise(self):
+        for depth in (300, 900, 5000):
+            data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(depth)}
+            errors = result.validate_result("security", data)
+            self.assertTrue(any("nest" in e for e in errors), (depth, errors))
+
+    def test_over_deep_planner_files_do_not_raise(self):
+        data = load("planner-valid.json")
+        data["children"][0]["files"] = [nested(2000)]
+        self.assertTrue(result.validate_result("planner", data))
+
+    def test_placeholder_found_within_depth_limit(self):
+        data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(20, "TBD")}
+        self.assertTrue(any("placeholder" in e for e in result.validate_result("security", data)))
+
+    def test_extract_skips_unparseably_deep_block(self):
+        deep = "[" * 100000 + "]" * 100000
+        text = f"{fenced({'n': 1})}\n```json\n{deep}\n```"
+        self.assertEqual(result.extract_result(text), {"n": 1})
+        self.assertIsNone(result.extract_result(f"```json\n{deep}\n```"))
+
+    def test_contract_denies_over_deep_block(self):
+        data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(500)}
+        decision = result.result_contract(kind="security")(response(fenced(data)))
+        self.assertEqual(decision["result"], "DENY")

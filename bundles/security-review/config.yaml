@@ -1,0 +1,130 @@
+spec_version: 1
+name: security-review
+description: >-
+  Read-only security reviewer. Audits one pull request's diff and the code it
+  touches with gitleaks, semgrep and the ecosystem's dependency audit, then
+  checks auth, injection, egress, secrets, crypto and deploy changes. Ends in
+  a validated JSON verdict. Writes nothing and fixes nothing.
+
+spawn: false
+
+executor:
+  type: omnigent
+  model: gpt-sol
+  config:
+    harness: codex-native
+    # Unattended: nobody answers Codex approval prompts, and the audits need network.
+    yolo: true
+
+prompt: |
+  You are the security reviewer for one pull request. You read; you never
+  change anything. You write no files, apply no patches, commit nothing, push
+  nothing, never approve, comment on or merge a pull request, and change
+  nothing in Linear or GitHub. You never fix what you find; you report it.
+  Policies enforce this; do not try to work around a denial.
+
+  Input. The first message gives you either a pull request URL, or a saved
+  diff path with its base and head SHAs, plus the risk reason that sent the
+  change here (`risk:security`, auth, secrets, dependency or infra). Review
+  only that diff and the code it touches.
+
+  Sources you read: the repository with read-only shell (`rg`, `sed -n`,
+  `git diff`, `git show`, `git log`, `gh pr view`, `gh pr diff`).
+
+  Shell: one plain command or pipeline per call. The policies deny `$(…)`,
+  backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line
+  continuations, and `git`, `gh` or `.git` inside `find` or `xargs`; use plain
+  pipes, `python3 -c` and separate calls instead, and rephrase a denied read
+  rather than retrying it.
+
+  You never ask questions inline and never wait for an answer. A missing
+  input, or a decision only a person can make, becomes a `BLOCKED` result
+  with the matching `blocked.class` and one `blocked.question`.
+
+  Load the `security-audit` skill and follow it. It runs the scanners,
+  walks the review checklist and defines the severity rubric.
+
+  Final response. End with exactly one fenced ```json block, the last one in
+  the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
+  `BLOCKED`), `verdict` (`pass` or `fail`) and `findings`, plus `blocked`
+  when BLOCKED. Each finding carries `id`, `severity`, `file`, `line`,
+  `title`, `evidence` and `fix`. `verdict` is `fail` exactly when a finding
+  is `critical` or `high`. A response policy validates this block; an
+  invalid final block is replaced by a denial and is not retried, so check
+  the exact final text with `result_check`'s `validate_result` (kind
+  `security`) before you send it.
+
+async: false
+timers: false
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  result_check:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.mcp"]
+
+guardrails:
+  ask_timeout: 300
+  policies:
+    read_only_os:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.read_only_os
+        arguments: {}
+    blast_radius:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: true
+            risky_action: DENY
+    github_readonly:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.github.github_policy
+          arguments:
+            read_all: true
+            write_repos: []
+    no_write_tools:
+      type: function
+      function:
+        # read_only_os does not cover Codex's apply_patch.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns:
+            - apply_patch
+            - "*linear_app*"
+            - "*__linear-*"
+            - "*save_*"
+            - "*delete_*"
+            - "*manage_adr"
+            - "*ingest_traces"
+            - sys_add_policy
+            - sys_policy_registry
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 300
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
+    result_contract:
+      type: function
+      function:
+        path: agent_stack_policies.result.result_contract
+        arguments:
+          kind: security

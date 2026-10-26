@@ -71,3 +71,31 @@ class McpServerTest(unittest.TestCase):
         self.assertEqual(out[6]["error"]["code"], -32602)
         self.assertEqual(out[7]["result"], {})
         self.assertEqual(out[None]["error"]["code"], -32700)
+
+    def test_deep_input_keeps_serving(self):
+        deep_block = "```json\n" + "[" * 100000 + "]" * 100000 + "\n```"
+        nested = {"status": "DONE", "verdict": "pass", "findings": [], "extra": []}
+        inner = nested["extra"]
+        for _ in range(600):
+            inner.append([])
+            inner = inner[0]
+        out = session(
+            INIT,
+            call(deep_block, kind="security", rid=3),
+            call("```json\n" + json.dumps(nested) + "\n```", kind="security", rid=4),
+            raw="[" * 200000 + "\n" + json.dumps({"jsonrpc": "2.0", "id": 5, "method": "ping"}) + "\n",
+        )
+        self.assertFalse(out[3]["result"]["structuredContent"]["has_block"])
+        self.assertFalse(out[4]["result"]["structuredContent"]["valid"])
+        self.assertEqual(out[None]["error"]["code"], -32700)
+        self.assertEqual(out[5]["result"], {})
+
+    def test_unexpected_error_is_internal_error(self):
+        from unittest import mock
+
+        from agent_stack_policies import mcp
+
+        with mock.patch.object(mcp, "_handle", side_effect=RuntimeError("boom")):
+            reply = mcp.respond(json.dumps({"jsonrpc": "2.0", "id": 9, "method": "ping"}))
+        self.assertEqual(reply["id"], 9)
+        self.assertEqual(reply["error"]["code"], -32603)

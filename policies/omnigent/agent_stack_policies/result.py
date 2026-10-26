@@ -13,6 +13,7 @@ RISK_CLASSES = ("low", "medium", "high")
 SEVERITIES = ("critical", "high", "medium", "low")
 MAX_CHILDREN = 8
 MAX_ERRORS_SHOWN = 5
+MAX_DEPTH = 64
 
 _BLOCK = re.compile(r"```json[ \t]*\r?\n(.*?)```", re.DOTALL)
 _EARS = re.compile(r"^WHEN .+ THE SYSTEM SHALL .+")
@@ -23,7 +24,7 @@ def extract_result(text: str) -> dict | None:
     for body in reversed(_BLOCK.findall(text)):
         try:
             parsed = json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):
             continue
         if isinstance(parsed, dict):
             return parsed
@@ -38,14 +39,31 @@ def _int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _placeholders(value: object, path: str = "result") -> list[str]:
-    if isinstance(value, str):
-        return [f"{path}: contains a placeholder"] if _PLACEHOLDER.search(value) else []
-    if isinstance(value, dict):
-        return [e for k, v in value.items() for e in _placeholders(v, f"{path}.{k}")]
-    if isinstance(value, list):
-        return [e for i, v in enumerate(value) for e in _placeholders(v, f"{path}[{i}]")]
-    return []
+def _too_deep(value: object) -> bool:
+    stack = [(value, 0)]
+    while stack:
+        item, depth = stack.pop()
+        if isinstance(item, (dict, list)):
+            if depth >= MAX_DEPTH:
+                return True
+            children = item.values() if isinstance(item, dict) else item
+            stack.extend((child, depth + 1) for child in children)
+    return False
+
+
+def _placeholders(value: object) -> list[str]:
+    errors = []
+    stack = [(value, "result")]
+    while stack:
+        item, path = stack.pop()
+        if isinstance(item, str):
+            if _PLACEHOLDER.search(item):
+                errors.append(f"{path}: contains a placeholder")
+        elif isinstance(item, dict):
+            stack.extend((v, f"{path}.{k}") for k, v in reversed(item.items()))
+        elif isinstance(item, list):
+            stack.extend((v, f"{path}[{i}]") for i, v in reversed(list(enumerate(item))))
+    return errors
 
 
 def _dict(result: dict, key: str, errors: list[str]) -> dict:
@@ -234,6 +252,8 @@ _CHECKS = {"planner": _check_planner, "security": _check_security, "documenter":
 def validate_result(kind: str, result: dict) -> list[str]:
     if kind not in _CHECKS:
         return [f"unknown kind {kind!r}"]
+    if _too_deep(result):
+        return [f"result nests deeper than {MAX_DEPTH} levels"]
     errors = _placeholders(result)
     status = result.get("status")
     if status not in STATUSES:

@@ -82,7 +82,7 @@ def _handle(method: object, params: dict) -> dict:
 def respond(line: str) -> dict | None:
     try:
         message = json.loads(line)
-    except ValueError:
+    except (ValueError, RecursionError):
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}
     if not isinstance(message, dict) or "method" not in message or "id" not in message:
         return None
@@ -91,6 +91,9 @@ def respond(line: str) -> dict | None:
         result = _handle(message["method"], params if isinstance(params, dict) else {})
     except RpcError as exc:
         return {"jsonrpc": "2.0", "id": message["id"], "error": {"code": exc.code, "message": str(exc)}}
+    except Exception as exc:
+        error = {"code": -32603, "message": f"internal error: {type(exc).__name__}"}
+        return {"jsonrpc": "2.0", "id": message["id"], "error": error}
     return {"jsonrpc": "2.0", "id": message["id"], "result": result}
 
 
