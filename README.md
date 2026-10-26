@@ -20,7 +20,7 @@ Both read and write the knowledge vault through its normal workflow.
 | `config/hermes/` | Hermes managed `config.yaml`, `SOUL.md`, learning snapshot script |
 | `config/pr-agent/` | PR-Agent review policy (`pr-agent.toml`) and reviewer guide (`review.md`), loaded by the h-cloud init container |
 
-Everything here ships inside images. Deployment manifests, secrets, databases and routes live in the h-cloud repository.
+Everything here ships inside images, except `config/pr-agent/`, which h-cloud fetches at runtime. Deployment manifests, secrets, databases and routes live in the h-cloud repository.
 
 ## Credentials
 

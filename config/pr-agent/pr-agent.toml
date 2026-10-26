@@ -1,4 +1,4 @@
-# Shared PR-Agent policy; h-cloud combines it with agents/pr-agent/review.md at startup.
+# Shared PR-Agent policy; h-cloud combines it with config/pr-agent/review.md at startup.
 # Repository-local .pr_agent.toml files may override these defaults.
 
 [config]
