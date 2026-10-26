@@ -19,7 +19,7 @@ ALLOWED = re.compile(r'(catalog|index|source-watch|spec-\d+)\.json')
 # Provenance and verification bookkeeping; a change confined to these is not a player-visible update.
 BOOKKEEPING = {'verified_at', 'identity_verified_at', 'verified_patch', 'captured_at', 'updated', 'sources',
                'unresolved', 'unknown_fields', 'quality_note', 'identity_verification', 'verification_basis',
-               'validation_scope', 'coverage', 'tooltip_enriched_at', 'recheck'}
+               'validation_scope', 'coverage', 'tooltip_enriched_at'}
 
 
 def load_bundle(path):
@@ -159,6 +159,8 @@ def validate(old, candidate, result, observation, checked=None):
     for entry in index['specs']:
         name = f'spec-{entry["spec_id"]}.json'
         setup = candidate[name]
+        if setup.get('recheck') and setup['recheck'] != old.get(name, {}).get('recheck'):
+            raise ValueError('Candidate may not set recheck: ' + name)
         if setup.get('schema_version') != 1:
             raise ValueError('Unsupported spec schema')
         if entry['file'] != name or setup['spec_id'] != entry['spec_id']:

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import (drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
+from apply_wow_season_refresh import (advance_verified, drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
                                       source_mapping_errors, validate)
 from check_wow_season_updates import active_bundle, analyze
 
@@ -299,6 +299,34 @@ class DataQuality(unittest.TestCase):
         self.assertEqual(source_mapping_errors(documents), [])
         for key, record in documents['catalog.json']['records'].items():
             record_errors(key, record)
+
+    def test_clearing_recheck_is_published_and_adding_it_is_rejected(self):
+        old, observation, result = fixture()
+        old['spec-265.json']['recheck'] = 'sources corrected'
+        candidate = copy.deepcopy(old)
+        del candidate['spec-265.json']['recheck']
+        docs = drop_negligible(old, validate(old, candidate, result, observation))
+        self.assertNotIn('recheck', docs['spec-265.json'])
+        fresh, observation, result = fixture()
+        flagged = copy.deepcopy(fresh)
+        flagged['spec-265.json']['recheck'] = 'agent flag'
+        with self.assertRaisesRegex(ValueError, 'recheck'):
+            validate(fresh, flagged, result, observation)
+
+    def test_flagged_spec_with_unchanged_advice_is_cleared_and_verified_through_the_pipeline(self):
+        old, observation, result = fixture()
+        old['spec-265.json']['recheck'] = 'sources corrected'
+        old['spec-265.json']['verified_at'] = '2020-01-01'
+        candidate = copy.deepcopy(old)
+        del candidate['spec-265.json']['recheck']
+        docs = drop_negligible(old, validate(old, candidate, result, observation))
+        guides = {u: {**v, 'meta': {'patch': '12.2'}, 'extract': {'enchants': '[item:1]', 'gems': '[item:1]',
+                  'consumables': '[item:1]', 'stats': 'Crit > Haste > Mastery > Versatility'}}
+                  for u, v in observation['current']['sources'].items()}
+        done = advance_verified(docs, [265], guides, '2026-10-26', False)
+        self.assertEqual(done, [265])
+        self.assertEqual((docs['spec-265.json']['verified_at'], docs['spec-265.json']['verified_patch']), ('2026-10-26', '12.2'))
+        self.assertNotIn('recheck', docs['spec-265.json'])
 
     def mapping_fixture(self):
         guide = 'https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables'
