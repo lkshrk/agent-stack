@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -83,7 +84,12 @@ type ingress struct {
 func (in *ingress) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err != nil {
-		http.Error(w, "unreadable body", http.StatusRequestEntityTooLarge)
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "unreadable body", http.StatusBadRequest)
 		return
 	}
 	if !verifySignature(in.secret, body, r.Header.Get("Linear-Signature")) {
@@ -105,7 +111,9 @@ func (in *ingress) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing delivery id", http.StatusBadRequest)
 		return
 	}
-	if !in.dedupe.firstSeen(id, now) {
+	sigKey := "sig:" + r.Header.Get("Linear-Signature")
+	deliveryKey := "delivery:" + id
+	if !in.dedupe.firstSeen(deliveryKey, now) || !in.dedupe.firstSeen(sigKey, now) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
@@ -114,7 +122,8 @@ func (in *ingress) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	default:
 		// unmark so Linear's retry is not swallowed as a duplicate
-		in.dedupe.forget(id)
+		in.dedupe.forget(deliveryKey)
+		in.dedupe.forget(sigKey)
 		http.Error(w, "queue full", http.StatusServiceUnavailable)
 	}
 }
