@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "context-mode": {
+      "type": "stdio",
+      "command": "context-mode",
+      "instructions": false
+    },
+    "litellm-tools": {
+      "type": "http",
+      "url": "${LITELLM_BASE_URL}/mcp/",
+      "headers": {
+        "x-litellm-api-key": "LITELLM_API_KEY"
+      },
+      "instructions": false
+    }
+  }
+}

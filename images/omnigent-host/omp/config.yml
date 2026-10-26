@@ -1,0 +1,8 @@
+setupVersion: 2
+modelRoles:
+  default: local-agents/gpt-astra
+  smol: local-agents/claude-sonnet:low
+  slow: local-agents/claude-opus:high
+  plan: "@slow"
+  task: "@default"
+  commit: "@smol"

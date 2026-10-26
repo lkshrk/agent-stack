@@ -4,7 +4,7 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 
 | Image | Contents |
 | --- | --- |
-| `omnigent-host/` | Runner: Omnigent host, Claude Code, Codex, the `runner` plugin and others, LSPs and toolchains, agent home seeding and credential helpers |
+| `omnigent-host/` | Runner: Omnigent host, Claude Code, Codex, omp with the workstation's shared skills and MCP servers, the `runner` plugin and others, LSPs and toolchains, agent home seeding and credential helpers |
 | `omnigent-server/` | Omnigent server with `bundles/` and `config/omnigent/config.yaml` baked in |
 | `agent-tools/` | The Go programs from `cmd/` on distroless |
 | `hermes/` | Hermes with its managed configuration from `config/hermes/`, git and the vault tooling |

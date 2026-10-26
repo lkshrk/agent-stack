@@ -5,6 +5,8 @@ FROM ${OMNIGENT_HOST_IMAGE}
 
 ARG CLAUDE_CODE_VERSION=2.1.309
 ARG CODEX_VERSION=0.164.0
+ARG OMP_VERSION=18.12.6
+ARG CONTEXT_MODE_VERSION=1.0.169
 ARG RTK_VERSION=v1.0.1
 ARG RTK_SHA256=5b919c3bccb799b67a61866d0e617410a4fcdf173e2614440e59de2fa2003436
 ARG CBM_VERSION=v0.12.1
@@ -42,7 +44,9 @@ RUN mise install \
 
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-      "@openai/codex@${CODEX_VERSION}"
+      "@openai/codex@${CODEX_VERSION}" \
+      "@oh-my-pi/pi-coding-agent@${OMP_VERSION}" \
+      "context-mode@${CONTEXT_MODE_VERSION}"
 
 RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
  && curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/${RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz" -o rtk.tgz \
@@ -62,6 +66,8 @@ RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
 COPY images/omnigent-host/bin/ /opt/agent/bin/
 COPY images/omnigent-host/claude/ /opt/agent/claude-home/
 COPY images/omnigent-host/codex/ /opt/agent/codex-home/
+COPY images/omnigent-host/omp/ /opt/agent/omp-home/
+COPY images/omnigent-host/agents/ /opt/agent/agents-home/.agents/
 COPY .claude-plugin/ /opt/agent/marketplace/.claude-plugin/
 COPY .agents/ /opt/agent/marketplace/.agents/
 COPY plugins/ /opt/agent/marketplace/plugins/
@@ -71,6 +77,7 @@ RUN chmod 0755 /opt/agent/bin/* \
  && git config --system include.path /etc/gitconfig.d/agent
 
 RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
+ && /opt/agent/bin/install-omp-skills /opt/agent/agents-home/.agents/skills \
  && rm -rf /opt/agent/claude-home/.claude/plugins/cache/*/.git \
  && chmod -R a+rX /opt/agent
 
