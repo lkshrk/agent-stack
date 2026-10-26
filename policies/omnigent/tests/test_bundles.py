@@ -85,7 +85,7 @@ def verdict(agent_dir: Path, case: Case) -> str:
     return decide(agent_dir, case)[0]
 
 
-PHASES = ("request", "response")
+PHASES = ("request", "response", "tool_result")
 
 
 def engine_state_updates(out: dict) -> list:
@@ -103,13 +103,16 @@ def engine_state_updates(out: dict) -> list:
 
 
 def run_sequence(agent: str, calls: list[tuple[str, object]], state: dict | None = None) -> list[str]:
-    """Tool calls in order; a ("request", text) or ("response", text) entry is that phase, a response turn-final."""
+    """Tool calls in order; ("request", text), ("response", text) and ("tool_result", (tool, text)) entries are those phases, a response turn-final."""
     from omnigent.runtime.policies.engine import _apply_one
 
     state = state if state is not None else {}
     actions = []
     for tool, data in calls:
-        if tool in PHASES:
+        if tool == "tool_result":
+            name, text = data
+            case = Case(agent, tool, name, {"result": text}, "", dict(state))
+        elif tool in PHASES:
             case = Case(agent, tool, None, data, "", dict(state), turn_final=True if tool == "response" else None)
         else:
             case = Case(agent, "tool_call", tool, data, "", dict(state))
@@ -170,6 +173,8 @@ DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "imple
 CRITIC = "planner/agents/critic"
 CRITIC_SEND = {"agent": "critic", "title": "plan-critic", "args": {"input": "Round 1. Root criteria ROU-12-1. Draft: ..."}}
 WAKE = "[System: sub-agent critic finished; call sys_read_inbox]"
+CRITIC_REPLY = '[System: sub-agent task t-1 completed \u2014 critic:plan-critic returned: ```json\n{"round": 1, "pass": true, "failed": []}\n```]'
+COLLECT = [("sys_read_inbox", {}), ("tool_result", ("sys_read_inbox", CRITIC_REPLY))]
 CONSULTED = {"agent_stack_dispatches": 2, "agent_stack_collections": 2}
 N1_PROBES = [
     "cat <(touch /tmp/p)",
@@ -570,7 +575,7 @@ class BundleVerdictTest(unittest.TestCase):
             ("sys_session_send", CRITIC_SEND),
             ("response", "Draft sent to the critic for round 1."),
             ("request", WAKE),
-            ("sys_read_inbox", {}),
+            *COLLECT,
             ("result_check__validate_result", {"kind": "planner", "text": response}),
             ("response", response),
         ]
@@ -682,7 +687,7 @@ class BundleVerdictTest(unittest.TestCase):
         def send(n):
             return ("sys_session_send", {**CRITIC_SEND, "args": {"input": f"Round {n}. Draft: ..."}})
 
-        collect = [("request", WAKE), ("sys_read_inbox", {})]
+        collect = [("request", WAKE), *COLLECT]
         run = [
             ("sys_os_shell", {"command": "rg -n createOrder backend/src"}),
             ("result_check__validate_result", {"kind": "planner", "text": response}),
@@ -708,8 +713,37 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(run_sequence("planner", [send, send]), ["ALLOW", "DENY"])
 
     def test_planner_final_without_result_denied_after_collection(self):
-        run = [("sys_session_send", CRITIC_SEND), ("request", WAKE), ("sys_read_inbox", {}), ("response", "Done.")]
-        self.assertEqual(run_sequence("planner", run), ["ALLOW", "ALLOW", "ALLOW", "DENY"])
+        run = [("sys_session_send", CRITIC_SEND), ("request", WAKE), *COLLECT, ("response", "Done.")]
+        self.assertEqual(run_sequence("planner", run), ["ALLOW", "ALLOW", "ALLOW", "ALLOW", "DENY"])
+
+    def test_planner_early_inbox_read_is_not_a_collection(self):
+        plan = infra_plan()
+        plan["critic"]["rounds"] = 1
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(plan, indent=2) + "\n```"
+        empty = [("sys_read_inbox", {}), ("tool_result", ("sys_read_inbox", "No completed tasks in the inbox."))]
+        run = [("sys_session_send", CRITIC_SEND), *empty, *empty, ("response", response)]
+        self.assertEqual(run_sequence("planner", run), ["ALLOW"] * 5 + ["DENY"])
+        other = "[System: sub-agent task t-9 failed \u2014 critic:plan-critic error: timeout]"
+        run = [("sys_session_send", CRITIC_SEND), ("sys_read_inbox", {}), ("tool_result", ("sys_read_inbox", other)), ("response", response)]
+        self.assertEqual(run_sequence("planner", run)[-1], "DENY")
+
+    def test_planner_collected_critic_reply_allows_the_plan(self):
+        plan = infra_plan()
+        plan["critic"]["rounds"] = 1
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(plan, indent=2) + "\n```"
+        run = [("sys_session_send", CRITIC_SEND), ("response", "Sent."), ("request", WAKE), *COLLECT, ("response", response)]
+        self.assertEqual(run_sequence("planner", run), ["ALLOW"] * len(run))
+
+    def test_planner_collections_capped_at_dispatches(self):
+        plan = infra_plan()
+        plan["critic"]["rounds"] = 2
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(plan, indent=2) + "\n```"
+        second = {**CRITIC_SEND, "args": {"input": "Round 2. Draft: ..."}}
+        state = {}
+        run = [("sys_session_send", CRITIC_SEND), ("request", WAKE), *COLLECT, *COLLECT, ("request", WAKE),
+               ("sys_session_send", second), ("response", response)]
+        self.assertEqual(run_sequence("planner", run, state)[-1], "DENY")
+        self.assertEqual(state["agent_stack_collections"], 1)
 
     def test_security_review_normal_run_allowed(self):
         response = "Security review of #3.\n```json\n" + (FIXTURES / "security-valid.json").read_text() + "\n```"

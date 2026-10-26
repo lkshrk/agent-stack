@@ -60,7 +60,9 @@ prompt: |
      args={input: "Round <n>. Root criteria: <IDs and text>. Draft:
      <the exact draft response>"})`. Then end your turn with one status
      line and no result block; the runtime wakes you when the critic
-     finishes. Collect its findings with one `sys_read_inbox` call.
+     finishes. Collect its findings with one `sys_read_inbox` call after
+     the wake; a round counts as collected only when that read returns the
+     critic's completed reply.
   4. Findings with `pass: false`: revise the draft yourself (back to step 2,
      or step 1 for a design gap) and send the next round to the same title.
      At most 3 rounds; a 4th send is denied. Still failing after round 3:
@@ -188,6 +190,7 @@ guardrails:
         arguments:
           limit: 3
           collect_tools: [sys_read_inbox]
+          collect_from: critic
     result_contract:
       type: function
       function:
