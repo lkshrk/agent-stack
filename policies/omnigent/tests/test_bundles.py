@@ -234,6 +234,41 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:main"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr merge 5"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_read", {"path": "backend/app/main.py"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".claude/skills/x/SKILL.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "packages/a/.claude/commands/x.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".agents/skills/x/SKILL.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".codex/AGENTS.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".github/copilot-instructions.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "GEMINI.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "packages/a/AGENTS.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "packages/a/CLAUDE.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "tools/skills/review/SKILL.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "bundles/polly/skills/fanout/SKILL.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "bundles/README.md", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": ".git/hooks/pre-commit", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > .git/hooks/pre-commit"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add backend/app/main.py"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add -A"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add ."}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git commit -am docs"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git -C . add backend/app/main.py"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "GIT_INDEX_FILE=/tmp/i git add docs/a.md"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "ls | xargs git add"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git checkout main -- backend/app/main.py"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git stash pop"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push --no-verify origin HEAD:feat/x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr review 7 --approve"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr close 7"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr edit 7 --base develop"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr comment 7 --body x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh api -X PATCH repos/o/r -f default_branch=x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add AGENTS.md"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add docs/bundles/x.md"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add -- docs/setup.md README.md"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:develop"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git status --porcelain"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git diff --name-only abc123..HEAD"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh api repos/o/r/pulls/7/files"}, "ALLOW"),
     Case("documenter", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
     Case("documenter", "tool_call", "litellm-tools__linear_app-save_comment", {"body": "x"}, "DENY"),
     Case("documenter", "tool_call", "mcp__litellm-tools__linear-save_comment", {"body": "x"}, "DENY"),
@@ -381,9 +416,10 @@ class BundleVerdictTest(unittest.TestCase):
         }
         response = "Docs updated for #7.\n```json\n" + json.dumps(result, indent=2) + "\n```"
         run = [
-            ("sys_os_shell", {"command": "gh pr view 7 --repo routivo/routivo-monorepo --json files,headRefName"}),
+            ("sys_os_shell", {"command": "gh pr view 7 --repo routivo/routivo-monorepo --json files,headRefName,headRefOid"}),
             ("sys_os_shell", {"command": "gh pr diff 7 --repo routivo/routivo-monorepo"}),
             ("sys_os_shell", {"command": "git rev-parse --abbrev-ref HEAD"}),
+            ("sys_os_shell", {"command": "git status --porcelain"}),
             ("sys_os_read", {"path": "docs/setup.md"}),
             ("sys_os_read", {"path": "README.md"}),
             ("sys_os_read", {"path": "backend/app/settings.py"}),
@@ -392,12 +428,27 @@ class BundleVerdictTest(unittest.TestCase):
             ("sys_os_edit", {"path": "README.md", "oldText": "a", "newText": "b"}),
             ("sys_os_shell", {"command": "git add docs/setup.md README.md"}),
             ("sys_os_shell", {"command": 'git commit -m "docs: document the ORDERS_QUEUE setting"'}),
+            ("sys_os_shell", {"command": "git diff --name-only abc123..HEAD"}),
             ("sys_os_shell", {"command": "git push origin HEAD:feat/x"}),
             ("result_check__validate_result", {"kind": "documenter", "text": response}),
         ]
         self.assertEqual(run_sequence("documenter", run), ["ALLOW"] * len(run))
         final = Case("documenter", "response", None, response, "ALLOW", turn_final=True)
         self.assertEqual(verdict(BUNDLES / "documenter", final), "ALLOW")
+
+    def test_documenter_formatter_spill_not_committed(self):
+        run = [
+            ("sys_os_edit", {"path": "docs/setup.md", "oldText": "a", "newText": "b"}),
+            ("sys_os_shell", {"command": "make fmt"}),
+            ("sys_os_shell", {"command": "git status --porcelain"}),
+            ("sys_os_shell", {"command": "git add -A"}),
+            ("sys_os_shell", {"command": "git add docs/setup.md backend/app/main.py"}),
+            ("sys_os_shell", {"command": 'git commit -am "docs: setup"'}),
+            ("sys_os_shell", {"command": "git add docs/setup.md"}),
+            ("sys_os_shell", {"command": 'git commit -m "docs: setup"'}),
+        ]
+        expected = ["ALLOW", "ALLOW", "ALLOW", "DENY", "DENY", "DENY", "ALLOW", "ALLOW"]
+        self.assertEqual(run_sequence("documenter", run), expected)
 
     def test_documenter_flags(self):
         from omnigent.spec import load

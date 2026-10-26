@@ -203,6 +203,19 @@ class SecurityDocumenterTest(unittest.TestCase):
         self.assertEqual(result.validate_result("documenter", data), [])
 
 
+    def test_documenter_gaps(self):
+        gap = {"file": "docs/setup.md", "reason": "ORDERS_QUEUE is read in settings.py and not documented."}
+        data = {"status": "DONE_WITH_CONCERNS", "mode": "audit", "changed_files": [], "stale": [], "gaps": [gap], "pr": None}
+        self.assertEqual(result.validate_result("documenter", data), [])
+        data["status"] = "DONE"
+        self.assertTrue(any("gaps" in e for e in result.validate_result("documenter", data)))
+        data.update(status="DONE", gaps=[])
+        self.assertEqual(result.validate_result("documenter", data), [])
+        for bad in ([{"file": "docs/a.md"}], ["x"], {"a": 1}, "x"):
+            data.update(status="DONE_WITH_CONCERNS", gaps=bad)
+            self.assertTrue(result.validate_result("documenter", data), bad)
+
+
 class ContractTest(unittest.TestCase):
     def setUp(self):
         self.policy = result.result_contract(kind="planner")

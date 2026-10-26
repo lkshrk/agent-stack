@@ -86,6 +86,25 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.vcs.docs_vcs",
+        "kind": "factory",
+        "name": "docs_vcs",
+        "description": (
+            "Allowlist git and gh in shell commands: read-only verbs, `git add` of doc paths, "
+            "`git commit -m`, `git push origin HEAD:<branch>`, gh pr reads and read-only gh api."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "allow_paths": {"type": "array", "items": {"type": "string"}},
+                "deny": {"type": "array", "items": {"type": "string"}},
+                "exempt": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["allow_paths"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.result.result_contract",
         "kind": "factory",
         "name": "result_contract",

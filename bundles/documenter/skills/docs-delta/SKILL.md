@@ -11,10 +11,14 @@ touch the code, even when it looks wrong. Report that instead.
 ## 1. Scope
 
 - PR URL `https://github.com/<owner>/<repo>/pull/<n>`: run
-  `gh pr view <n> --repo <owner>/<repo> --json files,headRefName` and
-  `gh pr diff <n> --repo <owner>/<repo>`.
+  `gh pr view <n> --repo <owner>/<repo> --json files,headRefName,headRefOid`
+  and `gh pr diff <n> --repo <owner>/<repo>`. Keep `headRefOid` as the head
+  SHA.
 - `git rev-parse --abbrev-ref HEAD` must name the head branch from the
   input. If it doesn't, return `BLOCKED` with `blocked.class: environment`.
+- `git status --porcelain` must print nothing. A dirty tree before you
+  start returns `BLOCKED` with `blocked.class: environment`, listing the
+  files.
 
 ## 2. Inventory
 
@@ -54,9 +58,13 @@ commands you changed.
 
 Only when you changed something:
 
-1. `git add <each doc file you changed>`, never `git add -A` or `.`.
+1. `git add -- <each doc file you changed>`, never `git add -A` or `.`.
 2. `git commit -m "docs: <summary>"`. No AI attribution, no trailers.
-3. `git push origin HEAD:<head branch>`. Never `--force`, never the base
+3. `git diff --name-only <head SHA>..HEAD` must list only docs paths. A
+   commit hook or a documented command can stage code; if any other file
+   appears, do not push. Return `BLOCKED` with `blocked.class: decision`,
+   listing the files.
+4. `git push origin HEAD:<head branch>`. Never `--force`, never the base
    branch. A rejected push becomes `BLOCKED` with `blocked.class:
    environment`.
 

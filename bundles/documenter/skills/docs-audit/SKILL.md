@@ -37,10 +37,12 @@ CLI definitions).
 
 - `stale`: one entry per wrong passage, `{"file": "<doc>", "reason":
   "<what is wrong and what the code says>"}`.
+- `gaps`: one entry per undocumented behaviour, `{"file": "<doc that should
+  cover it>", "reason": "<what is missing and where the code is>"}`.
 - `changed_files` is empty and `pr` is null.
-- No findings: `DONE`. Stale passages only: `DONE`. Gaps that need someone
-  who knows the code to describe them: `DONE_WITH_CONCERNS`, with each gap
-  in the prose above the result block.
+- No findings, or stale passages only: `DONE` with an empty `gaps`. Any
+  gap: `DONE_WITH_CONCERNS`; the validator rejects gaps under any other
+  status.
 - Open questions about scope or intent: `BLOCKED` with `blocked.class:
   decision` and one `blocked.question` batching all of them.
 
@@ -51,6 +53,9 @@ CLI definitions).
   "changed_files": [],
   "stale": [
     {"file": "docs/setup.md", "reason": "Documents --port; the CLI now reads PORT from the environment."}
+  ],
+  "gaps": [
+    {"file": "docs/setup.md", "reason": "ORDERS_QUEUE is read in backend/app/settings.py and documented nowhere."}
   ],
   "pr": null
 }

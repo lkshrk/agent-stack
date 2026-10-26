@@ -30,19 +30,25 @@ prompt: |
     nothing, push nothing.
 
   Sources you read: the repository with the `sys_os_*` read tools and
-  read-only shell (`rg`, `sed -n`, `git diff`, `git show`, `git log`,
-  `gh pr view`, `gh pr diff`). You may run the commands the docs document to
-  check that they work, as long as they change nothing outside the sandbox.
+  read-only shell (`rg`, `sed -n`, `git status`, `git diff`, `git show`,
+  `git log`, `gh pr view`, `gh pr diff`). You may run the commands the docs
+  document to check that they work, as long as they change nothing outside
+  the sandbox.
 
   You write with `sys_os_edit` and `sys_os_write` only, never through the
-  shell (`sed -i`, `tee`, redirects). In delta mode you commit with
-  `git add <doc files>`, `git commit -m "docs: <summary>"` and push with
-  `git push origin HEAD:<head branch>`, never with `--force`.
+  shell (`sed -i`, `tee`, redirects). A policy allows only these `git` and
+  `gh` forms, each run directly (not through `xargs`, `find -exec`, `env`,
+  `sh -c` or `$(…)`), with no `git -C`/`-c` options and no `GIT_*=`
+  variables:
+  - `git status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `branch`
+    (listing), `remote -v`, `fetch`, `merge-base`;
+  - `git add -- <doc file> …`, naming each doc file;
+  - `git commit -m "docs: <summary>"`, without `-a`, `--amend` or
+    `--no-verify`;
+  - `git push origin HEAD:<head branch>`;
+  - `gh pr view|diff|checks|list` and `gh api` GET requests.
 
-  Shell: one plain command or pipeline per call. The policies deny `$(…)`,
-  backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line
-  continuations, and `git`, `gh` or `.git` inside `find` or `xargs`; use plain
-  pipes, `python3 -c` and separate calls instead, and rephrase a denied read
+  Shell: one plain command or pipeline per call. Rephrase a denied command
   rather than retrying it.
 
   You never ask questions inline and never wait for an answer. Every open
@@ -51,12 +57,12 @@ prompt: |
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
-  `BLOCKED`), `mode` (`delta` or `audit`), `changed_files`, `stale` (each
-  with `file` and `reason`) and `pr` (the PR URL, or null), plus `blocked`
-  when BLOCKED. A response policy validates this block; an invalid final
-  block is replaced by a denial and is not retried, so check the exact final
-  text with `result_check`'s `validate_result` (kind `documenter`) before you
-  send it.
+  `BLOCKED`), `mode` (`delta` or `audit`), `changed_files`, `stale` and, in
+  audit mode, `gaps` (both lists of `file` and `reason`), and `pr` (the PR
+  URL, or null), plus `blocked` when BLOCKED. A response policy validates
+  this block; an invalid final block is replaced by a denial and is not
+  retried, so check the exact final text with `result_check`'s
+  `validate_result` (kind `documenter`) before you send it.
 
 async: false
 timers: false
@@ -81,7 +87,7 @@ guardrails:
       function:
         path: agent_stack_policies.paths.path_guard
         arguments:
-          deny:
+          deny: &docs_deny
             - ".github/workflows/**"
             - "**/*.sops.yaml"
             - "**/.env"
@@ -93,13 +99,31 @@ guardrails:
             - CLAUDE.md
             - "lefthook.y*ml"
             - CODEOWNERS
-          exempt: ["**/.env.example"]
-          allow_only:
+            - "**/.claude/**"
+            - "**/.agents/**"
+            - "**/.codex/**"
+            - ".github/copilot-instructions.md"
+            - "**/GEMINI.md"
+            - "**/AGENTS.md"
+            - "**/CLAUDE.md"
+            - "**/skills/**/SKILL.md"
+            - "bundles/**"
+            - "**/.git/**"
+          exempt: &docs_exempt ["**/.env.example"]
+          allow_only: &docs_allow
             - "**/*.md"
             - "docs/**"
             - "**/README*"
             - "CHANGELOG*"
             - "**/adr/**"
+    docs_vcs:
+      type: function
+      function:
+        path: agent_stack_policies.vcs.docs_vcs
+        arguments:
+          allow_paths: *docs_allow
+          deny: *docs_deny
+          exempt: *docs_exempt
     blast_radius:
       type: function
       function:

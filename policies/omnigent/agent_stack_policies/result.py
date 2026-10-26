@@ -239,6 +239,15 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
     for i, item in enumerate(stale):
         if not isinstance(item, dict) or not _text(item.get("file")) or not _text(item.get("reason")):
             errors.append(f"stale[{i}] needs file and reason")
+    gaps = result.get("gaps", [])
+    if not isinstance(gaps, list):
+        errors.append("gaps must be a list")
+        gaps = []
+    for i, item in enumerate(gaps):
+        if not isinstance(item, dict) or not _text(item.get("file")) or not _text(item.get("reason")):
+            errors.append(f"gaps[{i}] needs file and reason")
+    if gaps and result.get("status") != "DONE_WITH_CONCERNS":
+        errors.append("gaps require status DONE_WITH_CONCERNS")
     pr = result.get("pr")
     if pr is not None and not isinstance(pr, str):
         errors.append("pr must be a string or null")
