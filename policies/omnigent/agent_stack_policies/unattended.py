@@ -7,13 +7,19 @@ from ._event import Decision, Event, deny
 ALLOWED_HANDLER_PREFIXES = ("omnigent.policies.builtins.", "agent_stack_policies.")
 
 
+KNOWN_VERDICTS = ("ALLOW", "DENY", "ASK")
+
+
 def _verdict(decision: object) -> str | None:
     if not isinstance(decision, dict):
         return None
     value = decision.get("result")
     if not isinstance(value, str):
-        value = getattr(value, "value", None) or getattr(value, "name", None)
-    return value.upper() if isinstance(value, str) else None
+        inner = getattr(value, "value", None)
+        value = inner if isinstance(inner, str) else getattr(value, "name", None)
+    if not isinstance(value, str) or value.upper() not in KNOWN_VERDICTS:
+        return None
+    return value.upper()
 
 
 def _takes_config(evaluator: Callable) -> bool:
@@ -42,7 +48,12 @@ def deny_on_ask(
         decision = inner(event, config) if wants_config else inner(event)
         if inspect.isawaitable(decision):
             decision = await decision
-        if _verdict(decision) == "ASK":
+        if decision is None:
+            return None
+        verdict = _verdict(decision)
+        if verdict is None:
+            return deny("unattended: unrecognised verdict")
+        if verdict == "ASK":
             return deny(f"unattended: {decision.get('reason', '')}")
         return decision
 

@@ -30,3 +30,6 @@ class DenyToolsTest(unittest.TestCase):
 
     def test_deny_tools_is_case_sensitive(self):
         self.assertIsNone(deny_tools(patterns=["Write"])(tool_call_event("write")))
+
+    def test_abstains_on_agent_start_probe(self):
+        self.assertIsNone(deny_tools(patterns=["*"])(tool_call_event("sys_agent_start")))

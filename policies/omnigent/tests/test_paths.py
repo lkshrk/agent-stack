@@ -5,7 +5,7 @@ from agent_stack_policies.paths import glob_match, path_guard
 from . import assert_not_ask, tool_call_event
 
 WORKFLOWS = ".github/workflows/**"
-UNPARSEABLE = {"type": "tool_call", "data": {"name": "Write", "arguments": "{bad"}}
+UNPARSEABLE = {"type": "tool_call", "target": "Write", "data": {"name": "Write", "arguments": "{bad"}}
 
 EVENTS = [
     tool_call_event("Write", {"file_path": ".github/workflows/ci.yml"}),
@@ -137,7 +137,7 @@ class ShellTest(unittest.TestCase):
         self.assertEqual(decision["result"], "ALLOW")
 
     def test_shell_arguments_unparseable_denied(self):
-        event = {"type": "tool_call", "data": {"name": "bash", "arguments": "{bad"}}
+        event = {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}}
         self.assertEqual(path_guard(deny=[WORKFLOWS])(event)["result"], "DENY")
 
     def test_shell_without_command_allowed(self):
@@ -192,3 +192,6 @@ class SubstitutionPathTest(unittest.TestCase):
             "eval 'rm .github/workflows/x.yml'",
         ):
             self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], "DENY", command)
+
+    def test_abstains_on_agent_start_probe(self):
+        self.assertIsNone(path_guard(deny=[".github/**"])(tool_call_event("sys_agent_start")))

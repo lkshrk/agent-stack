@@ -13,7 +13,7 @@ EVENTS = [
     tool_call_event("bash", {}),
     tool_call_event("mcp__github__merge_pull_request", {"number": 1}),
     tool_call_event("Read", {"file_path": "a"}),
-    {"type": "tool_call", "data": {"name": "bash", "arguments": "{bad"}},
+    {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}},
     {"type": "other"},
 ]
 
@@ -92,7 +92,7 @@ class NoMergeTest(unittest.TestCase):
         self.assertEqual(run("pytest -q && git status")["result"], "ALLOW")
 
     def test_no_merge_arguments_unparseable_denied(self):
-        event = {"type": "tool_call", "data": {"name": "bash", "arguments": "{bad"}}
+        event = {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}}
         self.assertEqual(no_merge()(event)["result"], "DENY")
 
     def test_no_merge_mcp_merge_tool(self):
@@ -142,3 +142,6 @@ class SubstitutionTest(unittest.TestCase):
         self.assertEqual(run("ksh -c 'gh pr merge 5'")["result"], "DENY")
         self.assertEqual(run("eval 'git push origin main'")["result"], "DENY")
         self.assertEqual(run("eval git push origin main")["result"], "DENY")
+
+    def test_abstains_on_agent_start_probe(self):
+        self.assertIsNone(no_merge()(tool_call_event("sys_agent_start")))

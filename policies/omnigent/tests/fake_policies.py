@@ -35,3 +35,18 @@ def async_asker():
         return {"result": "ASK", "reason": "late"}
 
     return evaluate
+
+
+def odd_result():
+    return lambda event: {"result": "MAYBE", "reason": "x"}
+
+
+def non_dict():
+    return lambda event: "ALLOW"
+
+
+def name_enum():
+    class V:
+        name = "ASK"
+
+    return lambda event: {"result": V(), "reason": "by name"}

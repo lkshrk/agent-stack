@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agent_stack_policies import result
 
-from . import assert_not_ask
+from . import assert_not_ask, tool_call_event
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ROOT = Path(__file__).parent.parent
@@ -23,10 +23,14 @@ def fenced(obj):
 
 
 def response(text, final=None):
-    event = {"type": "response", "data": text}
-    if final is not None:
-        event["context"] = {"turn_final": final}
-    return event
+    return {
+        "type": "response",
+        "target": "agent",
+        "data": text,
+        "context": {"turn_final": final},
+        "session_state": {},
+        "llm_client": None,
+    }
 
 
 EVENTS = [
@@ -35,7 +39,7 @@ EVENTS = [
     response(fenced(load("planner-valid.json")), True),
     response("```json\n{not json}\n```", True),
     {"type": "response", "data": None},
-    {"type": "tool_call", "data": {"name": "Bash"}},
+    tool_call_event("Bash"),
 ]
 
 
@@ -105,6 +109,57 @@ class PlannerTest(unittest.TestCase):
         self.assertTrue(result.validate_result("planner", blocked))
 
 
+class MalformedInputTest(unittest.TestCase):
+    def test_unhashable_coverage_criterion(self):
+        for bad in (["x"], {"a": 1}, None, 3):
+            data = load("planner-valid.json")
+            data["critic"]["coverage"][0]["criterion"] = bad
+            self.assertTrue(result.validate_result("planner", data), bad)
+            decision = result.result_contract(kind="planner")(response(fenced(data), True))
+            self.assertEqual(decision["result"], "DENY")
+
+    def test_wrong_typed_shapes_never_raise(self):
+        junk = [None, 0, "s", [], {}, [1], ["a"], {"a": 1}, [{}], [[]], True]
+        base = {
+            "planner": load("planner-valid.json"),
+            "security": load("security-valid.json"),
+            "documenter": load("documenter-valid.json"),
+        }
+        for kind, good in base.items():
+            for key in list(good):
+                for value in junk:
+                    data = {**good, key: value}
+                    self.assertIsInstance(result.validate_result(kind, data), list, (kind, key, value))
+        planner = base["planner"]
+        for field in ("key", "title", "files", "criteria", "blocked_by", "independent_test"):
+            for value in junk:
+                data = json.loads(json.dumps(planner))
+                data["children"][1][field] = value
+                self.assertIsInstance(result.validate_result("planner", data), list, (field, value))
+        for value in junk:
+            data = json.loads(json.dumps(planner))
+            data["children"][0] = value
+            self.assertIsInstance(result.validate_result("planner", data), list)
+            data = json.loads(json.dumps(planner))
+            data["children"][0]["criteria"] = [value]
+            self.assertIsInstance(result.validate_result("planner", data), list)
+            data = json.loads(json.dumps(planner))
+            data["critic"] = {"rounds": value, "coverage": value}
+            self.assertIsInstance(result.validate_result("planner", data), list)
+            sec = json.loads(json.dumps(base["security"]))
+            sec["findings"] = [value]
+            self.assertIsInstance(result.validate_result("security", sec), list)
+            doc = json.loads(json.dumps(base["documenter"]))
+            doc["stale"] = [value]
+            self.assertIsInstance(result.validate_result("documenter", doc), list)
+
+    def test_documenter_missing_pr_counts_as_null(self):
+        data = {"status": "DONE", "mode": "audit", "changed_files": [], "stale": []}
+        self.assertEqual(result.validate_result("documenter", data), [])
+        data.update(mode="delta", changed_files=["a.md"])
+        self.assertTrue(result.validate_result("documenter", data))
+
+
 class SecurityDocumenterTest(unittest.TestCase):
     def test_security_valid_fixture(self):
         self.assertEqual(result.validate_result("security", load("security-valid.json")), [])
@@ -153,7 +208,7 @@ class ContractTest(unittest.TestCase):
         self.assertIsNone(self.policy(response(fenced({"status": "bad"}), False)))
 
     def test_contract_abstains_outside_response(self):
-        self.assertIsNone(self.policy({"type": "tool_call", "data": {"name": "Bash"}}))
+        self.assertIsNone(self.policy(tool_call_event("Bash")))
 
     def test_contract_allows_valid(self):
         decision = self.policy(response(fenced(load("planner-valid.json")), True))
@@ -167,6 +222,8 @@ class ContractTest(unittest.TestCase):
     def test_contract_reads_content_blocks(self):
         event = {
             "type": "response",
+            "target": "agent",
+            "session_state": {},
             "data": {"content": [{"type": "text", "text": fenced(load("planner-valid.json"))}]},
             "context": {"turn_final": True},
         }

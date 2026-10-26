@@ -1,8 +1,12 @@
 def tool_call_event(name, arguments=None, state=None):
-    event = {"type": "tool_call", "data": {"name": name, "arguments": arguments or {}}}
-    if state is not None:
-        event["context"] = {"session_state": state}
-    return event
+    return {
+        "type": "tool_call",
+        "target": name,
+        "data": {"name": name, "arguments": arguments or {}},
+        "context": {"turn_final": None},
+        "session_state": state if state is not None else {},
+        "llm_client": None,
+    }
 
 
 def assert_not_ask(test, decision):

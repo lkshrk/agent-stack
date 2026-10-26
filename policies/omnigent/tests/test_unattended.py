@@ -4,9 +4,9 @@ from unittest import mock
 
 from agent_stack_policies import unattended
 
-from . import assert_not_ask
+from . import assert_not_ask, tool_call_event
 
-EVENT = {"type": "tool_call", "data": {"name": "Bash", "arguments": {"command": "ls"}}}
+EVENT = tool_call_event("Bash", {"command": "ls"})
 PATCH = mock.patch.object(unattended, "ALLOWED_HANDLER_PREFIXES", ("tests.fake_policies.",))
 
 
@@ -47,6 +47,15 @@ class UnattendedTest(unittest.TestCase):
         decision = run(unattended.deny_on_ask(handler="tests.fake_policies.async_asker"))
         self.assertEqual(decision["result"], "DENY")
         self.assertIn("late", decision["reason"])
+
+    def test_wrapper_denies_unrecognised_verdict(self):
+        for name in ("odd_result", "non_dict"):
+            decision = run(unattended.deny_on_ask(handler=f"tests.fake_policies.{name}"))
+            self.assertEqual(decision, {"result": "DENY", "reason": "agent-stack: unattended: unrecognised verdict"})
+
+    def test_wrapper_enum_name_fallback(self):
+        decision = run(unattended.deny_on_ask(handler="tests.fake_policies.name_enum"))
+        self.assertIn("by name", decision["reason"])
 
     def test_wrapper_output_is_never_ask(self):
         for name in ("asker", "enum_asker", "allower", "denier", "abstainer", "async_asker"):

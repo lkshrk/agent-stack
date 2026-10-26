@@ -53,3 +53,7 @@ class SpawnTest(unittest.TestCase):
         policy = max_dispatches_per_session(limit=3)
         for event in EVENTS:
             assert_not_ask(self, policy(event))
+
+    def test_abstains_on_agent_start_probe(self):
+        probe = {**tool_call_event("sys_agent_start"), "session_state": {DISPATCH_STATE_KEY: 99}}
+        self.assertIsNone(max_dispatches_per_session(limit=1, dispatch_tools=["sys_agent_start"])(probe))

@@ -162,7 +162,13 @@ def _check_planner(result: dict, errors: list[str]) -> None:
     if not isinstance(coverage, list):
         errors.append("critic.coverage must be a list")
         coverage = []
-    covered = {c.get("criterion") for c in coverage if isinstance(c, dict)}
+    covered: set[str] = set()
+    for i, entry in enumerate(coverage):
+        criterion = entry.get("criterion") if isinstance(entry, dict) else None
+        if isinstance(criterion, str):
+            covered.add(criterion)
+        else:
+            errors.append(f"critic.coverage[{i}].criterion must be a string")
     missing = sorted(ids - covered)
     if missing:
         errors.append(f"criteria not covered by critic.coverage: {missing}")
@@ -213,7 +219,7 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
     for i, item in enumerate(stale):
         if not isinstance(item, dict) or not _text(item.get("file")) or not _text(item.get("reason")):
             errors.append(f"stale[{i}] needs file and reason")
-    pr = result.get("pr", False)
+    pr = result.get("pr")
     if pr is not None and not isinstance(pr, str):
         errors.append("pr must be a string or null")
     elif mode == "delta" and changed and not _text(pr):

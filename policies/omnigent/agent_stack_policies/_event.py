@@ -5,6 +5,7 @@ Event = dict[str, object]
 Decision = dict[str, object]
 
 TOOL_CALL = "tool_call"
+AGENT_START_PROBE = "sys_agent_start"
 
 
 def allow(**extra) -> Decision:
@@ -16,8 +17,7 @@ def deny(reason: str) -> Decision:
 
 
 def session_state(event: Event) -> dict:
-    context = event.get("context")
-    state = context.get("session_state") if isinstance(context, dict) else None
+    state = event.get("session_state")
     return state if isinstance(state, dict) else {}
 
 
@@ -32,10 +32,12 @@ def tool_name(event: Event) -> str | None:
     if event.get("type") != TOOL_CALL:
         return None
     data = event.get("data")
-    if not isinstance(data, dict):
+    name = _first(data, ("name", "tool_name")) if isinstance(data, dict) else None
+    if not isinstance(name, str):
+        name = event.get("target")
+    if not isinstance(name, str) or name == AGENT_START_PROBE:
         return None
-    name = _first(data, ("name", "tool_name"))
-    return name if isinstance(name, str) else None
+    return name
 
 
 def tool_call(event: Event, names: Collection[str]) -> dict | None:
