@@ -470,6 +470,35 @@ class PipelineRuns(unittest.TestCase):
         self.assertEqual(len(output['rejected']), 4)
         self.assertEqual(output['ai_updated'], [])
 
+    def test_result_spec_id_must_be_an_int_matching_its_folder(self):
+        old, observation = self.two_specs()
+        output = self.run_raw_parts(old, observation, {
+            'wow-spec-265': (json.dumps({**self.part('updated'), 'spec_id': [265]}), {}),
+            'wow-spec-266': (json.dumps({**self.part('updated', spec_id=266), 'spec_id': {}}), {}),
+            'wow-spec-267': (json.dumps(self.part('updated', spec_id=268)), {}),
+            'wow-spec-268': (json.dumps({**self.part('updated', spec_id=268), 'spec_id': True}), {}),
+            'unrelated': (json.dumps(self.part('updated')), {}),
+        })
+        self.assertEqual(set(output['rejected']), {'265', '266', '267', '268', 'unrelated'})
+        self.assertTrue(all('spec_id does not match' in r or 'Unrecognised' in r for r in output['rejected'].values()))
+        self.assertEqual(output['ai_updated'], [])
+
+    def test_parts_are_processed_in_numeric_spec_order(self):
+        order = []
+        real = merge_parts
+
+        def spy(old, parts):
+            if len(parts) == 1:
+                order.append(parts[0][0]['spec_id'])
+            return real(old, parts)
+        old, observation = self.two_specs()
+        old['index.json']['specs'].append({'spec_id': 1000, 'file': 'spec-1000.json'})
+        old['spec-1000.json'] = {**copy.deepcopy(old['spec-265.json']), 'spec_id': 1000}
+        old['index.json']['spec_count'] = 3
+        with patch('apply_wow_season_refresh.merge_parts', side_effect=spy):
+            self.run_pipeline(old, observation, [(self.part('unchanged', spec_id=1000), {}), (self.part('unchanged'), {})])
+        self.assertEqual(list(dict.fromkeys(order)), [265, 1000])
+
     def test_missing_curl_rejects_only_the_part(self):
         old, observation = spec_fixture(flask='item:241324')
         edited = copy.deepcopy(old)

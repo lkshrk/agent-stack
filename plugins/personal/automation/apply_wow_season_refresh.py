@@ -283,26 +283,30 @@ def describe(error):
 
 
 def load_parts(directory):
-    """Yield (spec_id, loaded part or None, failure reason or None) for every per-spec folder."""
+    """Return (folder spec id, loaded part or None, failure reason or None) for every per-spec folder."""
     loaded = []
     for folder in sorted(directory.iterdir()) if directory and directory.is_dir() else []:
-        number = re.search(r'(\d+)$', folder.name)
-        spec_id = int(number.group(1)) if number else None
+        number = re.match(r'wow-spec-(\d+)', folder.name)
+        key = int(number.group(1)) if number else folder.name
         try:
+            if not number:
+                raise ValueError('Unrecognised result folder name')
             if not (folder / 'result.json').is_file() or not (folder / 'candidate').is_dir():
                 raise ValueError('Missing result or candidate')
             result = json.loads((folder / 'result.json').read_text())
-            spec_id = result.get('spec_id', spec_id)
-            loaded.append((spec_id, (result, load_bundle(folder / 'candidate')), None))
+            claimed = result.get('spec_id') if isinstance(result, dict) else None
+            if isinstance(claimed, bool) or claimed != key or not isinstance(claimed, int):
+                raise ValueError('Result spec_id does not match its folder')
+            loaded.append((key, (result, load_bundle(folder / 'candidate')), None))
         except Exception as error:
-            loaded.append((spec_id, None, describe(error)))
+            loaded.append((key, None, describe(error)))
     return loaded
 
 
 def accept_parts(old, loaded, observation):
     """Validate every part on its own; a rejected part is dropped and its spec reported with the reason."""
     good, rejected, notes, checked, taken = [], {}, [], {}, set()
-    for spec_id, part, failure in sorted(loaded, key=lambda item: str(item[0])):
+    for spec_id, part, failure in sorted(loaded, key=lambda item: (not isinstance(item[0], int), item[0] if isinstance(item[0], int) else 0, str(item[0]))):
         proofs = {}
         try:
             if failure:
