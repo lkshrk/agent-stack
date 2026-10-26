@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "spec_id": 62,
+  "spec": "Arcane Mage",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/arcane-mage/stats-races-and-consumables",
+      "updated": "2026-09-13"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Intellect > Haste > Versatility > Critical Strike > Mastery",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244005",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "feet": "item:243953",
+      "legs": "item:240155",
+      "rings": "item:243957",
+      "weapon": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining_haste": "item:240890",
+      "remaining_crit": "item:240906"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "General guide baseline; use a personal simulation for gear-dependent choices.",
+    "Remaining sockets: Haste/Critical Strike gems, selected by personal simulation.",
+    "Concrete examples mapped from the guide's Haste/Crit family: Deadly Peridot is Haste-dominant; Quick Garnet is Crit-dominant. Choose by current gear/simulation; neither is a newly claimed universal optimum."
+  ],
+  "unresolved": [
+    "Exact crafting-quality ranks and complete use restrictions are not independently verified."
+  ],
+  "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
+  "derivation_notes": [
+    "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
+  ]
+}

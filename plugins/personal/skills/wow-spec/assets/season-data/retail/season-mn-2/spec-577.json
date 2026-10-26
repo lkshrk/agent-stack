@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "spec_id": 577,
+  "spec": "Havoc Demon Hunter",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/havoc-demon-hunter/stats-races-and-consumables",
+      "updated": "2026-09-17"
+    }
+  ],
+  "stat_guidance": {
+    "baseline": "Agility > Critical Strike > Mastery > Haste > Versatility.",
+    "hero_tree": "Fel-Scarred leans toward Mastery; Aldrachi Reaver toward Critical Strike.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:244641",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "main_hand": "item:273072",
+      "off_hand": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240967",
+      "amethyst": "item:240900",
+      "peridot": "item:240892",
+      "lapis": "item:240918",
+      "garnet": "item:240908",
+      "remaining": "item:240908"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "flask_alternative": "item:241326",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:271884",
+      "food": "item:255846",
+      "food_alternative": "item:242275",
+      "main_hand_oil": "item:243734",
+      "off_hand_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Use four rare gem colours with Powerful; fill additional sockets with Masterful Garnet.",
+    "Both weapons receive Rite and oil. Flask choice depends on gear."
+  ],
+  "unresolved": [
+    "Exact item quality ranks and full use/cooldown restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+}

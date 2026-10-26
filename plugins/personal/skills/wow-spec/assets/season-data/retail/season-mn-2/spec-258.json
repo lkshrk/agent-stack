@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "spec_id": 258,
+  "spec": "Shadow Priest",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables",
+      "updated": "2026-08-27"
+    }
+  ],
+  "stat_guidance": {
+    "overall": "Item level > Haste >= Mastery > Critical Strike > Versatility.",
+    "notes": "Hero tree and single-target/AoE change preferred distribution; guide rating ranges are rough targets, not caps.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243981",
+      "shoulders": "item:243962",
+      "chest": "item:243977",
+      "legs": "item:240133",
+      "feet": "item:244008",
+      "rings": "item:243956",
+      "weapon": "item:243973"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240892"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "food": "item:242285",
+      "flask": "item:241325",
+      "combat_potion": "item:241288",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Alternative weapon enchant",
+      "replacement": {
+        "enchants.weapon": "item:244031"
+      },
+      "sources": [
+        "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Alternative food",
+      "replacement": {
+        "consumables.food": "item:242286"
+      },
+      "sources": [
+        "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Prefer Mastery flask",
+      "replacement": {
+        "consumables.flask": "item:241322"
+      },
+      "sources": [
+        "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Balance gem secondaries",
+      "replacement": {
+        "gems.remaining": [
+          "item:240898",
+          "item:240906"
+        ]
+      },
+      "sources": [
+        "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Select among linked gems using current gear; no personalized sim performed.",
+    "Guide calls item 244008 Farstrider's Swiftness; live Wowhead identity confirms Enchant Boots - Farstrider's Hunt. Use the linked item identity."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

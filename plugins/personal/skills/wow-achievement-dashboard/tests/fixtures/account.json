@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "is_demo": true,
+  "account": "DEMO — synthetic states and requirements",
+  "snapshot_date": "2000-01-01",
+  "account_ap": 1000,
+  "validation": {
+    "reconciled": false,
+    "completed_records": 1,
+    "calculated_completed_ap": null
+  },
+  "task_sources": [
+    "{{ROOT}}/_System/Task Records/Execution.md",
+    "{{ROOT}}/_System/Task Records/Research.md",
+    "{{ROOT}}/_System/Task Records/Imported completions.md"
+  ],
+  "research_source": "{{ROOT}}/_System/Task Records/Research.md",
+  "characters": [
+    "Firstlight-Test Realm",
+    "Nightjar-Test Realm"
+  ],
+  "tasks": [
+    {
+      "id": 6,
+      "name": "DEMO: Level 10",
+      "points": 10,
+      "game_state": "completed",
+      "source": "{{ROOT}}/_System/Task Records/Imported completions.md",
+      "link": "{{ROOT}}/_System/Task Records/Imported completions#^ach-6",
+      "wowhead_url": "https://www.wowhead.com/achievement=6",
+      "categories": [
+        "quick-wins"
+      ],
+      "planning_min": null,
+      "planning_max": null,
+      "players": "solo",
+      "readiness": "ready",
+      "pilot": false,
+      "characters": [
+        "Firstlight-Test Realm"
+      ],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    },
+    {
+      "id": 7,
+      "name": "DEMO: Level 20",
+      "points": 10,
+      "game_state": "incomplete",
+      "source": "{{ROOT}}/_System/Task Records/Execution.md",
+      "link": "{{ROOT}}/_System/Task Records/Execution#^ach-7",
+      "wowhead_url": "https://www.wowhead.com/achievement=7",
+      "categories": [
+        "quick-wins"
+      ],
+      "planning_min": 10,
+      "planning_max": 15,
+      "players": "solo",
+      "readiness": "ready",
+      "pilot": true,
+      "characters": [
+        "Firstlight-Test Realm"
+      ],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    },
+    {
+      "id": 8,
+      "name": "DEMO: Level 30",
+      "points": 10,
+      "game_state": "incomplete",
+      "source": "{{ROOT}}/_System/Task Records/Execution.md",
+      "link": "{{ROOT}}/_System/Task Records/Execution#^ach-8",
+      "wowhead_url": "https://www.wowhead.com/achievement=8",
+      "categories": [
+        "buyable"
+      ],
+      "planning_min": 20,
+      "planning_max": 40,
+      "players": "solo",
+      "readiness": "conditional",
+      "pilot": true,
+      "characters": [
+        "Firstlight-Test Realm"
+      ],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    },
+    {
+      "id": 9,
+      "name": "DEMO: Level 40",
+      "points": 10,
+      "game_state": "incomplete",
+      "source": "{{ROOT}}/_System/Task Records/Research.md",
+      "link": "{{ROOT}}/_System/Task Records/Research#^ach-9",
+      "wowhead_url": "https://www.wowhead.com/achievement=9",
+      "categories": [
+        "long-term"
+      ],
+      "planning_min": null,
+      "planning_max": null,
+      "players": "unknown",
+      "readiness": "verify",
+      "pilot": false,
+      "characters": [],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    },
+    {
+      "id": 10,
+      "name": "DEMO: Level 50",
+      "points": 10,
+      "game_state": "incomplete",
+      "source": "{{ROOT}}/_System/Task Records/Execution.md",
+      "link": "{{ROOT}}/_System/Task Records/Execution#^ach-10",
+      "wowhead_url": "https://www.wowhead.com/achievement=10",
+      "categories": [
+        "needs-help"
+      ],
+      "planning_min": null,
+      "planning_max": null,
+      "players": "group",
+      "readiness": "conditional",
+      "pilot": false,
+      "characters": [
+        "Nightjar-Test Realm"
+      ],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    },
+    {
+      "id": 11,
+      "name": "DEMO: Level 60",
+      "points": 10,
+      "game_state": "unknown",
+      "source": "{{ROOT}}/_System/Task Records/Research.md",
+      "link": "{{ROOT}}/_System/Task Records/Research#^ach-11",
+      "wowhead_url": "https://www.wowhead.com/achievement=11",
+      "categories": [
+        "unclassified"
+      ],
+      "planning_min": null,
+      "planning_max": null,
+      "players": "unknown",
+      "readiness": "verify",
+      "pilot": false,
+      "characters": [],
+      "next_step": "Synthetic display example only; not researched gameplay advice."
+    }
+  ],
+  "shopping": [
+    {
+      "purchase_id": "demo-purchase",
+      "item_id": 1710,
+      "name": "DEMO purchase allocation",
+      "wowhead_url": "https://www.wowhead.com/item=1710",
+      "unit_cost": 2.5,
+      "currency_label": "gold",
+      "owned_usable": null,
+      "allocations": [
+        {
+          "achievement_id": 8,
+          "quantity": 3
+        }
+      ],
+      "character": "Firstlight-Test Realm"
+    }
+  ],
+  "shopping_note": "DEMO prices and requirements are invented to exercise the view; not a real shopping recommendation.",
+  "example_manual_ids": [
+    10
+  ]
+}

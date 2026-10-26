@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "spec_id": 102,
+  "spec": "Balance Druid",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/balance-druid/stats-races-and-consumables",
+      "updated": "2026-08-15"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Mastery > Haste = Critical Strike > Versatility; use a personal simulation for gear decisions.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:240133",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "weapon": "item:244029",
+      "head_alternative": "item:243951",
+      "feet_alternative": "item:243983"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "flask": "item:241326",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:271884",
+      "food": "item:242275",
+      "weapon_oil": "item:243734",
+      "flask_alternative": "item:241322",
+      "food_alternative": "item:255847"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Leech helm and Shaladrassil's Roots boots are supported utility alternatives.",
+    "Flask of the Magisters and Impossibly Royal Roast are listed alternatives."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full use restrictions are unverified.",
+    "Consumable durations and cooldown-sharing require tooltip verification."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities; no personal optimization or independent full tooltip verification."
+}

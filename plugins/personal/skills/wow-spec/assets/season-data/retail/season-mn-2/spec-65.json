@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "spec_id": 65,
+  "spec": "Holy Paladin",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/holy-paladin/stats-races-and-consumables",
+      "updated": "2026-08-27"
+    }
+  ],
+  "stat_guidance": {
+    "overall": "Intellect > Mastery > Haste = Critical Strike > Versatility.",
+    "mplus": "Versatility gains priority over Mastery for damage and survival.",
+    "notes": "Prefer item level/Intellect; balance Haste against mana. Lightsmith values Crit more.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243948",
+      "shoulders": "item:244021",
+      "chest": "item:244003",
+      "legs": "item:240155",
+      "feet": "item:243983",
+      "rings": "item:243959",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240969",
+      "remaining": "item:240892"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "food": "item:266985",
+      "flask": "item:241324",
+      "mana_potion": "item:241300"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Prefer Haste rather than Mastery gems",
+      "replacement": {
+        "gems.remaining": "item:240900"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-paladin/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Prefer Mastery flask",
+      "replacement": {
+        "consumables.flask": "item:241322"
+      },
+      "sources": [
+        "https://www.method.gg/guides/holy-paladin/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Choose secondary stats for healing, damage and mana needs; no hard Haste cap implied."
+  ],
+  "unresolved": [
+    "Combat damage potion and augment rune are not specified by this guide.",
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

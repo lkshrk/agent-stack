@@ -1,0 +1,27 @@
+{
+  "name": "personal",
+  "version": "1.0.0",
+  "description": "Personal skills: macOS disk and window-manager maintenance, change tables, documentation generation and World of Warcraft planning.",
+  "author": {
+    "name": "lkshrk"
+  },
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "codex",
+    "claude-code",
+    "personal"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Personal",
+    "shortDescription": "Personal maintenance, documentation and World of Warcraft skills.",
+    "longDescription": "Portable agent skills for personal machines: macOS disk reclaim, yabai and skhd health checks, line-change tables, C4 documentation generation and World of Warcraft planning.",
+    "developerName": "lkshrk",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ]
+  }
+}

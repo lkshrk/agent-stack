@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "spec_id": 70,
+  "spec": "Retribution Paladin",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables",
+      "updated": "2026-08-27"
+    }
+  ],
+  "stat_guidance": {
+    "overall": "Strength > Mastery > Haste > Critical Strike > Versatility.",
+    "notes": "Gear can change the ordering; personal simulation required for optimization.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244005",
+      "shoulders": "item:243991",
+      "chest": "item:243977",
+      "legs": "item:244641",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "weapon": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "healing_potion": "item:241304",
+      "weapon_oil": "item:243734",
+      "food": "item:242275",
+      "flask": "item:241322",
+      "combat_potion": "item:241288",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Haste is highest secondary stat",
+      "replacement": {
+        "consumables.combat_potion": "item:241308"
+      },
+      "sources": [
+        "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Gear favors Mastery gem",
+      "replacement": {
+        "gems.remaining": "item:240892"
+      },
+      "sources": [
+        "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Alternative weapon enchant",
+      "replacement": {
+        "enchants.weapon": "item:244031"
+      },
+      "sources": [
+        "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Recklessness is recommended over Light's Potential only when Crit or Mastery is the highest secondary."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

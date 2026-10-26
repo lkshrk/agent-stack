@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "spec_id": 265,
+  "spec": "Affliction Warlock",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE baseline with separate M+ and single-target stat guidance. Not personalized optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables",
+      "updated": "2026-08-12"
+    },
+    {
+      "url": "https://www.icy-veins.com/wow/affliction-warlock-pve-dps-gems-enchants-consumables",
+      "updated": "2026-08-16"
+    },
+    {
+      "url": "https://www.kalamazi.gg/guides/affliction",
+      "updated": null
+    }
+  ],
+  "stat_guidance": {
+    "mplus": "Intellect; Haste approximately Critical Strike; Method orders Mastery above Versatility thereafter.",
+    "single_target": "Method: Crit > Haste = Mastery > Versatility.",
+    "conflict": "Kalamazi prioritizes Haste and orders Versatility above Mastery. Lower-secondary ordering is not universal.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243990",
+      "chest": "item:243977",
+      "legs": "item:240133",
+      "feet": "item:243953",
+      "rings": "item:243957",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240897"
+    },
+    "consumables": {
+      "flask": "item:241324",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:271884",
+      "food": "item:242275",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Defensive Avoidance choices for helm/shoulders/boots follow Kalamazi and Method; Icy Veins lists alternative utility enchants.",
+    "Indecipherable is a general starting recommendation; Powerful Eversong Diamond with four rare gem colours can be better at higher gear levels according to Icy Veins. No personal gear inspected.",
+    "Light's Potential is a straightforward baseline; Icy Veins has gear-dependent alternative potions, not evaluated for this character.",
+    "Method's current guide differs from the retained mixed-source baseline: Nature's Wrath rings, Flask of the Shattered Sun, and Powerful Eversong Diamond with Masterful Garnet, Deadly Amethyst, Deadly Lapis and Deadly Peridot. These are source alternatives, not silent replacements."
+  ],
+  "unresolved": [
+    "Exact crafting-quality ranks",
+    "Full potion cooldown-sharing/recovery rules not independently verified for Concentrated variant",
+    "Not a simulated best-in-slot setup"
+  ],
+  "validation_scope": "Guide-backed baseline with verified item identities and stated effects; unknown fields below are not assumed. Not a personalized simulation."
+}

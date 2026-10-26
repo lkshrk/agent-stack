@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "spec_id": 256,
+  "spec": "Discipline Priest",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear or simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables",
+      "updated": "2026-09-17"
+    }
+  ],
+  "stat_guidance": {
+    "overall": "Item level/Intellect, then Haste > Mastery > Critical Strike > Versatility.",
+    "notes": "Mastery favors healing; Crit favors damage. Versatility supports high-key survival. Guide rough Haste targets: Voidweaver 1800, Oracle 1300; not hard caps.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243948",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "legs": "item:240155",
+      "feet": "item:243953",
+      "rings": "item:244015",
+      "weapon": "item:244029"
+    },
+    "gems": {
+      "unique": "item:240969",
+      "remaining": "item:240892"
+    },
+    "consumables": {
+      "healing_potion": "item:271884",
+      "weapon_oil": "item:243734",
+      "food": "item:242275",
+      "flask": "item:241324",
+      "combat_potion": "item:241308",
+      "mana_potion": "item:241300",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [
+    {
+      "condition": "Progression: dangerous AoE hits",
+      "replacement": {
+        "enchants.head": "item:244005",
+        "enchants.shoulders": "item:243991"
+      },
+      "sources": [
+        "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Extra mana needed",
+      "replacement": {
+        "enchants.chest": "item:244003"
+      },
+      "sources": [
+        "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Channel safely for mana",
+      "replacement": {
+        "consumables.mana_potion": "item:241294"
+      },
+      "sources": [
+        "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables"
+      ]
+    },
+    {
+      "condition": "Gear favors other secondary distribution",
+      "replacement": {
+        "gems.remaining": [
+          "item:240890",
+          "item:240900",
+          "item:240906"
+        ]
+      },
+      "sources": [
+        "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables"
+      ]
+    }
+  ],
+  "conditions": [
+    "Combat and mana potions share cooldown; guide favors Light's Potential with Evangelism. Gems/rings balance gear; listed gem is one supported option."
+  ],
+  "unresolved": [
+    "Exact quality ranks and full item usage restrictions not independently verified."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+}

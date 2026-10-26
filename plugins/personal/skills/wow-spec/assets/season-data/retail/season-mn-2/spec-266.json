@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "spec_id": 266,
+  "spec": "Demonology Warlock",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/demonology-warlock/stats-races-and-consumables",
+      "updated": "2026-09-27"
+    },
+    {
+      "url": "https://www.icy-veins.com/wow/demonology-warlock-pve-dps-gems-enchants-consumables",
+      "updated": "2026-08-16"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Intellect > Critical Strike > Haste approximately Mastery > Versatility",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:244007",
+      "shoulders": "item:243963",
+      "chest": "item:243977",
+      "feet": "item:243953",
+      "legs": "item:240133",
+      "rings": "item:243957",
+      "weapon": "item:243971"
+    },
+    "gems": {
+      "unique": "item:240967",
+      "green": "item:240890",
+      "blue": "item:240914",
+      "purple": "item:240898",
+      "red": "item:240906"
+    },
+    "consumables": {
+      "flask": "item:241326",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:241304",
+      "food": "item:242289",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "General guide baseline; use a personal simulation for gear-dependent choices.",
+    "Powerful Eversong Diamond requires the guide's four different Crit gem colours; do not present the diamond alone as the complete gem setup.",
+    "Weapon alternatives are Jan'alai's Precision and Rite of the Hash'ey.",
+    "Shoulder enchant fills Method's omission using Icy Veins. Icy Veins also recommends Indecipherable before Mythic-track gear; Powerful uses Deadly Peridot, Deadly Lapis, Deadly Amethyst and Quick Garnet. It prefers Concentrated Silvermoon Health Potion over Method's regular potion and primary-stat food over Spellfire Filet; preserve source preference.",
+    "Icy Veins' named four-colour set resolved against live tooltip IDs: Deadly Peridot, Deadly Lapis, Deadly Amethyst and Quick Garnet. Keep the guide's Powerful versus Indecipherable gear-level condition."
+  ],
+  "unresolved": [
+    "Exact crafting-quality ranks and complete use restrictions are not independently verified."
+  ],
+  "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
+  "derivation_notes": [
+    "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
+  ]
+}

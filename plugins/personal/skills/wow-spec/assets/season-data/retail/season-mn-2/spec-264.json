@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "spec_id": 264,
+  "spec": "Restoration Shaman",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; not personalized optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/restoration-shaman/stats-races-and-consumables",
+      "updated": "2026-08-11"
+    }
+  ],
+  "stat_guidance": {
+    "raid": "Intellect > Crit > Versatility = Haste > Mastery.",
+    "mplus": "Intellect > Crit = Versatility = Haste > Mastery.",
+    "context": "Resurgence makes Crit relevant to mana recovery; Mastery depends on target health. Haste gains dungeon damage value.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243951",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
+      "legs": "item:240155",
+      "feet": "item:243983",
+      "rings": "item:243987",
+      "weapon": "item:243971"
+    },
+    "gems": {
+      "unique": "item:240969",
+      "one_garnet": "item:240910",
+      "one_lapis": "item:240914",
+      "one_peridot": "item:240890"
+    },
+    "consumables": {
+      "food": "item:266985",
+      "flask": "item:241326",
+      "combat_potion": "item:241308",
+      "healing_potion": "item:241304",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Telluric: one diamond and at least one of each listed colour for its mana benefit.",
+    "Earthliving Weapon occupies the temporary weapon enhancement; no oil.",
+    "Guide provides no mana-potion recommendation; no substitute invented."
+  ],
+  "unresolved": [
+    "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
+    "No personal simulation."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+}

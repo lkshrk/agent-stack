@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "spec_id": 263,
+  "spec": "Enhancement Shaman",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; not personalized optimization.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/enhancement-shaman/stats-races-and-consumables",
+      "updated": "2026-08-24"
+    }
+  ],
+  "stat_guidance": {
+    "general": "Agility > Mastery >= Haste > Crit >= Versatility.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243950",
+      "shoulders": "item:244021",
+      "chest": "item:243976",
+      "legs": "item:244640",
+      "feet": "item:243983",
+      "rings": "item:243957",
+      "weapon": "item:273072"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "remaining": "item:240900"
+    },
+    "consumables": {
+      "food": "item:242275",
+      "flask": "item:241322",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:241304",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Use Windfury Weapon and Flametongue Weapon; weapon oils are inapplicable.",
+    "Quick Amethyst versus Masterful Peridot depends on a personal simulation.",
+    "Alternative diamond plan: Powerful plus one each Quick Amethyst, Masterful Peridot, Masterful Garnet and Masterful Lapis; simulate against baseline.",
+    "Recklessness recommendation targets Mastery."
+  ],
+  "unresolved": [
+    "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
+    "No personal simulation."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+}

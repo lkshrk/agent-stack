@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "spec_id": 252,
+  "spec": "Unholy Death Knight",
+  "game": "retail",
+  "season": "season-mn-2",
+  "verified_patch": "12.1",
+  "verified_at": "2026-10-04",
+  "status": "verified",
+  "scope": "Max-level PvE guide baseline; no personal gear simulation.",
+  "sources": [
+    {
+      "url": "https://www.method.gg/guides/unholy-death-knight/stats-races-and-consumables",
+      "updated": "2026-09-24"
+    }
+  ],
+  "stat_guidance": {
+    "single_target": "Strength > Crit > Mastery >= Haste > Versatility.",
+    "mplus": "Strength > Crit > Mastery >= Haste > Versatility.",
+    "personal_sim_performed": false
+  },
+  "recommendations": {
+    "enchants": {
+      "head": "item:243981",
+      "shoulders": "item:243961",
+      "chest": "item:243977",
+      "feet": "item:244009",
+      "legs": "item:244641",
+      "rings": "item:243957",
+      "weapon": "spell:327082"
+    },
+    "gems": {
+      "unique": "item:240983",
+      "dual_stat_example": "item:240898"
+    },
+    "consumables": {
+      "flask": "item:241322",
+      "combat_potion": "item:241288",
+      "healing_potion": "item:271884",
+      "food": "item:242275",
+      "feast": "item:255846",
+      "weapon_oil": "item:243734",
+      "optional_augment_rune": "item:259085"
+    }
+  },
+  "alternatives": {
+    "diamond": "item:240966"
+  },
+  "content_overrides": [],
+  "conditions": [
+    "Magisters flask recommendation follows guide text; erroneous link to Shattered Sun corrected using Wowhead item 241322. Flask choice remains gear-dependent.",
+    "Sim gem combinations; dual-stat gem is an example, not a universal best.",
+    "Powerful diamond is a gear-dependent alternative."
+  ],
+  "unresolved": [
+    "Exact item qualities, tooltip restrictions and consumable timings not independently checked."
+  ],
+  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown."
+}

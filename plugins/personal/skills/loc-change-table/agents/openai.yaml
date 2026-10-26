@@ -1,0 +1,4 @@
+interface:
+  display_name: "LOC Change Table"
+  short_description: "Count changed lines by repo and category since a date."
+  default_prompt: "Count line changes in this folder and subdirectories since the given date, categorize them, and return a repo-by-category table."

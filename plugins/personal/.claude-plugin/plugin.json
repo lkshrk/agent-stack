@@ -1,0 +1,20 @@
+{
+  "name": "personal",
+  "version": "1.0.0",
+  "description": "Personal skills: macOS disk and window-manager maintenance, change tables, documentation generation and World of Warcraft planning.",
+  "skills": [
+    "./skills/mac-disk-reclaim",
+    "./skills/yabai-skhd-doctor",
+    "./skills/loc-change-table",
+    "./skills/litho-document-skill",
+    "./skills/wow-account-setup",
+    "./skills/wow-achievement-dashboard",
+    "./skills/wow-achievement-plan",
+    "./skills/wow-duo-world-tour",
+    "./skills/wow-help",
+    "./skills/wow-spec"
+  ],
+  "author": {
+    "name": "lkshrk"
+  }
+}

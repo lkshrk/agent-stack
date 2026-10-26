@@ -1,0 +1,55 @@
+{
+  "kind": "manual-agent-evaluation",
+  "instructions": "For each case, load the listed skill and its relevant bundled references. Give the next response/actions using only the prompt and context; do not browse, mutate user data or invent missing gameplay evidence. Evaluate the result against the criteria afterward. These scenarios exercise instruction following, not live-client compatibility, and are not part of the deterministic Bun test count.",
+  "cases": [
+    {
+      "id": "ambiguous-classic",
+      "skills": ["wow-help"],
+      "prompt": "I play Classic. How do I unlock flying?",
+      "context": "No prior character or version context is available.",
+      "criteria": ["Ask which Classic variant the user plays before version-specific advice", "Do not assume Retail, Era or an expansion", "No account scan or provider expansion just to resolve the version"]
+    },
+    {
+      "id": "content-expansion-is-not-client",
+      "skills": ["wow-achievement-plan"],
+      "prompt": "Make a checklist for BfA achievements.",
+      "context": "The same character's established client context is Retail live. Current achievement observations are unavailable.",
+      "criteria": ["Keep Retail live as client context and BfA as target content", "Apply achievement planning with the required current-state check", "Do not infer a Classic client or claim personalized remaining state"]
+    },
+    {
+      "id": "named-provider-classic-no-import",
+      "skills": ["wow-spec"],
+      "prompt": "TBC Anniversary: use Method for a leveling and normal-dungeon build for my class. No other provider unless Method is actually missing the advice.",
+      "context": "Game, class and current phase are established. A supplied synthetic Method guide contains a complete point allocation, leveling order and selected-build calculator link. No compatible import format is verified. The guide is editorial; no ranking sample or simulation exists.",
+      "criteria": ["Retain Method and the ordinary-dungeon/leveling scope", "Use its sourced allocation and selected-build representation with import limitation stated", "Do not require an import, switch providers solely for its absence, invoke Retail M+ tools or invent usage statistics"]
+    },
+    {
+      "id": "forever-calculator-destination",
+      "skills": ["wow-spec"],
+      "prompt": "Explain this Method Forever beta build using its supplied calculator export.",
+      "context": "The supplied synthetic source includes a selected-build link, exact calculator export and matching beta tree/build. Calculator format is established; in-game import compatibility and any Retail codec compatibility are unverified. A newer Retail cache exists for the same class name.",
+      "criteria": ["Preserve the source export and identify its calculator destination", "Do not run the Retail codec, substitute the Retail cache, or claim in-game validation", "Keep beta context separate from live recommendations"]
+    },
+    {
+      "id": "help-explicit-current-user-report",
+      "skills": ["wow-help"],
+      "prompt": "Use the current quest and reputation state I just supplied for my Classic Hardcore character. I understand it is my report, not an API refresh.",
+      "context": "A configured-reader check already found no compatible importer. The user report is dated today, identifies the character/game and has no known contradictions. Mechanics still need ordinary source research.",
+      "criteria": ["Accept the already-explicit fallback choice and continue applicable research/advice", "Label state as dated user-reported evidence", "Do not ask for approval again, repeat unsupported scans or claim API-confirmed state"]
+    },
+    {
+      "id": "static-dashboard-current-user-report",
+      "skills": ["wow-achievement-dashboard"],
+      "prompt": "Update my TBC Anniversary reputation checklist from today's progress report. Use that report; no API access is available.",
+      "context": "An existing static Markdown reputation plan and dated user report are supplied. The reader limitation has already been checked. No native achievement dataset or AP evidence is supplied.",
+      "criteria": ["Update the static progression view from the explicitly selected report", "Preserve history, source date and user-reported status", "Do not require the achievement renderer, invent AP or repeatedly request API access"]
+    },
+    {
+      "id": "hardcore-self-found-goals",
+      "skills": ["wow-achievement-plan", "wow-duo-world-tour"],
+      "prompt": "Make a conditional profession and reputation route for our two Hardcore self-found characters using Wowhead and Method.",
+      "context": "Both characters have compatible game/faction/world context. Supplied rules prohibit player trading, mail and auction-house use. Player progress is unknown; the request explicitly asks for a general conditional route. No native achievement goals were requested.",
+      "criteria": ["Use progression Markdown with per-player actions and conditional prerequisites", "Preserve self-found restrictions in shopping and shared-material advice", "Use existing provider sections first; no fabricated achievement IDs, AP or personal eligibility"]
+    }
+  ]
+}
