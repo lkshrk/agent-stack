@@ -22,13 +22,17 @@ _GH_API_WRITE_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
 _PROTECTED = frozenset({"main", "master"})
 _GROUPING = frozenset({"(", ")", "{", "}", "$"})
 _KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until"})
-_DOC_NAME = re.compile(r"^(README|CHANGELOG)|.\.")
+_DOC_EXTS = frozenset({".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc"})
+_DOC_NAMES = frozenset({"README", "CHANGELOG", "LICENSE", "NOTICE", "CONTRIBUTING"})
+_PAGER_OFF = frozenset({"--no-pager", "-P"})
+_ALLOWED_GIT_ENV = frozenset({"GIT_PAGER=cat"})
+_STDERR_REDIRECT = re.compile(r"(?<=\s)2>\s*(?:&1|/dev/null)(?=$|[\s;|&)])")
 
 ADD_FORM = "only `git add -- <doc paths>` naming doc files is allowed"
 COMMIT_FORM = "only `git commit -m <message>` is allowed"
-PUSH_FORM = "only `git push origin HEAD:<branch>` to a non-protected branch is allowed"
+PUSH_FORM = "only `git push origin HEAD:<branch>` to a non-protected branch (no tags or other refs) is allowed"
 GIT_FORM = (
-    "git allows only status, diff, log, show, rev-parse, ls-files, branch (list), remote -v, "
+    "git allows only `--no-pager` with read verbs, status, diff, log, show, rev-parse, ls-files, branch (list), remote -v, "
     "fetch, merge-base, `git add -- <doc paths>`, `git commit -m <message>` and "
     "`git push origin HEAD:<branch>`"
 )
@@ -39,6 +43,10 @@ def _base(token: str) -> str:
     return os.path.basename(token)
 
 
+def _doc_file(name: str) -> bool:
+    return name in _DOC_NAMES or os.path.splitext(name)[1].lower() in _DOC_EXTS
+
+
 def _check_add(args: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if args[:1] == ["--"]:
         args = args[1:]
@@ -47,7 +55,7 @@ def _check_add(args: list[str], is_doc: Callable[[str], bool]) -> str | None:
     for path in args:
         if any(ch in path for ch in "*?[") or path.startswith(":") or path.endswith("/"):
             return f"{ADD_FORM} (got {path})"
-        if not _DOC_NAME.search(_base(path)) or not is_doc(path):
+        if not _doc_file(_base(path)) or not is_doc(path):
             return f"{ADD_FORM} (got {path})"
     return None
 
@@ -74,7 +82,7 @@ def _check_push(args: list[str]) -> str | None:
     if len(args) != 2 or args[0] != "origin" or not args[1].startswith("HEAD:"):
         return PUSH_FORM
     branch = args[1].removeprefix("HEAD:").removeprefix("refs/heads/")
-    if not branch or ":" in branch or branch in _PROTECTED:
+    if not branch or ":" in branch or branch in _PROTECTED or branch.startswith("refs/"):
         return PUSH_FORM
     return None
 
@@ -82,7 +90,14 @@ def _check_push(args: list[str]) -> str | None:
 def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if not rest:
         return None
+    pager_off = False
+    while rest and rest[0] in _PAGER_OFF:
+        pager_off, rest = True, rest[1:]
+    if not rest:
+        return None
     sub, args = rest[0], rest[1:]
+    if pager_off and sub not in _GIT_READ | {"branch", "remote"}:
+        return f"git --no-pager is allowed only with read verbs; {GIT_FORM}"
     if sub.startswith("-"):
         return f"git global options are not allowed; {GIT_FORM}"
     if any(a.startswith(_GIT_UNSAFE_FLAGS) for a in args):
@@ -90,7 +105,11 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if sub in _GIT_READ:
         return None
     if sub == "branch":
-        return None if all(a in _BRANCH_LIST_FLAGS for a in args) else f"git branch may only list; {GIT_FORM}"
+        flags = [a for a in args if a.startswith("-")]
+        listing = all(f in _BRANCH_LIST_FLAGS for f in flags) and (
+            len(flags) == len(args) or {"--list", "-l"} & set(flags)
+        )
+        return None if listing else f"git branch may only list; {GIT_FORM}"
     if sub == "remote":
         return None if args in ([], ["-v"]) else f"git remote may only list; {GIT_FORM}"
     if sub == "add":
@@ -144,8 +163,8 @@ def _check_statement(tokens: list[str], is_doc: Callable[[str], bool]) -> str | 
     while i < len(tokens) and tokens[i] in _KEYWORDS:
         i += 1
     while i < len(tokens) and _ASSIGNMENT.match(tokens[i]):
-        if tokens[i].startswith("GIT_"):
-            return "GIT_* environment overrides are not allowed"
+        if tokens[i].startswith("GIT_") and tokens[i] not in _ALLOWED_GIT_ENV:
+            return "GIT_* environment overrides other than GIT_PAGER=cat are not allowed"
         i += 1
     if i == len(tokens):
         return None
@@ -182,7 +201,7 @@ def docs_vcs(
             return None
         if arguments.get("_unparseable"):
             return _deny("unparseable tool arguments")
-        command = shell_command(arguments)
+        command = _STDERR_REDIRECT.sub("", shell_command(arguments))
         try:
             statements = walk(command)
         except ValueError:

@@ -92,8 +92,61 @@ class DocsVcsTest(unittest.TestCase):
             "git add docs/../src/a.py",
             "git add -f docs/a.md",
             "git add",
+            "git add README.d",
+            "git add CHANGELOG.d",
+            "git add docs/foo.d",
+            "git add docs/v1.2",
+            "git add docs/conf.py",
+            "git add LICENSE",
         ):
             self.assertDenied(command, "git add")
+
+    def test_git_add_doc_names_and_extensions(self):
+        for command in (
+            "git add docs/LICENSE",
+            "git add docs/NOTICE.txt",
+            "git add docs/CONTRIBUTING.rst",
+            "git add docs/guide.mdx docs/guide.markdown docs/a.adoc docs/b.txt",
+            "git add README.rst",
+            "git add CHANGELOG",
+        ):
+            self.assertAllowed(command)
+        policy = docs_vcs(allow_paths=ALLOW_PATHS + ["LICENSE"])
+        decision = policy(tool_call_event("bash", {"command": "git add LICENSE"}))
+        self.assertEqual(decision["result"], "ALLOW")
+
+    def test_read_forms_not_over_denied(self):
+        for command in (
+            "git --no-pager log -1",
+            "git --no-pager diff --name-only abc123..HEAD",
+            "git -P show HEAD",
+            "GIT_PAGER=cat git log -1",
+            "git log -1 2>/dev/null",
+            "git log -1 2> /dev/null",
+            "git status 2>&1",
+            "git status --porcelain 2>&1 | head",
+            "gh pr view 7 2>&1",
+            "gh pr diff 7 2>/dev/null",
+            "git push origin HEAD:feat/x 2>&1",
+            "git branch --list 'feat/*'",
+            "git branch -l feat/x",
+        ):
+            self.assertAllowed(command)
+        for command in (
+            "git --no-pager add -A",
+            "git --no-pager push origin HEAD:feat/x",
+            "git --no-pager -C . log",
+            "GIT_PAGER=less git log",
+            "GIT_PAGER=cat GIT_INDEX_FILE=/tmp/i git add docs/a.md",
+            "GIT_EDITOR=true git commit",
+            "git log > docs/log.md",
+            "git log 2>docs/err.md",
+            "gh pr diff 7 > /tmp/pr.diff",
+            "git log >> notes.md",
+            "git branch feat/new",
+            "git branch -D feat/x",
+        ):
+            self.assertDenied(command)
 
     def test_git_commit_message_only(self):
         self.assertAllowed('git commit -m "docs: document ORDERS_QUEUE"')
@@ -131,6 +184,15 @@ class DocsVcsTest(unittest.TestCase):
             "git push origin :feat/x",
             "git push origin --delete feat/x",
             "git push",
+            "git push origin HEAD:refs/tags/v9",
+            "git push origin refs/tags/v9",
+            "git push origin HEAD:refs/notes/x",
+            "git push origin HEAD:refs/heads/refs/heads/main",
+            "git push origin HEAD:refs/remotes/origin/x",
+            "git push --tags origin",
+            "git push --follow-tags origin HEAD:feat/x",
+            "git push --all origin",
+            "git push --mirror origin",
         ):
             self.assertDenied(command, "git push")
 

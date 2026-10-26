@@ -41,12 +41,16 @@ prompt: |
   `sh -c` or `$(…)`), with no `git -C`/`-c` options and no `GIT_*=`
   variables:
   - `git status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `branch`
-    (listing), `remote -v`, `fetch`, `merge-base`;
-  - `git add -- <doc file> …`, naming each doc file;
+    (listing), `remote -v`, `fetch`, `merge-base`, optionally with
+    `--no-pager` or `GIT_PAGER=cat`;
+  - `git add -- <doc file> …`, naming each doc file (Markdown, reST, text,
+    AsciiDoc, or README, CHANGELOG, LICENSE, NOTICE, CONTRIBUTING);
   - `git commit -m "docs: <summary>"`, without `-a`, `--amend` or
     `--no-verify`;
   - `git push origin HEAD:<head branch>`;
   - `gh pr view|diff|checks|list` and `gh api` GET requests.
+  `2>&1` and `2>/dev/null` are fine; other redirects on `git` or `gh` are
+  denied. Tags and other `refs/` never get pushed.
 
   Shell: one plain command or pipeline per call. Rephrase a denied command
   rather than retrying it.

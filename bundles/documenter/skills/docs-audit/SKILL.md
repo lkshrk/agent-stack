@@ -41,10 +41,10 @@ CLI definitions).
   cover it>", "reason": "<what is missing and where the code is>"}`.
 - `changed_files` is empty and `pr` is null.
 - No findings, or stale passages only: `DONE` with an empty `gaps`. Any
-  gap: `DONE_WITH_CONCERNS`; the validator rejects gaps under any other
-  status.
+  gap: `DONE_WITH_CONCERNS`; the validator rejects gaps under `DONE`.
 - Open questions about scope or intent: `BLOCKED` with `blocked.class:
-  decision` and one `blocked.question` batching all of them.
+  decision` and one `blocked.question` batching all of them. Keep the
+  `stale` and `gaps` found so far in the result.
 
 ```json
 {

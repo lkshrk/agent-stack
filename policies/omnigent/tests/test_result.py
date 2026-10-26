@@ -203,6 +203,14 @@ class SecurityDocumenterTest(unittest.TestCase):
         self.assertEqual(result.validate_result("documenter", data), [])
 
 
+    def test_documenter_audit_gaps_fixture(self):
+        self.assertEqual(result.validate_result("documenter", load("documenter-valid-audit-gaps.json")), [])
+
+    def test_documenter_blocked_keeps_gaps(self):
+        data = load("documenter-valid-audit-gaps.json")
+        data.update(status="BLOCKED", blocked={"class": "decision", "question": "Document module x or drop it?"})
+        self.assertEqual(result.validate_result("documenter", data), [])
+
     def test_documenter_gaps(self):
         gap = {"file": "docs/setup.md", "reason": "ORDERS_QUEUE is read in settings.py and not documented."}
         data = {"status": "DONE_WITH_CONCERNS", "mode": "audit", "changed_files": [], "stale": [], "gaps": [gap], "pr": None}

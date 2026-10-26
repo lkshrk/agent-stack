@@ -234,6 +234,13 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:main"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr merge 5"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_read", {"path": "backend/app/main.py"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:refs/tags/v9"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git push --tags origin"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git add README.d"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git --no-pager log -1 2>&1"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "GIT_PAGER=cat git log -1"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr diff 7 2>/dev/null"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git branch --list 'feat/*'"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_write", {"path": ".claude/skills/x/SKILL.md", "content": "x"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_write", {"path": "packages/a/.claude/commands/x.md", "content": "x"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_write", {"path": ".agents/skills/x/SKILL.md", "content": "x"}, "DENY"),
@@ -279,6 +286,7 @@ CASES: list[Case] = [
     Case("documenter", "response", None, "Docs updated.", "DENY", turn_final=True),
     Case("documenter", "response", None, fenced("documenter-valid.json"), "ALLOW", turn_final=True),
     Case("documenter", "response", None, fenced("documenter-invalid-delta-no-pr.json"), "DENY", turn_final=True),
+    Case("documenter", "response", None, fenced("documenter-valid-audit-gaps.json"), "ALLOW", turn_final=True),
 ]
 
 
