@@ -10,6 +10,9 @@ review is a sub-agent that returns a structured report, not a transcript
 anyone needs to read through.
 
 ## Procedure
+0. Bring the task branch up to date with `origin/main`: rebase if the branch was
+   never pushed, otherwise `git merge origin/main`. Rerun the gates, push
+   without force, and only then snapshot the diff.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
    redirect (`gh pr diff <pr> > <absolute shared diff path>` or
    `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > <absolute shared diff path>`).

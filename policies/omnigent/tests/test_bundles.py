@@ -70,6 +70,8 @@ def verdict(agent_dir: Path, case: Case) -> str:
     return result
 
 
+DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
+
 CASES: list[Case] = [
     Case("polly", "tool_call", "Write", {"file_path": ".github/workflows/ci.yml", "content": "x"}, "DENY"),
     Case("polly", "tool_call", "Write", {"file_path": "deploy/.env", "content": "x"}, "DENY"),
@@ -79,6 +81,19 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "git status"}, "ALLOW"),
     Case("polly/agents/codex", "tool_call", "Bash", {"command": "git push origin main"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "CLAUDE.md"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "gh pr merge 12"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:main"}, "DENY"),
+    Case("polly", "tool_call", "Write", {"file_path": "docs/notes.md", "content": "x"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_session_send", DISPATCH, "DENY", {"agent_stack_dispatches": 24}),
+    Case("polly", "tool_call", "sys_session_send", DISPATCH, "ALLOW", {"agent_stack_dispatches": 3}),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 800}),
+    Case("polly", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env"}, "DENY"),
+    Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env.example"}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push --force origin feat/x"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "Write", {"file_path": "src/a.py", "content": "x"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "Bash", {"command": "rg foo"}, "ALLOW"),
 ]
 
 
@@ -88,3 +103,8 @@ class BundleVerdictTest(unittest.TestCase):
         for case in CASES:
             with self.subTest(case=case):
                 self.assertEqual(verdict(BUNDLES / case.agent, case), case.expected)
+
+    def test_polly_spawn_disabled(self):
+        from omnigent.spec import load
+
+        self.assertIs(load(BUNDLES / "polly", expand_env=False).spawn, False)

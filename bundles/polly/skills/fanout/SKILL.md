@@ -21,6 +21,11 @@ dependency).
    work only inside `.worktrees/<task_id>`. The worker drives the task to green
    and opens its OWN PR for the branch. Commits and PR texts carry no AI
    attribution (no Co-authored-by trailer, no session link).
+   For a change under the repo's UI paths (Routivo: `frontend/**`), the
+   contract requires the repository's sandbox check (Routivo:
+   `scripts/sandbox-check.sh`) with PNG screenshots pushed to a
+   `pr-assets/<task-branch>` branch and their blob URLs linked in a PR comment;
+   missing e2e evidence is a blocking review finding.
    For a long-running `claude_code` or `codex` implementation with an explicit
    completion condition, the `input` may instead be one standalone
    `/goal <condition>` command containing that same task, worktree, acceptance

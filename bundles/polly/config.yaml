@@ -10,11 +10,7 @@ description: >-
   putting it all together. Best for bigger tasks you want planned and
   split up.
 
-# Beyond the declared sub-agents (tools.agents below), polly may also spawn
-# child sessions it defines itself: spawn: true registers
-# sys_session_create, so it can launch an existing agent by id or author a
-# custom agent config and launch it via config_path.
-spawn: true
+spawn: false
 
 executor:
   type: omnigent
@@ -321,7 +317,7 @@ guardrails:
     blast_radius:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.blast_radius
+        path: omnigent.policies.builtins.orchestration.blast_radius
         arguments:
           # Orchestrator runs unattended; don't ASK on push/merge/deploy. The
           # catastrophic DENY set (force-push, rm -rf /, hard-reset to a remote
@@ -330,16 +326,37 @@ guardrails:
     spawn_bounds:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.spawn_bounds
+        path: omnigent.policies.builtins.orchestration.spawn_bounds
         arguments:
           max_dispatches_per_turn: 6
-          # sys_session_create counts too: with spawn: true polly can
-          # launch self-defined children, and an uncounted create would
-          # bypass the per-turn fan-out cap.
-          dispatch_tools: [sys_session_send, sys_session_create]
+          dispatch_tools: [sys_session_send]
+    max_dispatches_per_session:
+      type: function
+      function:
+        path: agent_stack_policies.spawn.max_dispatches_per_session
+        arguments:
+          limit: 24
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 800
+    detect_loop:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.detect_loop
+        arguments: {}
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
     headless_subagent_purpose_guard:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.headless_subagent_purpose_guard
+        path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
         arguments:
           allowed_purposes: [implement, review, explore, search]
