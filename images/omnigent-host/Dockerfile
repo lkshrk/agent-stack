@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.10
 ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.19.1@sha256:46ddb52b8013e69bcd2068842d9746bc896d50f5884a2469d51a27a6211c5814
 
-FROM ${OMNIGENT_HOST_IMAGE}
+FROM ${OMNIGENT_HOST_IMAGE} AS image
 
 ARG CLAUDE_CODE_VERSION=2.1.309
 ARG CODEX_VERSION=0.164.0
@@ -95,3 +95,17 @@ RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconf
 
 WORKDIR /root
 CMD ["sleep", "infinity"]
+
+FROM image AS test
+COPY policies/omnigent/ /src/policies/omnigent/
+COPY bundles/ /src/bundles/
+COPY config/omnigent/ /src/config/omnigent/
+COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
+COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
+WORKDIR /src
+RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+USER 1000660000
+RUN fail=0; for t in images/omnigent-host/test/*.sh; do echo "== $t"; bash "$t" || fail=1; done; exit "$fail"
+
+# The default target is the published image, without the test stage.
+FROM image
