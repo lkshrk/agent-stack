@@ -490,6 +490,39 @@ class PipelineRuns(unittest.TestCase):
         self.assertEqual(saved['source-watch.json']['sources'][LIVE_GUIDE]['sha256'], 'a' * 64)
         self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1')
 
+    def test_unresolved_result_records_its_new_limitation_only(self):
+        old, observation = spec_fixture(flask='item:241324')
+        old['spec-265.json']['unresolved'] = ['Existing limitation']
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['stat_guidance']['single_target'] = 'Guess'
+        edited['unresolved'] = ['Guide flask section is contradictory']
+        part = self.part('unresolved', accepted_sources=[], unresolved_sources=[LIVE_GUIDE])
+        output, saved = self.run_pipeline(old, observation, [(part, {'spec-265.json': edited})])
+        self.assertEqual(output['rejected'], {})
+        self.assertEqual(saved['spec-265.json']['unresolved'], ['Existing limitation', 'Guide flask section is contradictory'])
+        self.assertEqual(saved['spec-265.json']['stat_guidance'], old['spec-265.json']['stat_guidance'])
+        self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1')
+
+    def test_lookup_tooltips_cited_outside_the_bundle_are_ignored_not_rejected(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['recommendations']['consumables']['flask'] = 'item:241326'
+        lookup = 'https://nether.wowhead.com/tooltip/spell/1289744'
+        part = self.part('updated', accepted_sources=[LIVE_GUIDE, lookup])
+        output, saved = self.run_pipeline(old, observation, [(part, {'spec-265.json': edited})])
+        self.assertEqual(output['rejected'], {})
+        self.assertEqual(saved['spec-265.json']['recommendations']['consumables']['flask'], 'item:241326')
+        self.assertNotIn(lookup, saved['source-watch.json']['sources'])
+
+    def test_an_unrelated_guide_citation_still_rejects_the_part(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['recommendations']['consumables']['flask'] = 'item:241326'
+        part = self.part('updated', accepted_sources=[LIVE_GUIDE, 'https://www.method.gg/guides/survival-hunter/stats-races-and-consumables'])
+        output, saved = self.run_pipeline(old, observation, [(part, {'spec-265.json': edited})])
+        self.assertIn('unrelated source', output['rejected']['265'])
+        self.assertEqual(saved['spec-265.json']['recommendations'], old['spec-265.json']['recommendations'])
+
     def test_a_run_cannot_edit_another_spec(self):
         old, observation = spec_fixture()
         other = copy.deepcopy(old['spec-265.json'])
