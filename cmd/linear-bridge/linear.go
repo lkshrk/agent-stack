@@ -92,7 +92,7 @@ type graphQL struct {
 
 const (
 	archiveMutation = `mutation($id:String!){ issueArchive(id:$id){ success } }`
-	thoughtMutation = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: thought, body:$b}}){ success } }`
+	thoughtMutation = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: "thought", body:$b}}){ success } }`
 )
 
 func (g *graphQL) ArchiveIssue(ctx context.Context, issueID string) error {

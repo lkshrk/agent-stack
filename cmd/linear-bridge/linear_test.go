@@ -139,7 +139,7 @@ func TestGraphQLThoughtSendsMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := (*calls)[0]
-	if !strings.Contains(c.req.Query, "agentActivityCreate") || c.req.Variables["s"] != "sess-1" || c.req.Variables["b"] != "hello" {
+	if !strings.Contains(c.req.Query, "agentActivityCreate") || !strings.Contains(c.req.Query, `type: "thought"`) || c.req.Variables["s"] != "sess-1" || c.req.Variables["b"] != "hello" {
 		t.Fatalf("call = %+v", c)
 	}
 }
