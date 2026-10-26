@@ -121,7 +121,7 @@ test("publish pushes and opens the PR as the h-cloud-npa app via octo-sts", () =
   const publish = wow.jobs.publish;
   const sts = publish.steps.find((step: any) => step.id === "sts");
   expect(sts.uses).toMatch(/^octo-sts\/action@[0-9a-f]{40}$/);
-  expect(sts.with).toEqual({ scope: "lkshrk/agent-stack", identity: "agent-stack-wow-refresh" });
+  expect(sts.with).toEqual({ domain: "sts.h-cloud.io", scope: "lkshrk", identity: "agent-stack-wow-refresh" });
   expect(publish.steps.indexOf(sts)).toBe(0);
   expect(publish.steps.find((step: any) => step.id === "pr").env.GH_TOKEN).toBe("${{ steps.sts.outputs.token }}");
   const checkout = publish.steps.find((step: any) => step.id === "checkout");
