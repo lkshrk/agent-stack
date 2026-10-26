@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import (advance_verified, summarize_patches, drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
+from apply_wow_season_refresh import (advance_verified, summarize_patches, drop_negligible, load_bundle, main as apply_main, merge_parts, pr_body, record_errors,
                                       source_mapping_errors, validate)
 from check_wow_season_updates import active_bundle, analyze
 
@@ -739,3 +739,40 @@ class PipelineRuns(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PullRequestBody(unittest.TestCase):
+    def docs(self):
+        return {f'spec-{i}.json': {'spec': name} for i, name in [(253, 'Beast Mastery Hunter'), (250, 'Blood Death Knight'), (103, 'Feral Druid')]}
+
+    def test_sections_bullets_and_one_sentence_per_spec(self):
+        summaries = [(253, 'updated', 'Food now follows the feast. Flask changed too, and more detail follows.'),
+                     (250, 'unresolved', 'Guide lists the potion as plain text.'),
+                     (103, 'unchanged', 'Everything matches the guide.')]
+        body = pr_body(self.docs(), summaries, advanced=[103, 250], rejected={}, notes=[], enriched=[], deferred=[])
+        self.assertTrue(body.startswith('Refreshes the season bundle: 1 updated, 1 unchanged, 1 unresolved.'))
+        self.assertIn('## Updated\n- **253 Beast Mastery Hunter**: Food now follows the feast.\n', body)
+        self.assertIn('## Unresolved\n- **250 Blood Death Knight**: Guide lists the potion as plain text.\n', body)
+        self.assertIn('## Verification advanced\n- 2 specs: 103, 250\n', body)
+        self.assertNotIn('Flask changed too', body.split('<details>')[0])
+        self.assertIn('Flask changed too', body.split('<details>')[1])
+
+    def test_rejections_and_extras_are_listed(self):
+        body = pr_body(self.docs(), [], advanced=[], rejected={253: 'ValueError: Cannot accept an unrelated source'},
+                       notes=['Duplicate result for spec 250 ignored'], enriched=['item:1', 'item:2'], deferred=[103])
+        self.assertTrue(body.startswith('Refreshes the season bundle: 1 rejected.'))
+        self.assertIn('## Rejected\n- **253 Beast Mastery Hunter**: `ValueError: Cannot accept an unrelated source`\n', body)
+        self.assertIn('- Tooltip data filled for 2 catalogue records', body)
+        self.assertIn('- Retried next run: 103', body)
+        self.assertIn('- Duplicate result for spec 250 ignored', body)
+        self.assertNotIn('<details>', body)
+
+    def test_verification_only_run(self):
+        body = pr_body(self.docs(), [], advanced=[103], rejected={}, notes=[], enriched=[], deferred=[])
+        self.assertTrue(body.startswith('Verification-only refresh: no advice changed.'))
+
+    def test_long_first_sentence_is_shortened(self):
+        body = pr_body(self.docs(), [(103, 'unchanged', 'x' * 400)], advanced=[], rejected={}, notes=[], enriched=[], deferred=[])
+        line = next(l for l in body.splitlines() if l.startswith('- **103'))
+        self.assertLessEqual(len(line), 220)
+        self.assertTrue(line.endswith('…'))

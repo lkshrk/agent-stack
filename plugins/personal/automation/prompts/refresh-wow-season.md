@@ -26,4 +26,4 @@ Do not rewrite dates, `verified_patch` or sources for their own sake: the publis
 
 ## Result
 
-Return the structured result: `spec_id`; `outcome` (`updated`, `unchanged`, `unresolved`); a short `summary` of the actual advice changes or why none; `accepted_sources` (the exact guide URL(s) you verified from the task file, plus the tooltip URLs of new records; lookups you only used to confirm an identity, such as recipe spell tooltips, are not sources); `unresolved_sources` (exact URLs you could not settle).
+Return the structured result: `spec_id`; `outcome` (`updated`, `unchanged`, `unresolved`); a `summary` whose first sentence (at most 25 words) names the player-visible change, e.g. "Food → Harandar Celebration feast; flask → Shattered Sun.", or starts with "No advice change:" and the reason; optional detail follows in later sentences; `accepted_sources` (the exact guide URL(s) you verified from the task file, plus the tooltip URLs of new records; lookups you only used to confirm an identity, such as recipe spell tooltips, are not sources); `unresolved_sources` (exact URLs you could not settle).

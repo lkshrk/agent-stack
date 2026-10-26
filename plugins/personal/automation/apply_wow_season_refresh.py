@@ -291,7 +291,7 @@ def merge_parts(old, parts):
     merged = copy.deepcopy(old)
     records = merged['catalog.json']['records']
     old_records = old['catalog.json']['records']
-    accepted, unresolved, summaries, touched = [], [], [], set()
+    accepted, unresolved, summaries, spec_summaries, touched = [], [], [], [], set()
     by_outcome = {'unchanged': [], 'updated': [], 'unresolved': []}
     for result, candidate in parts:
         spec_id, name = result['spec_id'], f'spec-{result["spec_id"]}.json'
@@ -311,6 +311,7 @@ def merge_parts(old, parts):
             accepted += result['accepted_sources']
         unresolved += result['unresolved_sources']
         summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
+        spec_summaries.append((spec_id, result['outcome'], result['summary'].strip()))
         by_outcome[result['outcome']].append(spec_id)
         if result['outcome'] == 'unresolved':
             known = merged[name].get('unresolved', [])
@@ -336,8 +337,46 @@ def merge_parts(old, parts):
     accepted = [url for url in dict.fromkeys(accepted) if url not in set(unresolved) and not lookup_only(url, wanted)]
     result = {'status': 'partial' if unresolved else 'complete',
               'summary': '\n'.join(summaries) or 'No Claude runs were needed.',
-              'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved))}
+              'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved)),
+              'spec_summaries': spec_summaries}
     return merged, result, by_outcome
+
+
+def first_sentence(text, limit=180):
+    match = re.match(r'(.+?[.!?])(?:\s|$)', text, re.S)
+    sentence = ' '.join((match.group(1) if match else text).split())
+    return sentence if len(sentence) <= limit else sentence[:limit - 1].rstrip() + '…'
+
+
+def pr_body(docs, spec_summaries, advanced, rejected, notes, enriched, deferred):
+    """Markdown pull request body: one headline, a bulleted section per outcome, full agent notes collapsed."""
+    def label(spec_id):
+        name = docs.get(f'spec-{spec_id}.json', {}).get('spec', '')
+        return f'**{spec_id} {name}**' if name else f'**{spec_id}**'
+
+    counts = {o: sum(1 for _, outcome, _ in spec_summaries if outcome == o) for o in ('updated', 'unchanged', 'unresolved')}
+    counts['rejected'] = len(rejected)
+    parts = [f'{n} {o}' for o, n in counts.items() if n]
+    lines = ['Refreshes the season bundle: ' + ', '.join(parts) + '.' if parts else 'Verification-only refresh: no advice changed.']
+    for outcome in ('updated', 'unresolved', 'unchanged'):
+        rows = [f'- {label(i)}: {first_sentence(text)}' for i, o, text in spec_summaries if o == outcome]
+        if rows:
+            lines += ['', '## ' + outcome.capitalize(), *rows]
+    if rejected:
+        lines += ['', '## Rejected', *[f'- {label(i)}: `{reason}`' for i, reason in sorted(rejected.items(), key=str)]]
+    if advanced:
+        lines += ['', '## Verification advanced', f'- {len(advanced)} specs: ' + ', '.join(map(str, sorted(advanced)))]
+    extra = [f'- Tooltip data filled for {len(enriched)} catalogue records'] if enriched else []
+    extra += ['- Retried next run: ' + ', '.join(map(str, deferred))] if deferred else []
+    extra += [f'- {note}' for note in notes]
+    if extra:
+        lines += ['', '## Notes', *extra]
+    if spec_summaries:
+        lines += ['', '<details><summary>Agent notes</summary>', '']
+        for spec_id, outcome, text in spec_summaries:
+            lines += [f'{label(spec_id)} ({outcome})', '', text, '']
+        lines += ['</details>']
+    return '\n'.join(lines) + '\n'
 
 
 def describe(error):
@@ -528,17 +567,9 @@ def main(argv=None):
     if not args.dry_run:
         for name in changed:
             (bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
-    lines = [result['summary']] + (['', *notes] if notes else [])
-    if rejected:
-        lines += ['', 'Rejected per-spec results (previous values kept): ' + '; '.join(f'{i}: {r}' for i, r in sorted(rejected.items(), key=str))]
-    if advanced:
-        lines += ['', f'Advice unchanged, verification advanced for {len(advanced)} specs: ' + ', '.join(map(str, sorted(advanced)))]
-    if enriched:
-        lines += ['', f'Tooltip data filled for {len(enriched)} catalogue records: ' + ', '.join(sorted(enriched))]
     deferred = observation.get('prediff', {}).get('deferred', [])
-    if deferred:
-        lines += ['', 'Specs with differences not processed this run (retried next run): ' + ', '.join(map(str, deferred))]
-    output = {'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
+    summary = pr_body(docs, result.get('spec_summaries', []), advanced, rejected, notes, enriched, deferred)
+    output = {'changed_files': changed, 'release': release, 'status': result['status'], 'summary': summary,
                       'advanced': sorted(advanced), 'ai_updated': outcomes['updated'], 'rejected': {str(k): v for k, v in rejected.items()}, 'notes': notes,
                'enriched': sorted(enriched)}
     print(json.dumps(output))
