@@ -41,7 +41,7 @@ jobs:
 
       - name: Check out repository
         id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -54,7 +54,7 @@ jobs:
 
       - name: Set up Bun
         id: bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
@@ -85,7 +85,7 @@ jobs:
 
       - name: Preserve trusted source observations
         id: observation
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wow-source-observation
           path: wow-source-observation.json
@@ -116,7 +116,7 @@ jobs:
       - name: Refresh affected setup records with Claude Code
         if: steps.inspect.outputs.needed == 'true'
         id: refresh
-        uses: anthropics/claude-code-action@v1
+        uses: anthropics/claude-code-action@925afb53776cf1a2b738c6bdbed37b4d4000ef13 # v1.0.262
         env:
           ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
           ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-haiku
@@ -139,7 +139,7 @@ jobs:
       - name: Keep candidate data
         id: candidate
         if: steps.result_file.outcome == 'success'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wow-refresh-candidate
           path: plugins/personal/skills/wow-spec/assets/season-data/retail/season-mn-2/
@@ -149,7 +149,7 @@ jobs:
       - name: Keep refresh result
         id: result
         if: always() && hashFiles('wow-refresh-result.json') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wow-refresh-result
           path: wow-refresh-result.json
@@ -205,34 +205,34 @@ jobs:
     steps:
       - name: Check out trusted base
         id: checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.refresh.outputs.base_sha }}
 
       - name: Download candidate data
         id: candidate_download
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: wow-refresh-candidate
           path: ${{ runner.temp }}/wow-candidate
 
       - name: Download source observations
         id: observation_download
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: wow-source-observation
           path: ${{ runner.temp }}/wow-observation
 
       - name: Download refresh result
         id: result_download
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: wow-refresh-result
           path: ${{ runner.temp }}/wow-result
 
       - name: Set up Bun
         id: bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
 
