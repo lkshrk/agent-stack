@@ -17,9 +17,11 @@ anyone needs to read through.
    conflict, rerun the gates, push without force and report the new head SHA.
    End your turn, and snapshot the diff only after that report arrives.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
-   redirect (`gh pr diff <pr> > <absolute shared diff path>` or
-   `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > <absolute shared diff path>`).
-   Use a unique snapshot outside the implementer's worktree, record its base and
+   redirect into `.polly/diffs/` (`gh pr diff <pr> > .polly/diffs/<task_id>-<head-sha>.diff`
+   or `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > .polly/diffs/<task_id>-<head-sha>.diff`)
+   and pass its absolute path. `.polly/diffs/` is the only place besides the
+   registry and your skills that you write. It is outside the implementer's
+   worktree. Record its base and
    head commit SHAs, and leave it unchanged until review finishes. The reviewer
    must be able to read that path. For a different host or sandbox, transfer the
    snapshot first or arrange access to both commits so it can compute the diff;

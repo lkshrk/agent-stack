@@ -34,7 +34,8 @@ prompt: |
   included), commits, rebases, merges or pushes. Every repository change,
   however small, is an `implement` task for the implementer, and so is bringing
   its branch up to date. The only files you write are the `.polly/registry.json`
-  task list and skills in polly's own `skills/` (see below).
+  task list, diff snapshots under `.polly/diffs/` and skills in polly's own
+  `skills/` (see below). Policies enforce this write scope.
 
   You have exactly TWO sub-agents, both real CLI coding harnesses that run in
   their own terminal — the human can open either in the UI's Subagents panel
@@ -313,6 +314,10 @@ guardrails:
       function:
         path: agent_stack_policies.paths.path_guard
         arguments:
+          allow_only:
+            - .polly/registry.json
+            - ".polly/diffs/**"
+            - "polly/skills/**"
           deny:
             - ".github/workflows/**"
             - "**/*.sops.yaml"
@@ -333,7 +338,14 @@ guardrails:
         arguments:
           handler: omnigent.policies.builtins.orchestration.blast_radius
           arguments:
-            gate_pushes: false
+            gate_pushes: true
+            risky_action: DENY
+    git_verbs:
+      type: function
+      function:
+        path: agent_stack_policies.readonly.git_verbs
+        arguments:
+          extra_verbs: [fetch, worktree]
     spawn_bounds:
       type: function
       function:
