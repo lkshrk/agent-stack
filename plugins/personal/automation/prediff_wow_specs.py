@@ -125,9 +125,7 @@ def classify(documents, sources):
     return result
 
 
-def needs_advance(setup, guides, baseline, force=False):
-    if force:
-        return True
+def needs_advance(setup, guides, baseline):
     for url, guide in guides.items():
         meta = guide.get('meta', {})
         stored = next((s for s in setup['sources'] if (s['url'] if isinstance(s, dict) else s) == url), None)
@@ -145,11 +143,13 @@ def summarize(documents, observation, cap=DEFAULT_CAP, force=False):
     specs = classify(documents, sources)
     baseline = documents['source-watch.json'].get('sources', {})
     changed = sorted(i for i, v in specs.items() if v['status'] == 'changed')
+    ordered = changed + (sorted(i for i, v in specs.items() if v['status'] == 'unchanged') if force else [])
+    selected = ordered[:cap]
     advance = sorted(e['spec_id'] for e in documents['index.json']['specs']
-                     if specs[e['spec_id']]['status'] == 'unchanged'
-                     and needs_advance(documents[e['file']], live_guides(documents[e['file']], sources), baseline, force))
+                     if specs[e['spec_id']]['status'] == 'unchanged' and e['spec_id'] not in selected
+                     and needs_advance(documents[e['file']], live_guides(documents[e['file']], sources), baseline))
     return {'schema_version': 1, 'cap': cap, 'specs': {str(k): v for k, v in specs.items()},
-            'changed': changed, 'selected': changed[:cap], 'deferred': changed[cap:],
+            'changed': changed, 'selected': selected, 'deferred': ordered[cap:],
             'unchanged': sorted(i for i, v in specs.items() if v['status'] == 'unchanged'),
             'advance': advance,
             'unavailable': sorted(i for i, v in specs.items() if v['status'] == 'unavailable')}

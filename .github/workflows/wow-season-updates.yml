@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force_refresh:
-        description: Recheck recommendations even when source fingerprints are unchanged
+        description: Send every spec with a readable guide to Claude Code (within the cap), even without differences
         type: boolean
         default: false
 
@@ -119,7 +119,7 @@ jobs:
               lines += ['', 'Detection did not complete successfully. Inspect the first failed stage above; later skipped stages are not evidence of unchanged sources.']
           elif os.environ['CLAUDE_NEEDED'] == 'false':
               lines += ['', 'Claude Code skipped: no spec differs from its live guide. Deterministic verification advances and tooltip enrichment still run in publishing.',
-                        'Enable force_refresh to advance verification of every unchanged spec anyway.']
+                        'Enable force_refresh to send unchanged specs to Claude Code too, within the cap.']
           else:
               lines += ['', 'Specs with differences are rechecked one Claude Code run each; see the matrix jobs.']
           summary = '\n'.join(lines) + '\n'
@@ -269,12 +269,9 @@ jobs:
           echo "Validating candidate against trusted source observations and base $BASE_SHA."
           echo "Only accepted seasonal data changes may be applied; unsupported observations retain previous values."
           mkdir -p "$RUNNER_TEMP/wow-parts"
-          force=()
-          [ "$FORCE_REFRESH" != true ] || force=(--force)
           python3 plugins/personal/automation/apply_wow_season_refresh.py \
             --parts "$RUNNER_TEMP/wow-parts" \
             --observation "$RUNNER_TEMP/wow-refresh/wow-source-observation.json" \
-            "${force[@]}" \
             > "$RUNNER_TEMP/wow-apply.json"
           cat "$RUNNER_TEMP/wow-apply.json"
           echo "release=$(jq -r '.release' "$RUNNER_TEMP/wow-apply.json")" >> "$GITHUB_OUTPUT"

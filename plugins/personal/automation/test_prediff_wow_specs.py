@@ -104,7 +104,21 @@ class PreDiff(unittest.TestCase):
         settled['spec-265.json']['sources'][0]['updated'] = '2026-10-13'
         baseline = {GUIDE: {'sha256': guides[GUIDE]['sha256']}}
         self.assertFalse(needs_advance(settled['spec-265.json'], guides, baseline))
-        self.assertTrue(needs_advance(settled['spec-265.json'], guides, baseline, force=True))
+
+    def test_force_sends_unchanged_specs_to_claude_after_the_differing_ones_within_the_cap(self):
+        docs = documents()
+        for sid in (266, 267):
+            docs['index.json']['specs'].append({'spec_id': sid, 'file': f'spec-{sid}.json'})
+            docs[f'spec-{sid}.json'] = copy.deepcopy(docs['spec-265.json'])
+            docs[f'spec-{sid}.json']['spec_id'] = sid
+        docs['spec-267.json']['recommendations']['consumables']['flask'] = 'item:241324'
+        observation = {'current': {'sources': {GUIDE: live()}}}
+        normal = summarize(docs, observation, cap=2)
+        self.assertEqual((normal['selected'], normal['deferred']), ([267], []))
+        forced = summarize(docs, observation, cap=2, force=True)
+        self.assertEqual((forced['selected'], forced['deferred']), ([267, 265], [266]))
+        self.assertNotIn(265, forced['advance'])
+        self.assertEqual(forced['advance'], [266])
 
     def test_task_carries_only_this_specs_context(self):
         docs = documents()

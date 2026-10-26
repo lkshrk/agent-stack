@@ -273,7 +273,7 @@ def spec_fixture(flask='item:241326'):
 
 
 class PipelineRuns(unittest.TestCase):
-    def run_pipeline(self, old, observation, parts=(), force=False, fetched=None):
+    def run_pipeline(self, old, observation, parts=(), fetched=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base, parts_dir = root / 'base', root / 'parts'
@@ -291,7 +291,7 @@ class PipelineRuns(unittest.TestCase):
             argv = ['--bundle', str(base), '--parts', str(parts_dir), '--observation', str(root / 'observation.json'), '--no-enrich']
             with patch('apply_wow_season_refresh.fetch_guides', return_value=fetched if fetched is not None else observation['current']['sources']), \
                     patch('sys.stdout', new_callable=io.StringIO):
-                output = apply_main(argv + (['--force'] if force else []))
+                output = apply_main(argv)
             return output, {n.name: json.loads(n.read_text()) for n in base.iterdir()}
 
     def part(self, outcome, **changes):

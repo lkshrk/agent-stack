@@ -284,7 +284,7 @@ def version_key(patch):
     return [int(part) for part in patch.split('.')]
 
 
-def advance_verified(docs, spec_ids, sources, today, require_unchanged, force=False):
+def advance_verified(docs, spec_ids, sources, today, require_unchanged):
     """Record that a spec was rechecked against its live guide and its advice still stands."""
     live = {s: v for s, v in sources.items() if v.get('kind') == 'guide'}
     done = []
@@ -295,7 +295,7 @@ def advance_verified(docs, spec_ids, sources, today, require_unchanged, force=Fa
         setup = copy.deepcopy(docs[name])
         guides = live_guides(setup, live)
         if not guides or (require_unchanged and (verdicts[sid]['status'] != 'unchanged'
-                                                 or not needs_advance(setup, guides, watch['sources'], force))):
+                                                 or not needs_advance(setup, guides, watch['sources']))):
             continue
         patches = [g['meta']['patch'] for g in guides.values() if g.get('meta', {}).get('patch')]
         if patches:
@@ -335,7 +335,6 @@ def main(argv=None):
     parser.add_argument('--game')
     parser.add_argument('--season')
     parser.add_argument('--no-enrich', action='store_true')
-    parser.add_argument('--force', action='store_true', help='Advance verification of unchanged specs even without drift')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     bundle = args.bundle or active_bundle(args.game, args.season)
@@ -351,7 +350,7 @@ def main(argv=None):
     all_ids = [e['spec_id'] for e in docs['index.json']['specs']]
     rest = [i for i in all_ids if i not in ai_updated]
     fresh = fetch_guides(docs, set(rest))
-    advanced = advance_verified(docs, [i for i in rest if i not in ai_unchanged], fresh, today, True, args.force)
+    advanced = advance_verified(docs, [i for i in rest if i not in ai_unchanged], fresh, today, True)
     advanced += advance_verified(docs, [i for i in ai_unchanged if i in rest], {**fresh, **observation['current']['sources']}, today, False)
     if any(docs[n] != old.get(n) for n in docs):
         record_informational(docs, observation)
