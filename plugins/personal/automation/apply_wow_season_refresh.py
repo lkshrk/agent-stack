@@ -280,6 +280,12 @@ def catalogue_edit_allowed(before, after):
     return all(k in ENRICHABLE and before.get(k) is None for k in changed)
 
 
+def lookup_only(url, wanted):
+    """A publisher tooltip the agent consulted to confirm an identity but the bundle does not cite."""
+    parsed = urlparse(url)
+    return url not in wanted and parsed.hostname == 'nether.wowhead.com' and parsed.path.startswith('/tooltip/')
+
+
 def merge_parts(old, parts):
     """Combine per-spec Claude runs into one candidate bundle, a legacy-shaped result and the spec ids by outcome."""
     merged = copy.deepcopy(old)
@@ -307,6 +313,10 @@ def merge_parts(old, parts):
         summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
         by_outcome[result['outcome']].append(spec_id)
         if result['outcome'] == 'unresolved':
+            known = merged[name].get('unresolved', [])
+            added = [u for u in candidate.get(name, {}).get('unresolved', []) if u not in known]
+            if added:
+                merged[name]['unresolved'] = known + added
             continue
         for key, record in candidate['catalog.json']['records'].items():
             if record == old_records.get(key):
@@ -322,7 +332,8 @@ def merge_parts(old, parts):
         elif {k: v for k, v in candidate[name].items() if k != 'unresolved'} != {k: v for k, v in old[name].items() if k != 'unresolved'}:
             raise ValueError('An unchanged outcome must not edit the spec: ' + name)
     merged['index.json']['catalogue_record_count'] = len(records)
-    accepted = [url for url in dict.fromkeys(accepted) if url not in set(unresolved)]
+    wanted = targets(documents=merged)
+    accepted = [url for url in dict.fromkeys(accepted) if url not in set(unresolved) and not lookup_only(url, wanted)]
     result = {'status': 'partial' if unresolved else 'complete',
               'summary': '\n'.join(summaries) or 'No Claude runs were needed.',
               'accepted_sources': accepted, 'unresolved_sources': list(dict.fromkeys(unresolved))}
@@ -488,6 +499,10 @@ def main(argv=None):
         observation['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
     docs = copy.deepcopy(drop_negligible(old, validate(old, candidate, result, observation, checked)))
     skipped = set(outcomes['unresolved']) | set(rejected)
+    for spec_id in outcomes['unresolved']:
+        name = f'spec-{spec_id}.json'
+        if candidate[name] != old[name]:
+            docs[name]['unresolved'] = candidate[name]['unresolved']
     for spec_id, reason in rejected.items():
         name = f'spec-{spec_id}.json'
         if name in docs:
