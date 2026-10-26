@@ -16,7 +16,6 @@ ARG KOTLIN_LSP_VERSION=0.0.27
 ARG KOTLIN_LSP_SHA256=6787185abb0e7f3b527484bb6cc4a881ce42b2e39320626937e65839751075e9
 ARG MISE_VERSION=v2026.10.15
 ARG PLAYWRIGHT_VERSION=1.60.0
-ARG PROJECT_NODE_VERSION=24.21.0
 
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -26,14 +25,6 @@ RUN apt-get update \
       build-essential pkg-config libssl-dev zsh jq xz-utils zip \
       lua5.4 libcurl4-openssl-dev libxml2 libsqlite3-0 libncurses6 tzdata \
       libhdf5-dev \
- && rm -rf /var/lib/apt/lists/*
-
-# PGDG, because trixie ships only PostgreSQL 17.
-RUN install -d /usr/share/postgresql-common/pgdg \
- && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
- && echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main' >/etc/apt/sources.list.d/pgdg.list \
- && apt-get update \
- && apt-get install -y --no-install-recommends postgresql-18 libvips-dev osmium-tool \
  && rm -rf /var/lib/apt/lists/*
 
 ENV MISE_DATA_DIR=/opt/mise \
@@ -47,9 +38,7 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mi
  && chmod 0755 /usr/local/bin/mise
 
 COPY images/omnigent-host/mise.toml /etc/mise/config.toml
-# Preinstalled, not global: a project that pins it gets it offline, everything else keeps the base node.
 RUN mise install \
- && mise install "node@${PROJECT_NODE_VERSION}" \
  && mise reshim \
  && rm -rf /opt/mise/cache \
  && chmod -R a+rX /opt/mise
@@ -75,11 +64,8 @@ RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
  && ln -s /opt/kotlin-lsp/kotlin-lsp.sh /opt/agent/bin/kotlin-lsp \
  && cd / && rm -rf /tmp/dl
 
-ENV DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN duckdb -c "SET extension_directory='${DUCKDB_EXTENSION_DIRECTORY}'; INSTALL spatial;" \
- && chmod -R a+rX /opt/duckdb \
- && apt-get update \
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN apt-get update \
  && npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
  && echo "${PLAYWRIGHT_VERSION}" >"${PLAYWRIGHT_BROWSERS_PATH}/.playwright-version" \
  && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \

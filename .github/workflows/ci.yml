@@ -152,14 +152,6 @@ jobs:
         run: |
           docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-host:ci \
             /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
-      - name: Start a throwaway PostgreSQL in the Omnigent runner as the sandbox user
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/with-postgres.sh
-      - name: Keep the node CLIs working in a project that pins another node
-        if: matrix.image == 'omnigent-host'
-        run: |
-          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/node-pin.sh
       - name: Install the read-only security-review Codex profile
         if: matrix.image == 'omnigent-host'
         run: |
