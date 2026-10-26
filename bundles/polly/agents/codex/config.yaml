@@ -40,25 +40,6 @@ os_env:
 guardrails:
   ask_timeout: 300
   policies:
-    path_guard:
-      type: function
-      on: [tool_call]
-      function:
-        path: agent_stack_policies.paths.path_guard
-        arguments:
-          deny:
-            - ".github/workflows/**"
-            - "**/*.sops.yaml"
-            - "**/.env"
-            - "**/.env.*"
-            - "**/*.pem"
-            - "**/*.key"
-            - ".pilot/**"
-            - AGENTS.md
-            - CLAUDE.md
-            - "lefthook.y*ml"
-            - CODEOWNERS
-          exempt: ["**/.env.example"]
     blast_radius:
       type: function
       on: [tool_call]

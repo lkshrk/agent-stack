@@ -346,6 +346,8 @@ CASES: list[Case] = [
     Case("planner", "tool_call", "sys_call_async", {"tool": "sys_os_write", "arguments": {}}, "DENY"),
     Case("planner", "response", None, "Draft sent to the critic.", "ALLOW", {"agent_stack_dispatches": 1}, turn_final=True),
     Case("planner", "response", None, "Plan done.", "DENY", {"agent_stack_dispatches": 1, "agent_stack_collections": 1}, turn_final=True),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "cat AGENTS.md"}, "ALLOW"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "sed -n 1,40p CLAUDE.md"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]
 
@@ -634,7 +636,7 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
         self.assertEqual(sorted(s.name for s in spec.skills), ["docs-audit", "docs-delta"])
 
-    def test_every_writing_agent_has_a_path_guard(self):
+    def test_path_guard_exactly_on_writing_agents(self):
         from omnigent.spec import load
 
         from .test_in_image import walk_specs
@@ -643,8 +645,10 @@ class BundleVerdictTest(unittest.TestCase):
             for spec in walk_specs(load(config.parent, expand_env=False)):
                 paths = {p.function.path for p in agent_policies(spec)}
                 with self.subTest(agent=spec.name):
-                    if "omnigent.policies.builtins.orchestration.read_only_os" not in paths:
-                        self.assertIn("agent_stack_policies.paths.path_guard", paths)
+                    self.assertEqual(
+                        "agent_stack_policies.paths.path_guard" in paths,
+                        "omnigent.policies.builtins.orchestration.read_only_os" not in paths,
+                    )
 
     def test_bundle_policy_names_differ_from_server_wide(self):
         from omnigent.spec import load
