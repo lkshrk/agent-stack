@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import shell_command, walk
+from ._shell import shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
@@ -22,13 +22,17 @@ def _refspec_destination(refspec: str) -> str:
 
 
 def _has_substitution(tokens: list[str]) -> bool:
-    return any("`" in t for t in tokens) or any(
-        a == "$" and b == "(" for a, b in zip(tokens, tokens[1:])
+    return any(substituted(t) for t in tokens) or any(
+        a.endswith("$") and b == "(" for a, b in zip(tokens, tokens[1:])
     )
 
 
+def _mentions_merge_or_push(tokens: list[str]) -> bool:
+    return any(t in ("merge", "push") or t.endswith(("/merge", "/merges")) for t in tokens)
+
+
 def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None:
-    if _has_substitution(tokens) and ("merge" in tokens or "push" in tokens):
+    if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution around merge or push"
     names = [os.path.basename(t) for t in tokens]
     if "gh" in names:

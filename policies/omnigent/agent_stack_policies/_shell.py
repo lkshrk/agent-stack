@@ -3,7 +3,7 @@ import shlex
 
 _OPERATOR_CHARS = frozenset(";&|")
 _PUNCTUATION = frozenset(";&|()<>")
-_SHELLS = frozenset({"sh", "bash", "zsh"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
 
 
 def _lines(command: str) -> list[str]:
@@ -11,6 +11,9 @@ def _lines(command: str) -> list[str]:
     for ch in command:
         if escaped:
             escaped = False
+            if ch == "\n":
+                current.pop()
+                continue
         elif ch == "\\" and quote != "'":
             escaped = True
         elif quote:
@@ -48,7 +51,10 @@ def parse(command: str) -> list[list[str]]:
 
 def _nested_command(tokens: list[str]) -> str | None:
     for i, token in enumerate(tokens):
-        if os.path.basename(token) not in _SHELLS:
+        name = os.path.basename(token)
+        if name == "eval" and i + 1 < len(tokens):
+            return " ".join(tokens[i + 1 :])
+        if name not in _SHELLS:
             continue
         for j in range(i + 1, len(tokens) - 1):
             flag = tokens[j]
@@ -57,14 +63,42 @@ def _nested_command(tokens: list[str]) -> str | None:
     return None
 
 
+def substituted(token: str) -> bool:
+    return "`" in token or "$(" in token
+
+
+def _bodies(token: str) -> list[str]:
+    bodies = []
+    i = 0
+    while (start := token.find("$(", i)) >= 0:
+        depth, j = 1, start + 2
+        while j < len(token) and depth:
+            depth += {"(": 1, ")": -1}.get(token[j], 0)
+            j += 1
+        bodies.append(token[start + 2 : j - 1 if depth == 0 else j])
+        i = j
+    return bodies + token.split("`")[1::2]
+
+
+def _walk_quietly(command: str) -> list[list[str]]:
+    try:
+        return walk(command)
+    except ValueError:
+        return []
+
+
 def walk(command: str) -> list[list[str]]:
-    """All statements of a command, including those inside `sh|bash|zsh -c`; raises ValueError if unparseable."""
+    """All statements of a command, including `sh -c`, `eval` and `$(...)` bodies; raises ValueError if the top level is unparseable (unparseable bodies, e.g. heredocs, are skipped)."""
     result: list[list[str]] = []
     for tokens in parse(command):
         result.append(tokens)
         nested = _nested_command(tokens)
         if nested is not None:
             result.extend(walk(nested))
+        for token in tokens:
+            if substituted(token):
+                for body in _bodies(token):
+                    result.extend(_walk_quietly(body))
     return result
 
 

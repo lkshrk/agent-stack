@@ -120,3 +120,25 @@ class QuoteAwareMergeTest(unittest.TestCase):
 
     def test_nested_shell_login_flag(self):
         self.assertEqual(run("bash -lc 'git push origin main'")["result"], "DENY")
+
+
+class SubstitutionTest(unittest.TestCase):
+    def test_quoted_and_nested_substitution_denied(self):
+        for command in (
+            'git push origin "$(echo main)"',
+            'git push origin "$(git branch --show-current)"',
+            "git push origin HEAD:$(git branch --show-current)",
+            "gh api -X PUT repos/o/r/pulls/$(echo 5)/merge",
+            'echo "$(gh pr merge 5)"',
+            'x="$(git push origin main)"',
+        ):
+            self.assertEqual(run(command)["result"], "DENY", command)
+
+    def test_backslash_newline_joined(self):
+        self.assertEqual(run("git push origin \\\nmain")["result"], "DENY")
+
+    def test_other_shells_and_eval(self):
+        self.assertEqual(run("dash -c 'git push origin main'")["result"], "DENY")
+        self.assertEqual(run("ksh -c 'gh pr merge 5'")["result"], "DENY")
+        self.assertEqual(run("eval 'git push origin main'")["result"], "DENY")
+        self.assertEqual(run("eval git push origin main")["result"], "DENY")

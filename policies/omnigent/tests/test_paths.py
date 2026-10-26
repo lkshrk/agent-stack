@@ -179,3 +179,16 @@ class QuoteAwareTest(unittest.TestCase):
         ):
             decision = policy(tool_call_event("bash", {"command": command}))
             self.assertEqual(decision["result"], "DENY", command)
+
+
+class SubstitutionPathTest(unittest.TestCase):
+    def test_substitution_body_checked(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        for command in (
+            'echo "$(cp a .github/workflows/x.yml)"',
+            "echo `cp a .github/workflows/x.yml`",
+            "cp a \\\n.github/workflows/x.yml",
+            "dash -c 'rm .github/workflows/x.yml'",
+            "eval 'rm .github/workflows/x.yml'",
+        ):
+            self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], "DENY", command)
