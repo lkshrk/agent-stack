@@ -80,5 +80,9 @@
     "Exact item quality ranks and full use/cooldown restrictions not independently verified.",
     "Guide does not name the lapis and peridot variants needed for Telluric's four-colour requirement; previous Masterful Lapis and Masterful Peridot retained."
   ],
-  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation.",
+  "acknowledged_differences": {
+    "differences": "98b3d5c27ed9801258c923e06b253bfeee5998db54bb6f7a4ccf5c6d1ae60726",
+    "sections": "5d7f58dcafb667bb4a731b068a22e64033cb7c070ca7d1de4be599f080b76e2e"
+  }
 }

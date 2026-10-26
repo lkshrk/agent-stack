@@ -3,7 +3,7 @@
   "game": "retail",
   "expansion": "Midnight",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
+  "verified_patch": "12.1.5",
   "verified_at": "2026-10-26",
   "roster_source": "https://www.raidbots.com/static/data/live/talents.json",
   "season_source": "https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11",
@@ -256,7 +256,6 @@
     "https://worldofwarcraft.blizzard.com/en-us/news"
   ],
   "patch_coverage": {
-    "12.1": 2,
-    "12.1.5": 38
+    "12.1.5": 40
   }
 }
