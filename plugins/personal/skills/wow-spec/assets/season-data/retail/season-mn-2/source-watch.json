@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-10-26T11:25:59.631278+00:00",
+  "captured_at": "2026-10-26T13:00:58.941616+00:00",
   "season": "season-mn-2",
   "sources": {
     "https://nether.wowhead.com/tooltip/item/240094": {
@@ -88,13 +88,6 @@
         268
       ],
       "sha256": "b01eec8190ec803d172f52ca7e1ea286050ff972abb3813862ecee0acc2bf9d7"
-    },
-    "https://nether.wowhead.com/tooltip/item/240897": {
-      "kind": "tooltip",
-      "spec_ids": [
-        265
-      ],
-      "sha256": "54b1062fbe61b9b70487db85eeeac2ff08936b7aa8af3932a8f201b702f326e4"
     },
     "https://nether.wowhead.com/tooltip/item/240898": {
       "kind": "tooltip",
@@ -392,7 +385,6 @@
         257,
         258,
         261,
-        262,
         263,
         269,
         577,
@@ -1264,7 +1256,11 @@
       "spec_ids": [
         265
       ],
-      "sha256": "42c7e65329d5316d1fe6e6c07159a3a4be8318ec9652d781ccd81113abc5018f"
+      "sha256": "05f0e3114e919ab616785686670c422d72c91f10d9fee374967a1e75c82ff49a",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/arcane-mage/stats-races-and-consumables": {
       "kind": "guide",
@@ -1351,14 +1347,22 @@
       "spec_ids": [
         266
       ],
-      "sha256": "e98e0c51488eb1f2c0de07b18d47538398a084a7a675b6488baa3508945e4258"
+      "sha256": "b8886e1749d14b94847222cd07d059cd338ea74f3d2c98f99642eca1a4c08eaf",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/destruction-warlock/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         267
       ],
-      "sha256": "0dc3563f70fb7bdb2a15e5ef770c1ce403735309689321d20807e1d456f5a893"
+      "sha256": "8897314def52d925017f6af14fd2d58044d4b126c1043a2da58139e467732646",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/devastation-evoker/stats-races-and-consumables": {
       "kind": "guide",
@@ -1652,7 +1656,11 @@
       "spec_ids": [
         269
       ],
-      "sha256": "89847830f30ada9ba24833bf264b54905bafaa7ac67c3beb35a8b5b7397d3253"
+      "sha256": "0c0a832900bfec68ac984e28070b6fddef0b246b8327774a1971191fb732ef8a",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.raidbots.com/static/data/live/talents.json": {
       "kind": "roster",
@@ -1957,6 +1965,13 @@
       "kind": "news",
       "spec_ids": [],
       "sha256": "6fa5ca6225e40d6269c350d8f284777348cda37ae66e8b4cb6892fa72372fad2"
+    },
+    "https://nether.wowhead.com/tooltip/item/243985": {
+      "kind": "tooltip",
+      "spec_ids": [
+        265
+      ],
+      "sha256": "98881bc5313577c0ee239e799643a4cc2658f258b1e16cd275ad3d0c635db64e"
     }
   }
 }

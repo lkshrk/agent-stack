@@ -4267,6 +4267,36 @@
       "identity_verified_at": "2026-10-04",
       "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
       "tooltip_enriched_at": "2026-10-26"
+    },
+    "item:243985": {
+      "item_id": 243985,
+      "name": "Enchant Ring - Nature's Wrath",
+      "category": "enchant",
+      "slot": "Rings",
+      "effect": "Permanently enchants a ring with Nature's Wrath, increasing Critical Strike by 24. Cannot be applied to items lower than level 120. Haranir Heightening - Azerothian Arms",
+      "duration_seconds": null,
+      "minimum_level": 70,
+      "minimum_item_level": 120,
+      "quality_rank": null,
+      "quality_note": "Exact linked variant; quality rank not independently verified.",
+      "consumed_on_use": "applied/socketed",
+      "cooldown_seconds": null,
+      "shared_use_restrictions": null,
+      "unknown_fields": [
+        "exact quality rank",
+        "unlisted restrictions"
+      ],
+      "status": "verified",
+      "verified_at": "2026-10-26",
+      "verified_patch": "12.1",
+      "sources": [
+        "https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables",
+        "https://nether.wowhead.com/tooltip/item/243985"
+      ],
+      "verification_basis": "current guide recommendation and linked identity only",
+      "identity_verified_at": "2026-10-26",
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     }
   }
 }

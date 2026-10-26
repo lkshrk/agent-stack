@@ -4,14 +4,14 @@
   "spec": "Affliction Warlock",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE baseline with separate M+ and single-target stat guidance. Not personalized optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables",
-      "updated": "2026-08-12"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/warlock/affliction/m+",
@@ -27,19 +27,19 @@
   "recommendations": {
     "enchants": {
       "head": "item:244007",
-      "shoulders": "item:243990",
+      "shoulders": "item:243991",
       "chest": "item:243977",
       "legs": "item:240133",
       "feet": "item:243953",
-      "rings": "item:243957",
+      "rings": "item:243985",
       "weapon": "item:244029"
     },
     "gems": {
-      "unique": "item:240983",
-      "remaining": "item:240897"
+      "unique": "item:240967",
+      "remaining": "item:240908"
     },
     "consumables": {
-      "flask": "item:241324",
+      "flask": "item:241326",
       "combat_potion": "item:241308",
       "healing_potion": "item:271884",
       "food": "item:242275",
@@ -50,9 +50,9 @@
   "content_overrides": [],
   "conditions": [
     "Defensive Avoidance choices for helm/shoulders/boots follow Kalamazi and Method; Icy Veins lists alternative utility enchants.",
-    "Indecipherable is a general starting recommendation; Powerful Eversong Diamond with four rare gem colours can be better at higher gear levels according to Icy Veins. No personal gear inspected.",
+    "Method pairs the unique Powerful Eversong Diamond with one each of Masterful Garnet, Deadly Amethyst, Deadly Lapis and Deadly Peridot; the remaining-gem pick is the first of those four. Indecipherable Eversong Diamond is a simpler starting alternative. No personal gear inspected.",
     "Light's Potential is a straightforward baseline; Icy Veins has gear-dependent alternative potions, not evaluated for this character.",
-    "Method's current guide differs from the retained mixed-source baseline: Nature's Wrath rings, Flask of the Shattered Sun, and Powerful Eversong Diamond with Masterful Garnet, Deadly Amethyst, Deadly Lapis and Deadly Peridot. These are source alternatives, not silent replacements."
+    "Rings (Nature's Wrath) and flask (Flask of the Shattered Sun) follow Method's current guide; Eyes of the Eagle rings and Flask of the Blood Knights remain source alternatives from other guides."
   ],
   "unresolved": [
     "Exact crafting-quality ranks",

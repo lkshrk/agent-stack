@@ -8,7 +8,7 @@
   "roster_source": "https://www.raidbots.com/static/data/live/talents.json",
   "season_source": "https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11",
   "spec_count": 40,
-  "catalogue_record_count": 92,
+  "catalogue_record_count": 93,
   "coverage": "All current Retail specs have guide-backed stat, gem, enchant and consumable records. Conditional choices and unknown quality/cooldown restrictions are preserved in each record.",
   "specs": [
     {
@@ -254,5 +254,9 @@
   ],
   "trigger_sources": [
     "https://worldofwarcraft.blizzard.com/en-us/news"
-  ]
+  ],
+  "patch_coverage": {
+    "12.1": 9,
+    "12.1.5": 31
+  }
 }

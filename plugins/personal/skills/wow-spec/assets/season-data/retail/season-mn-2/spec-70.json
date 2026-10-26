@@ -81,5 +81,9 @@
   "unresolved": [
     "Exact quality ranks and full item usage restrictions not independently verified."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified."
+  "validation_scope": "Current guide recommendations and linked identities only; effects and restrictions not independently tooltip-verified.",
+  "acknowledged_differences": {
+    "differences": "b0ebe6fe9a739b7e06bfff9ae1617ed5f120518578030fd3ce58f3f18fee5fe4",
+    "sections": "60aba04d62a54290ae585fc412c5b0140bfc61acf72c442a02484a246e7f3678"
+  }
 }
