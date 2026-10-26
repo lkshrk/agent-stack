@@ -4,14 +4,14 @@
   "spec": "Augmentation Evoker",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/augmentation-evoker/stats-races-and-consumables",
-      "updated": "2026-08-25"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/evoker/augmentation/m+",
@@ -67,5 +67,9 @@
   "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
   "derivation_notes": [
     "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
-  ]
+  ],
+  "acknowledged_differences": {
+    "differences": "005eaa9fc2b6e093d9cb219652595463c53d649c063b7ef217343d187a748dcf",
+    "sections": "f307273102715c5b0efc85d9a31448fffbf680c2525316ddc58558ed53a6511e"
+  }
 }

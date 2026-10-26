@@ -4,14 +4,14 @@
   "spec": "Mistweaver Monk",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/mistweaver-monk/stats-races-and-consumables",
-      "updated": "2026-08-27"
+      "updated": "2026-10-14"
     },
     {
       "url": "https://murlok.io/monk/mistweaver/m+",
@@ -58,5 +58,9 @@
     "Exact quality ranks and full use restrictions are unverified.",
     "Consumable durations and cooldown-sharing require tooltip verification."
   ],
-  "validation_scope": "Current guide recommendations and linked identities; no personal optimization or independent full tooltip verification."
+  "validation_scope": "Current guide recommendations and linked identities; no personal optimization or independent full tooltip verification.",
+  "acknowledged_differences": {
+    "differences": "bc85c11034c10a0a9e26a574493038a41cc20df3b549e8809a7c9279dd96e06d",
+    "sections": "bf0d1618a075d29df077288c1fbde482facde86d54252e33e0d600c5782ddd6c"
+  }
 }

@@ -4,14 +4,14 @@
   "spec": "Preservation Evoker",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/preservation-evoker/stats-races-and-consumables",
-      "updated": "2026-08-20"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/evoker/preservation/m+",
@@ -19,7 +19,7 @@
     }
   ],
   "stat_guidance": {
-    "raid": "Intellect > Mastery > Critical Strike > Haste = Versatility.",
+    "raid": "Intellect > Mastery > Critical Strike > Haste > Versatility.",
     "mplus_healing": "Intellect > Mastery > Critical Strike > Haste > Versatility.",
     "mplus_damage": "Intellect > Critical Strike > Haste > Mastery > Versatility.",
     "thresholds": "About 20% Haste is comfort, not a cap. Mastery diminishing returns near 1380 rating are not a cap; compare gear with QuestionablyEpic.",
@@ -27,17 +27,17 @@
   },
   "recommendations": {
     "enchants": {
-      "head": "item:244007",
-      "shoulders": "item:243991",
-      "chest": "item:244003",
+      "head": "item:243951",
+      "shoulders": "item:244021",
+      "chest": "item:243977",
       "legs": "item:240155",
-      "feet": "item:243953",
+      "feet": "item:243983",
       "rings": "item:243959",
       "weapon": "item:244029"
     },
     "gems": {
       "unique": "item:240969",
-      "garnet": "item:240910",
+      "garnet": "item:240908",
       "amethyst": "item:240900",
       "lapis": "item:240918",
       "peridot": "item:240892",
@@ -46,7 +46,7 @@
     "consumables": {
       "flask": "item:241322",
       "mana_potion": "item:241300",
-      "combat_potion": "item:241308",
+      "combat_potion": "item:241288",
       "healing_potion": "item:271884",
       "food": "item:242747",
       "food_alternative": "item:266985",
@@ -56,31 +56,29 @@
   },
   "content_overrides": [
     {
-      "condition": "Raid healing",
+      "condition": "Mana is not a concern",
       "replacements": {
-        "enchants.head": "item:243951",
-        "enchants.shoulders": "item:244021",
-        "enchants.feet": "item:243983"
+        "gems.unique": "item:240983"
       },
-      "reason": "Leech utility in raid.",
+      "reason": "Indecipherable Eversong Diamond is the stronger neck gem when mana is not a concern.",
       "source": "https://www.method.gg/guides/preservation-evoker/stats-races-and-consumables"
     },
     {
-      "condition": "Mana is not a concern",
+      "condition": "Mythic+ with enough healing and a wish for more damage",
       "replacements": {
-        "enchants.chest": "item:243977",
-        "gems.unique": "item:240967"
+        "consumables.flask": "item:241324"
       },
-      "reason": "Throughput alternative to mana setup.",
+      "reason": "Flask of the Blood Knights is the guide's Mythic+ alternative to Flask of the Magisters.",
       "source": "https://www.method.gg/guides/preservation-evoker/stats-races-and-consumables"
     }
   ],
   "conditions": [
-    "Baseline utility enchants favour M+ Avoidance; raid alternatives below.",
-    "Use four gem colours. Mana-sensitive baseline uses Telluric, Magister chest and Arcanoweave."
+    "Guide lists Leech enchants for head, shoulders and boots; it favours Leech in raid and Avoidance slightly in Mythic+, and prefers gear with Leech or Avoidance over slightly higher item level without tertiaries.",
+    "Telluric Eversong Diamond needs all four gem colours; the guide names Quick Amethyst and Masterful Garnet as usually best for remaining sockets. Weapon Rite of the Hash'ey is an equal option to Acuity of the Ren'dorei; rings compare Zul'jin's Mastery with Eyes of the Eagle."
   ],
   "unresolved": [
-    "Exact item quality ranks and full use/cooldown restrictions not independently verified."
+    "Exact item quality ranks and full use/cooldown restrictions not independently verified.",
+    "Guide does not name the lapis and peridot variants needed for Telluric's four-colour requirement; previous Masterful Lapis and Masterful Peridot retained."
   ],
   "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
 }

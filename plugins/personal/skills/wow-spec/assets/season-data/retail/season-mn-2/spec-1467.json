@@ -4,14 +4,14 @@
   "spec": "Devastation Evoker",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/devastation-evoker/stats-races-and-consumables",
-      "updated": "2026-08-25"
+      "updated": "2026-10-16"
     },
     {
       "url": "https://murlok.io/evoker/devastation/m+",
@@ -58,5 +58,9 @@
   "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
   "derivation_notes": [
     "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
-  ]
+  ],
+  "acknowledged_differences": {
+    "differences": "f0c1b6a32c2c832b7069f4a5d468189f488ece6c9c2309499e12784ceb8cabf0",
+    "sections": "ec85b2494707d85c25639f9d89c91f2045794db3b63957fb8e0f7b6dbeee00b6"
+  }
 }

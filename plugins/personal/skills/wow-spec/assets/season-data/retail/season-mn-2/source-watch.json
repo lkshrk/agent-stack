@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-10-26T13:00:58.941616+00:00",
+  "captured_at": "2026-10-26T13:07:47.064742+00:00",
   "season": "season-mn-2",
   "sources": {
     "https://nether.wowhead.com/tooltip/item/240094": {
@@ -1184,9 +1184,10 @@
     "https://nether.wowhead.com/tooltip/item/271887": {
       "kind": "tooltip",
       "spec_ids": [
-        253
+        253,
+        259
       ],
-      "sha256": "ceb637355a24c1cdba172ac8e7e30c2d8b7474d37a3c4ba88409b9ba3d52b9ab"
+      "sha256": "9ceeea64d84c1d3d79b416978b499c2843c9df33c9e6afa0508dbfa5f10d334d"
     },
     "https://nether.wowhead.com/tooltip/item/273072": {
       "kind": "tooltip",
@@ -1300,7 +1301,11 @@
       "spec_ids": [
         1473
       ],
-      "sha256": "6be4b1d4ef525a603745ffdfccb38738017f69102f963b8cc51a18a1dd395322"
+      "sha256": "37b56ec011b474f9a89c592600511ce8860e25564e7e6224ea1deedbdc3f4b9e",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/balance-druid/stats-races-and-consumables": {
       "kind": "guide",
@@ -1369,14 +1374,22 @@
       "spec_ids": [
         1467
       ],
-      "sha256": "edf443a196cdff1f17bf3ab35994c31754f3fa07df318c3fd23335f97b8dac47"
+      "sha256": "dcc18440435d4419306c003ad64c5fa89579e657b28674f6816959b92da14d61",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/devourer-demon-hunter/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         1480
       ],
-      "sha256": "cadbfd727200721800e94d66e29b9976e77ca878f7b461546d1f90685a57eadb"
+      "sha256": "02e149ae59eb3fff15028fc46b29fdff0602a87d0bdd3f15420f0fa3d8ad406c",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-18"
+      }
     },
     "https://www.method.gg/guides/discipline-priest/stats-races-and-consumables": {
       "kind": "guide",
@@ -1416,7 +1429,11 @@
       "spec_ids": [
         103
       ],
-      "sha256": "98d07419b50824a9e701380a98d7cc8f3cee72cf5e33689a3ef50f02d7fdfb91"
+      "sha256": "b16a509076302cd5d1eb076e8f082dde8be8973588fd5b674d069f0c672c43f8",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/fire-mage/stats-races-and-consumables": {
       "kind": "guide",
@@ -1514,14 +1531,22 @@
       "spec_ids": [
         254
       ],
-      "sha256": "edc027532f68d2aae69fb7fa71018a3e63344451dc612e68de0102b1946da064"
+      "sha256": "5a7fbbf87bb22f7a629ea255852f79699ef1942874595e31ee22bc8d4abc8248",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/mistweaver-monk/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         270
       ],
-      "sha256": "786e577c57d6d4a963fbff8a8e0bc23a74c755b556a2a8a11aa75c1a1e293de3"
+      "sha256": "b0eb06169cf13392938ee798178360a473f1a4de7ec802e645da8516e6bc9210",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/outlaw-rogue/stats-races-and-consumables": {
       "kind": "guide",
@@ -1539,7 +1564,11 @@
       "spec_ids": [
         1468
       ],
-      "sha256": "41855f8d26587cf2b33284c1217524b8bbce984410d44a6c549555619946ea05"
+      "sha256": "3640774f92020f23dbcd166e8319e7013d66220674283cea80891559fa9bd31e",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/protection-paladin/stats-races-and-consumables": {
       "kind": "guide",
