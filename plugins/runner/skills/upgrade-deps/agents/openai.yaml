@@ -1,0 +1,4 @@
+interface:
+  display_name: "Upgrade Dependencies"
+  short_description: "Upgrade a repo's dependencies one at a time, changelog-checked and verified, in any ecosystem."
+  default_prompt: "Upgrade this repository's dependencies one at a time — detect the stack, prioritize security and patch bumps, read each changelog, ask me before major or breaking upgrades, and verify build/tests (or Flux health) before moving to the next."

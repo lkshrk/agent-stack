@@ -1,0 +1,61 @@
+{
+  "name": "agent-stack",
+  "owner": {
+    "name": "lkshrk"
+  },
+  "metadata": {
+    "description": "Agent plugin marketplace for the agent-stack runner, Linear workflow and personal skills.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "runner",
+      "source": "./plugins/runner",
+      "description": "Skills for the Omnigent runner: dependency upgrades, project tool allowlists and AI context generation.",
+      "version": "1.0.0",
+      "author": {
+        "name": "lkshrk"
+      },
+      "category": "development",
+      "keywords": [
+        "skills",
+        "codex",
+        "claude-code",
+        "runner"
+      ]
+    },
+    {
+      "name": "linear",
+      "source": "./plugins/linear",
+      "description": "Linear issue intake, refinement, implementation, closeout, status and reconciliation workflow skills.",
+      "version": "1.0.0",
+      "author": {
+        "name": "lkshrk"
+      },
+      "category": "development",
+      "keywords": [
+        "linear",
+        "skills",
+        "workflow",
+        "codex",
+        "claude-code"
+      ]
+    },
+    {
+      "name": "personal",
+      "source": "./plugins/personal",
+      "description": "Personal skills: macOS disk and window-manager maintenance, change tables, documentation generation and World of Warcraft planning.",
+      "version": "1.0.0",
+      "author": {
+        "name": "lkshrk"
+      },
+      "category": "development",
+      "keywords": [
+        "skills",
+        "codex",
+        "claude-code",
+        "personal"
+      ]
+    }
+  ]
+}
