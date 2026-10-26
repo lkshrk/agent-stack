@@ -1,9 +1,10 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "summary", "accepted_sources", "unresolved_sources"],
+  "required": ["spec_id", "outcome", "summary", "accepted_sources", "unresolved_sources"],
   "properties": {
-    "status": {"type": "string", "enum": ["complete", "partial", "blocked"]},
+    "spec_id": {"type": "integer"},
+    "outcome": {"type": "string", "enum": ["updated", "unchanged", "unresolved"]},
     "summary": {"type": "string"},
     "accepted_sources": {"type": "array", "items": {"type": "string"}},
     "unresolved_sources": {"type": "array", "items": {"type": "string"}}

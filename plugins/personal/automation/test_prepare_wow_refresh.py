@@ -24,7 +24,15 @@ class GatewayChecks(unittest.TestCase):
         self.assertIn('--max-turns', words)
         self.assertIn('Bash(bun:*)', words[words.index('--allowedTools') + 1])
         schema = json.loads(words[words.index('--json-schema') + 1])
-        self.assertEqual(schema['required'], ['status', 'summary', 'accepted_sources', 'unresolved_sources'])
+        self.assertEqual(schema['required'], ['spec_id', 'outcome', 'summary', 'accepted_sources', 'unresolved_sources'])
+
+    def test_run_is_narrow_and_cannot_spawn_agents(self):
+        words = shlex.split(configuration(self.env())['claude_args'])
+        self.assertLessEqual(int(words[words.index('--max-turns') + 1]), 20)
+        allowed = words[words.index('--allowedTools') + 1].split(',')
+        denied = words[words.index('--disallowedTools') + 1].split(',')
+        self.assertFalse({'Task', 'Agent'} & set(allowed))
+        self.assertTrue({'Task', 'Agent'} <= set(denied))
 
     def test_model_and_key_are_required_and_openai_credentials_are_ignored(self):
         with self.assertRaisesRegex(ValueError, 'WOW_REFRESH_MODEL'):
