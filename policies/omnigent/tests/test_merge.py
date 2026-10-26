@@ -224,3 +224,21 @@ class StdinArgumentsTest(unittest.TestCase):
         for command in ("ls | xargs wc -l", "echo a | xargs git log -1", "cat <(git log -1)"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class VariableTargetTest(unittest.TestCase):
+    def test_variable_in_push_or_merge_denied(self):
+        for command in (
+            "printf -v b %s main; git push origin $b",
+            "b=main; git push origin $b",
+            'git push origin "$BRANCH"',
+            "git push origin HEAD:${B}",
+            "gh api -X PUT repos/o/r/pulls/$N/merge",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_literal_push_allowed(self):
+        for command in ("git push -u origin feat/x", "echo $HOME && git push origin feat/x"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

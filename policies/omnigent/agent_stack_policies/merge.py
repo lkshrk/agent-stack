@@ -77,6 +77,8 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
             return f"{command.wrappers[0]} into a merge or push is not allowed, since stdin can supply the branch; {_PR_HINT}"
     for run in _vcs_runs(tokens):
         rest = run[1:]
+        if _mentions_merge_or_push(run) and any("$" in t for t in rest):
+            return "a variable in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
         if os.path.basename(run[0]) == "gh":
             reason = _check_gh(rest)
         else:

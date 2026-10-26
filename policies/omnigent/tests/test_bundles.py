@@ -203,6 +203,17 @@ N2_PROBES = [
     "timeout 30 rg x",
     "env rg x",
 ]
+N4_PROBES = [
+    "printf -v y '%s%s' 'a[$' '(touch /tmp/p)]'; echo ${x:y}",
+    "printf -v PATH '%s' ./bin; rg x",
+    "printf -v HOME '%s' ./evil; git log -p -1",
+    "printf -v GIT_DIR '%s' x; git log",
+    "echo $((1+1))",
+    "echo ${a[y]}",
+    "echo ${!x}",
+    "declare -x HOME=./evil",
+    "[[ -v x ]]",
+]
 I1_PROBES = [
     "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=touch git status",
     "GIT_EXTERNAL_DIFF=bash git diff HEAD~1",
@@ -470,7 +481,7 @@ CASES += [
     Case(agent, "tool_call", tool, {"command": command}, "DENY")
     for agent, tools in READ_ONLY_AGENTS.items()
     for tool in tools
-    for command in I1_PROBES + N1_PROBES + N2_PROBES
+    for command in I1_PROBES + N1_PROBES + N2_PROBES + N4_PROBES
 ]
 CASES += [
     Case("polly", "tool_call", tool, {"command": command}, "DENY")
@@ -481,6 +492,8 @@ CASES += [
         "diff <(git -C .worktrees/t1 rebase origin/main) a",
         "echo --output=/tmp/x | xargs git log -1",
         "echo main | xargs git push origin",
+        "printf -v HOME '%s' ./evil; git log -p -1",
+        "printf -v GIT_DIR '%s' x; git log",
     )
 ]
 CASES += [

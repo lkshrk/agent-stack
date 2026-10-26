@@ -38,6 +38,10 @@ _SHELL_SHORT = frozenset("celuxvo")
 _SHELL_OPTIONS = frozenset({"pipefail", "errexit", "nounset", "xtrace"})
 _UNIQ_VALUES = frozenset({"-f", "-s", "-w"})
 _SAFE_WRAPPERS = frozenset({"command", "builtin", "find"})
+ASSIGNING_BUILTINS = frozenset({
+    "read", "mapfile", "readarray", "declare", "typeset", "local", "export", "readonly", "let", "getopts",
+})
+_EXPANSION = re.compile(r"\$\(\(|\$\[|\(\(|\$\{!|\$\{[^}]*[:\[]")
 _SYSTEM_SHELL_DIRS = ("/bin/", "/usr/bin/")
 _HINT = "this agent is read-only; report the change instead of making it"
 
@@ -137,6 +141,8 @@ def _check_args(name: str, args: list[str]) -> str | None:
             i += 1
         if len(operands) > 1:
             return "uniq with an output file is not allowed"
+    if name in ("test", "[") and "-v" in args:
+        return "test -v evaluates an array subscript"
     if name == "rg" and any(a.startswith(("--pre", "--hostname-bin")) for a in args):
         return "rg --pre and --hostname-bin run a command"
     return None
@@ -163,6 +169,8 @@ def _check(tokens: list[str], allowed: frozenset[str], exact: list[list[str]]) -
         return None
     program, args = command.argv[0], command.argv[1:]
     name = os.path.basename(program)
+    if assigns(command):
+        return f"{name} assigns shell variables, which is not allowed"
     if name in SHELLS:
         if "find" in command.wrappers:
             return "a shell through find -exec is not allowed"
@@ -194,6 +202,8 @@ def read_only_shell(
         command = _STDERR_ONLY.sub("", command)
         if _FILE_REDIRECT.search(command):
             return deny(f"redirecting output to a file is not allowed; {_HINT}")
+        if _EXPANSION.search(command):
+            return deny(f"arithmetic, subscript, substring and indirect expansions are not allowed; {_HINT}")
         try:
             statements = walk(command)
         except ValueError:
@@ -205,6 +215,16 @@ def read_only_shell(
         return allow()
 
     return policy
+
+
+def assigns(command: Command) -> bool:
+    """True when a statement sets shell variables: `VAR=`, `env VAR=`, an assigning builtin or `printf -v`."""
+    if command.assignments or "env" in command.wrappers:
+        return True
+    if not command.argv:
+        return False
+    name = os.path.basename(command.argv[0])
+    return name in ASSIGNING_BUILTINS or (name == "printf" and any(a.startswith("-v") for a in command.argv[1:]))
 
 
 def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Decision | None]:
@@ -225,8 +245,11 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
             if re.search(r"\bgit\b", command):
                 return deny("unparseable command naming git; simplify it")
             return allow()
-        for tokens in statements:
-            resolved = resolve(tokens)
+        resolved_all = [resolve(tokens) for tokens in statements]
+        runs_git = any(r.argv and os.path.basename(r.argv[0]) == "git" for r in resolved_all)
+        if runs_git and any(assigns(r) for r in resolved_all):
+            return deny("setting variables in a command that runs git is not allowed; hand repository changes to the implementer")
+        for resolved in resolved_all:
             argv = resolved.argv
             if argv and os.path.basename(argv[0]) == "git":
                 if {"xargs", "parallel"} & set(resolved.wrappers):
