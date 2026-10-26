@@ -1,0 +1,93 @@
+{
+  "type": "AgentSessionEvent",
+  "action": "created",
+  "createdAt": "2026-10-26T03:56:41.412Z",
+  "organizationId": "c6d019c4-7242-448d-8696-1c4d0c617d96",
+  "oauthClientId": "placeholder-client-id",
+  "appUserId": "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb",
+  "agentSession": {
+    "id": "15678ced-2fe6-415a-90d9-6cbc9be21f9b",
+    "createdAt": "2026-10-26T03:56:41.069Z",
+    "updatedAt": "2026-10-26T03:56:41.069Z",
+    "archivedAt": null,
+    "creatorId": "86f579dd-3529-498b-b531-56ece905d2cc",
+    "appUserId": "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb",
+    "commentId": "58d6fe2f-da83-48fc-8f15-d5232c040e6d",
+    "sourceCommentId": null,
+    "issueId": "04959fb8-108f-421e-9ad8-7eea5e4104d6",
+    "pullRequestId": null,
+    "slugId": "b6883ae26323e",
+    "status": "pending",
+    "startedAt": null,
+    "endedAt": null,
+    "dismissedAt": null,
+    "dismissedById": null,
+    "externalLink": null,
+    "summary": null,
+    "sourceMetadata": null,
+    "modelSelection": null,
+    "plan": null,
+    "workspaceDiff": null,
+    "context": [],
+    "url": "https://linear.app/example/",
+    "externalUrls": [],
+    "organizationId": "c6d019c4-7242-448d-8696-1c4d0c617d96",
+    "creator": {
+      "id": "86f579dd-3529-498b-b531-56ece905d2cc",
+      "name": "Placeholder Name",
+      "email": "user@example.com",
+      "avatarUrl": "https://example.com/avatar.png",
+      "url": "https://linear.app/example/"
+    },
+    "comment": {
+      "id": "58d6fe2f-da83-48fc-8f15-d5232c040e6d",
+      "body": "placeholder body",
+      "issueId": "04959fb8-108f-421e-9ad8-7eea5e4104d6"
+    },
+    "issue": {
+      "id": "04959fb8-108f-421e-9ad8-7eea5e4104d6",
+      "title": "placeholder title",
+      "teamId": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+      "team": {
+        "id": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+        "key": "ROU",
+        "name": "Placeholder Name"
+      },
+      "identifier": "ROU-697",
+      "url": "https://linear.app/example/"
+    }
+  },
+  "agentActivity": {
+    "id": "96beea6d-d755-4406-bea6-8aad08cb2f28",
+    "createdAt": "2026-10-26T03:56:41.069Z",
+    "updatedAt": "2026-10-26T03:56:41.069Z",
+    "archivedAt": null,
+    "agentSessionId": "15678ced-2fe6-415a-90d9-6cbc9be21f9b",
+    "sourceCommentId": "58d6fe2f-da83-48fc-8f15-d5232c040e6d",
+    "userId": "86f579dd-3529-498b-b531-56ece905d2cc",
+    "sourceMetadata": null,
+    "executionSkippedReason": null,
+    "signal": null,
+    "ephemeral": false,
+    "pushSummary": null,
+    "queued": false,
+    "sentAt": null,
+    "signalMetadata": null,
+    "content": {
+      "type": "prompt",
+      "body": "placeholder body"
+    },
+    "user": {
+      "id": "86f579dd-3529-498b-b531-56ece905d2cc",
+      "name": "Placeholder Name",
+      "email": "user@example.com",
+      "avatarUrl": "https://example.com/avatar.png",
+      "url": "https://linear.app/example/"
+    }
+  },
+  "previousComments": null,
+  "guidance": null,
+  "promptContext": "placeholder promptContext",
+  "webhookTimestamp": 1792987001432,
+  "webhookId": "fba557e7-681d-41a0-ad80-235e95123d18"
+}

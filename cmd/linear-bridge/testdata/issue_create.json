@@ -1,0 +1,58 @@
+{
+  "action": "create",
+  "actor": {
+    "id": "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb",
+    "name": "Placeholder Name",
+    "email": "user@example.com",
+    "avatarUrl": "https://example.com/avatar.png",
+    "url": "https://linear.app/example/",
+    "type": "user"
+  },
+  "createdAt": "2026-10-26T04:08:55.418Z",
+  "url": "https://linear.app/example/",
+  "type": "Issue",
+  "organizationId": "c6d019c4-7242-448d-8696-1c4d0c617d96",
+  "data": {
+    "id": "c3f4380b-637c-4fd3-9643-1de802f5c79a",
+    "createdAt": "2026-10-26T04:08:55.418Z",
+    "updatedAt": "2026-10-26T04:08:55.418Z",
+    "number": 698,
+    "title": "placeholder title",
+    "priority": 0,
+    "sortOrder": -586497,
+    "prioritySortOrder": -717187,
+    "slaType": "all",
+    "addedToTeamAt": "2026-10-26T04:08:55.594Z",
+    "labelIds": [],
+    "teamId": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+    "previousIdentifiers": [],
+    "creatorId": "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb",
+    "stateId": "823f7ac1-8596-48c7-99b5-e7155d3b4ec3",
+    "subIssueSortOrder": 909,
+    "reactionData": [],
+    "priorityLabel": "No priority",
+    "inheritsSharedAccess": false,
+    "botActor": null,
+    "identifier": "ROU-698",
+    "url": "https://linear.app/example/",
+    "subscriberIds": [
+      "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb"
+    ],
+    "parentId": "664e63c3-9f96-4e41-8474-1ae9859267e6",
+    "state": {
+      "id": "823f7ac1-8596-48c7-99b5-e7155d3b4ec3",
+      "color": "#bec2c8",
+      "name": "Placeholder Name",
+      "type": "backlog"
+    },
+    "team": {
+      "id": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+      "key": "ROU",
+      "name": "Placeholder Name"
+    },
+    "labels": [],
+    "releases": []
+  },
+  "webhookTimestamp": 1792987735868,
+  "webhookId": "fba557e7-681d-41a0-ad80-235e95123d18"
+}
