@@ -4,14 +4,14 @@
   "spec": "Protection Warrior",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal gear simulation.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/protection-warrior/stats-races-and-consumables",
-      "updated": "2026-08-11"
+      "updated": "2026-10-14"
     },
     {
       "url": "https://murlok.io/warrior/protection/m+",
@@ -31,7 +31,7 @@
       "feet": "item:244009",
       "legs": "item:244641",
       "rings": "item:244015",
-      "weapon": "item:244029"
+      "weapon": "item:273071"
     },
     "gems": {
       "unique": "item:240983"
@@ -46,8 +46,7 @@
     }
   },
   "alternatives": {
-    "ring": "item:243957",
-    "weapon": "item:243973"
+    "ring": "item:243957"
   },
   "content_overrides": [
     {
@@ -65,7 +64,7 @@
     }
   ],
   "conditions": [
-    "Eyes of the Eagle and Berserker's Rage are listed ring/weapon alternatives.",
+    "Eyes of the Eagle is a listed ring alternative.",
     "Powerful diamond alternative uses four distinct rare gem colours; companion gems below apply only to that configuration."
   ],
   "unresolved": [

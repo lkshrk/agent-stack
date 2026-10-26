@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-10-04T10:34:40.484127+00:00",
+  "captured_at": "2026-10-26T11:25:59.631278+00:00",
   "season": "season-mn-2",
   "sources": {
     "https://nether.wowhead.com/tooltip/item/240094": {
@@ -1271,21 +1271,33 @@
       "spec_ids": [
         62
       ],
-      "sha256": "149b461de5ab366ce72f36bb820718827a8291afea2468352741520b14085069"
+      "sha256": "d5ee95821aa39df59f84016f4f854f8115e5364e72ee7693ae73e4053cda2e05",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/arms-warrior/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         71
       ],
-      "sha256": "e17d36819efadbe180508d57626668f472a4e442548da5599f72f958f18781dd"
+      "sha256": "f7902e5bbd2d1d08ee6d0de54905cb910132f8dc35d94003827befd4f56bc574",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-25"
+      }
     },
     "https://www.method.gg/guides/assassination-rogue/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         259
       ],
-      "sha256": "966b7be3b5cc333ecce825d305b73be07ac8f64395221085fe63a1eab71b0370"
+      "sha256": "edd1521e7a6d93810f211f5fdcbe5eec4e4020031358b134e239132069ab3ffa",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-18"
+      }
     },
     "https://www.method.gg/guides/augmentation-evoker/stats-races-and-consumables": {
       "kind": "guide",
@@ -1299,7 +1311,11 @@
       "spec_ids": [
         102
       ],
-      "sha256": "ba48341ceab93fbd73661c09cea81ac9b3f021ddca55616ced52f61cc1ba5eae"
+      "sha256": "886bcd9920eed53c698b2a43bd759be6d50e8006f8c020df029d3983350a9d5b",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables": {
       "kind": "guide",
@@ -1313,14 +1329,22 @@
       "spec_ids": [
         250
       ],
-      "sha256": "1459ea3e87023a3b884b6e5f07c08f9a60579ed4e621272e37c2f51aba33ee0c"
+      "sha256": "eaa591fb1e83d884356369775550c5a36b96cb9e2f695dfa5c066142de0c608b",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/brewmaster-monk/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         268
       ],
-      "sha256": "855e93dda0e3dad64670b7c9e9a0294e5fd104921416c3ef3b82a14e1414d907"
+      "sha256": "69cf62450805e76dcf054ef15abd84ad2a8e1fabd1f832a02bcc08cd9f6305fc",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/demonology-warlock/stats-races-and-consumables": {
       "kind": "guide",
@@ -1355,21 +1379,33 @@
       "spec_ids": [
         256
       ],
-      "sha256": "200526321395ee14b6ef5f63c8de359cafa4ebb40d7a4f54477aae67818b7093"
+      "sha256": "988942a03338084e3f9b1856d8f0cd90e2c9cb1efc1df509871b64ed970228e1",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/elemental-shaman/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         262
       ],
-      "sha256": "501a31fa6eeccf42bf8ca1c04cb875a56a33feb8863358cfa8af902842899f74"
+      "sha256": "87e3a3d66477725331ad61f4c9bed92963d831947ece0127bcad69addbcc77b4",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/enhancement-shaman/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         263
       ],
-      "sha256": "4201113681f80de818760de5660aa7cdda4b2c3f0a9566d31a2f5dec082148e4"
+      "sha256": "1f8dd8e414894b01c2fb21615ad38237c1f5f54cf7c8ed211ff19d715d0aaa40",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/feral-druid/stats-races-and-consumables": {
       "kind": "guide",
@@ -1383,14 +1419,22 @@
       "spec_ids": [
         63
       ],
-      "sha256": "9ae4aca4c5063cb07c98b453e7d1727a60247135de61f5ced42030609ae38ba8"
+      "sha256": "1f06332aa7bc23d052185364276694644749016ad281bf53d85d098062f6d682",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/frost-death-knight/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         251
       ],
-      "sha256": "3e34f5f68441f78d52ef29d0daeee80c998a2db6bed84895a55a34cf8267b3eb"
+      "sha256": "85304fb0e99b682a303a2fcc0fa1a58b0bda74e9992379a1ffa1265a7d6b1285",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/frost-death-knight/talents": {
       "kind": "guide",
@@ -1404,21 +1448,33 @@
       "spec_ids": [
         64
       ],
-      "sha256": "b395169026582ad5c87496fa2784929a17a25a26eedcc9f5a3ef9723a2aa7603"
+      "sha256": "3310be2f93ce16ca2f1d8c1916f40a92c8e92eb5cb5ca2e9cd27c25b17d00f06",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/fury-warrior/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         72
       ],
-      "sha256": "f51ecc545296e5df71e9413a2e84ad89e26a7dbe9ff1b686c3709e7328b07b07"
+      "sha256": "f11dbe98f48d0fa632e49a4b854d0d05b2ca988fb7082111926a40fce5025528",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-25"
+      }
     },
     "https://www.method.gg/guides/guardian-druid/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         104
       ],
-      "sha256": "8a0ded0192654dd6f8c1c1575770cc6f29697cd9d47526facf9e488fd04d078f"
+      "sha256": "911ff7e881b31bfd550cefabe9c77f5ae6440d62efbf2ec3b62c5e68c014cab8",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/havoc-demon-hunter/stats-races-and-consumables": {
       "kind": "guide",
@@ -1432,14 +1488,22 @@
       "spec_ids": [
         65
       ],
-      "sha256": "2aa953a97b695441b569f5fbea406785119b5ed4749bf562a74eb4cefb41c026"
+      "sha256": "e1174b8c1a9c8e3c57c5b07cfd235928ef39e7af0da4d29cc3c29c3813c694ff",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/holy-priest/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         257
       ],
-      "sha256": "1cdbeb41b98c446fe4e400e19d55c999993c6a595b1485b24dadadca583d64c3"
+      "sha256": "d068a0dfabd832fce50c53854faf33e87c6affa2955c4661c1cdc9d63a4b7c00",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/marksmanship-hunter/stats-races-and-consumables": {
       "kind": "guide",
@@ -1460,7 +1524,11 @@
       "spec_ids": [
         260
       ],
-      "sha256": "30fe35704def4d4178ae2d4e8f6830203ebcf32080c6534e28d9d2729607101e"
+      "sha256": "95a4676f707aa0dceb48b52b3dd46f3c565d501612005c577dbc7a28a3f89a36",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-18"
+      }
     },
     "https://www.method.gg/guides/preservation-evoker/stats-races-and-consumables": {
       "kind": "guide",
@@ -1474,70 +1542,110 @@
       "spec_ids": [
         66
       ],
-      "sha256": "266640d9c806fe9e174dff9ad7dffee3f299921e58b32db5d0706f09311a6f3c"
+      "sha256": "eecc1d6a2e279b769d751774e796f315240384a4c375d21bbfb791d704aa382f",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/protection-warrior/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         73
       ],
-      "sha256": "939d8dc128d969260860d7c175cf4e681a877527a95e72a97b82f2c1507b97af"
+      "sha256": "363b3390890211b6a02e8aabd6b1ae02a3b9c5813ff7dbffc6b14c17e7f9b33b",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/restoration-druid/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         105
       ],
-      "sha256": "103ce7f4cf322bc5be7aa3c046904cc44a008b25c9857bd7466a4a2160994346"
+      "sha256": "b4036b3a8c014bd7160124142f538de0b57a16952a2932436453ef52e95035ef",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/restoration-shaman/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         264
       ],
-      "sha256": "e1a26d4f4e162d7609803868084c91c9686cf3b4583887bc7f1a1d0a43eb64b4"
+      "sha256": "f8a8ad28552f8ac27e2f50cdabafa5906bd6682c9243ad3e7cabcd3aa813ff5d",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         70
       ],
-      "sha256": "78ebff9d00fed6fded3d6f6739c7aaa2755ca3342caaa05f4c1070e026f0c6aa"
+      "sha256": "a0987e30a0c75bd4fb830f190a02c9ef89c2a753bedd5fab9a7e287af9d0ba69",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/shadow-priest/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         258
       ],
-      "sha256": "2e5756b8c60004f69fe103a406daf8bba47bde50b4d42ac482b9277be1ad1900"
+      "sha256": "49f30effd46f3ece95f3e1aba82b0ee8b6a6595d545c1de4c3b8814e18fb87cd",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/subtlety-rogue/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         261
       ],
-      "sha256": "db0b73a755c2aa1296ad18b1aa522dd8c9693a89e62e81e1e3be80b13696a260"
+      "sha256": "3f235645d2d3d241d53c913ca36b3db02e7a1fedd53275b2a831b9569a81d6a5",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         255
       ],
-      "sha256": "59a868b9029548f176310ba47717df606a4bc4d8ba4040a6447f44efded382b5"
+      "sha256": "cc9b5b2e8af81986134c0679a703c88093603c618a70da563e481031d662756d",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/unholy-death-knight/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         252
       ],
-      "sha256": "10dd44c043d9137502704c7e3cc5e58390781cca8e319132b31f54d8c15372df"
+      "sha256": "1fa9596b02d6530fe3ff54bb46e10a0ba0b6cea94519cf3e7ff456caf946aa18",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/vengeance-demon-hunter/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
         581
       ],
-      "sha256": "032fb68d1a984cb952684e1e7577014cc82c93db5ddef4bef0c17b67ba27fa8e"
+      "sha256": "753f63a58ea38b9a43eb85789003e67a309b9fe59917d466a3ba839ecb8c8b9a",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-14"
+      }
     },
     "https://www.method.gg/guides/windwalker-monk/stats-races-and-consumables": {
       "kind": "guide",
@@ -1550,6 +1658,305 @@
       "kind": "roster",
       "spec_ids": [],
       "sha256": "9ca5ec7055f7cc67bbd334921086c563168e3b0207b4744c51c0191f43180925"
+    },
+    "https://nether.wowhead.com/tooltip/item/244006": {
+      "kind": "tooltip",
+      "spec_ids": [
+        70
+      ],
+      "sha256": "d12a6ae777d57a8fc12ea3abdc94c3cbafa6a2e7d43583d2b00bc48752241a19"
+    },
+    "https://nether.wowhead.com/tooltip/item/273071": {
+      "kind": "tooltip",
+      "spec_ids": [
+        73
+      ],
+      "sha256": "c7b2880bd1be265d7fd85037b892f34b21729e7c22e91d1863928af5f1c440bc"
+    },
+    "https://murlok.io/death-knight/blood/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        250
+      ],
+      "sha256": "ea66c1a64470ec8ef53b4e43a1cefd3d3a0ae911d49ac4596f0e2d16c734fba3"
+    },
+    "https://murlok.io/death-knight/frost/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        251
+      ],
+      "sha256": "ad4d26c048cb59062633fad3b889b8045a495f130a3fc8a53c73412f4e810c7f"
+    },
+    "https://murlok.io/death-knight/unholy/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        252
+      ],
+      "sha256": "c54eb193c5eb79c0aff4acd0037196b6ce22e46121ba6728bdd75c4a45f84af1"
+    },
+    "https://murlok.io/demon-hunter/devourer/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        1480
+      ],
+      "sha256": "24a7a4085c2c86afffa06ada6b112363ccf2c405c9f28f137d2acac81218456a"
+    },
+    "https://murlok.io/demon-hunter/havoc/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        577
+      ],
+      "sha256": "b56a4c2653c24b15688a389ca0e4f02863cea8c7cb27c17ba50a569ec073132b"
+    },
+    "https://murlok.io/demon-hunter/vengeance/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        581
+      ],
+      "sha256": "f891289ba8558e130a896094eacce4a406d0ef5cce55c239ea30edb3f27fe122"
+    },
+    "https://murlok.io/druid/balance/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        102
+      ],
+      "sha256": "f7afdd7ad08f0e47fc0e5bc3ddd5bd492b5a46e8322d495b45c00f9e750b63d4"
+    },
+    "https://murlok.io/druid/feral/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        103
+      ],
+      "sha256": "93747c8bd5fc7c10c803ed5f8534e58b2eb355e4d1e736b3719f69c61d773fab"
+    },
+    "https://murlok.io/druid/guardian/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        104
+      ],
+      "sha256": "9b438bdd1c8f3bbad2c59d0fab8e0a4be81b3ef2a24b23f3ae079e62b96faf39"
+    },
+    "https://murlok.io/druid/restoration/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        105
+      ],
+      "sha256": "423617ce3376ab69dae55811d88afa627b113d6c1fe0d60486ba15c960ada16e"
+    },
+    "https://murlok.io/evoker/augmentation/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        1473
+      ],
+      "sha256": "fb5844a64e4e2d3939ed7438ee16074231ca771d786eed8bcd12f7a36e9572d0"
+    },
+    "https://murlok.io/evoker/devastation/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        1467
+      ],
+      "sha256": "6dfd2b014a92957a0cbd3b61f2c08128450776c51e14a8c5f0362cc1d682d168"
+    },
+    "https://murlok.io/evoker/preservation/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        1468
+      ],
+      "sha256": "2e0df0a8c5deea228a7a83ce3bbd112e57f5e1a8d340019ed45cbb65ce9842e5"
+    },
+    "https://murlok.io/hunter/beast-mastery/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        253
+      ],
+      "sha256": "0c845a7bb7c3153aab30f8217ca55f33ef5841731d585cd6c0a28deacda0e86a"
+    },
+    "https://murlok.io/hunter/marksmanship/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        254
+      ],
+      "sha256": "f1f211430ed68a75b889ec4b66eb086e97317069fce9c4c919ad89f5307d8f56"
+    },
+    "https://murlok.io/hunter/survival/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        255
+      ],
+      "sha256": "930cb14ebe2e33e52f82922e433e860e16f05c5fa86f08356deda4d08a510a77"
+    },
+    "https://murlok.io/mage/arcane/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        62
+      ],
+      "sha256": "2fa5006e900272e016a36236c8c1e362575eb4dbfab9afe7593a8215cf74101b"
+    },
+    "https://murlok.io/mage/fire/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        63
+      ],
+      "sha256": "23c41c09606d94a27bb3d5b09a56b8409c32693ac645a93b8c3888ef60d2ad84"
+    },
+    "https://murlok.io/mage/frost/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        64
+      ],
+      "sha256": "46327297b587f2f64c8cc4832acefe89852b299410c4a6a7c7c435fdef76636b"
+    },
+    "https://murlok.io/monk/brewmaster/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        268
+      ],
+      "sha256": "b966fae5d59b687a3bbcf60d8461b3fff56f1e7cb4934dc85854117bf748cc3a"
+    },
+    "https://murlok.io/monk/mistweaver/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        270
+      ],
+      "sha256": "7d1b7a9f05a9499f62ced1d7f3e58a343288c863a9f2d1bd3d596cb77bf4c65a"
+    },
+    "https://murlok.io/monk/windwalker/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        269
+      ],
+      "sha256": "9d00107fcf32e4d282ca5c4a3dcbbafdfd8c7d99ff2d2dca373405f6b3547e1e"
+    },
+    "https://murlok.io/paladin/holy/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        65
+      ],
+      "sha256": "c7351a7da0997878b57726159d45daa8f2f78b34aeb94d739e21a9f4d4417b47"
+    },
+    "https://murlok.io/paladin/protection/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        66
+      ],
+      "sha256": "e10073b34b423adbd7ed0c274f5698f9977d8df62b3dfbbc3231eb3979fa43c1"
+    },
+    "https://murlok.io/paladin/retribution/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        70
+      ],
+      "sha256": "acaeb5cc942d2edc8de22daa4ffa57ea4c34cb99d9b446f553721a9b9df0976c"
+    },
+    "https://murlok.io/priest/discipline/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        256
+      ],
+      "sha256": "362d6a0ae56e574ffb32f00e4b481c6999f265c8454ef5840d327ff345d4b587"
+    },
+    "https://murlok.io/priest/holy/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        257
+      ],
+      "sha256": "029fb528f7e2fe08794d0fc838899160f69fa214e8e80ceeae95720fa2356963"
+    },
+    "https://murlok.io/priest/shadow/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        258
+      ],
+      "sha256": "b04f1e6342e2092e4bf3a29f736bcd4e89c13d9c0fc9616efe8527674a078c90"
+    },
+    "https://murlok.io/rogue/assassination/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        259
+      ],
+      "sha256": "8adfa17a8d4e9023616541217fb9161c37f1bf922bf7d0e4b01f91976342bd54"
+    },
+    "https://murlok.io/rogue/outlaw/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        260
+      ],
+      "sha256": "54861ddabaa23be735f20f7a55c596939e06af3632668057c514e9b7dadbb9a5"
+    },
+    "https://murlok.io/rogue/subtlety/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        261
+      ],
+      "sha256": "f04755247d81f63bf14eda7279900eda35de3e43710eafbf88edfdba06e24c7e"
+    },
+    "https://murlok.io/shaman/elemental/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        262
+      ],
+      "sha256": "4c926bcd33c43d4e76b94f000bc6ba563e876b2625930fcd2244a227e410f798"
+    },
+    "https://murlok.io/shaman/enhancement/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        263
+      ],
+      "sha256": "644bc604fd348f7a2f8947c7cee16db122c16989c9965808826687234480d575"
+    },
+    "https://murlok.io/shaman/restoration/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        264
+      ],
+      "sha256": "131943bab1bacba6fdfbfdb9eb5b727184157107689f595dd6da4c8ea6001c07"
+    },
+    "https://murlok.io/warlock/affliction/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        265
+      ],
+      "sha256": "b17c30b92910893ef8d0bb422de5727968834f6c9eb3d7d8d1f9ace3e4e6a1c2"
+    },
+    "https://murlok.io/warlock/demonology/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        266
+      ],
+      "sha256": "49ae3b5ea104526384e96308b1454158c8332282d12cd8544b6d4ba1326963ce"
+    },
+    "https://murlok.io/warlock/destruction/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        267
+      ],
+      "sha256": "cb2f27dfdc9a59a9ce8d5a095ab2578e19b9baccb147fd72b99e6ccf7472695b"
+    },
+    "https://murlok.io/warrior/arms/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        71
+      ],
+      "sha256": "6e8d2195cb4a9a32c4311136198813dee30dfaf76e5da27a6559b963e7b672e5"
+    },
+    "https://murlok.io/warrior/fury/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        72
+      ],
+      "sha256": "4170a2028d11cc3e7b7d76870bbe0e9a3e3c63bc8ba330377920d895b83280dc"
+    },
+    "https://murlok.io/warrior/protection/m+": {
+      "kind": "crosscheck",
+      "spec_ids": [
+        73
+      ],
+      "sha256": "fcc51e00bff89c34b27d6a243883781b5bd2a10dbaa48ec708966ce2030eddeb"
+    },
+    "https://worldofwarcraft.blizzard.com/en-us/news": {
+      "kind": "news",
+      "spec_ids": [],
+      "sha256": "6fa5ca6225e40d6269c350d8f284777348cda37ae66e8b4cb6892fa72372fad2"
     }
   }
 }

@@ -4,14 +4,14 @@
   "spec": "Frost Mage",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal simulation.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/frost-mage/stats-races-and-consumables",
-      "updated": "2026-08-11"
+      "updated": "2026-10-16"
     },
     {
       "url": "https://murlok.io/mage/frost/m+",

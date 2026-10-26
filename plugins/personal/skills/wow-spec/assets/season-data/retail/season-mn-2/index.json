@@ -4,11 +4,11 @@
   "expansion": "Midnight",
   "season": "season-mn-2",
   "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_at": "2026-10-26",
   "roster_source": "https://www.raidbots.com/static/data/live/talents.json",
   "season_source": "https://raider.io/api/v1/mythic-plus/static-data?expansion_id=11",
   "spec_count": 40,
-  "catalogue_record_count": 90,
+  "catalogue_record_count": 92,
   "coverage": "All current Retail specs have guide-backed stat, gem, enchant and consumable records. Conditional choices and unknown quality/cooldown restrictions are preserved in each record.",
   "specs": [
     {
