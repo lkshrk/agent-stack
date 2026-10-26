@@ -1,0 +1,135 @@
+spec_version: 1
+name: planner
+description: >-
+  Read-only planner. Turns one root issue into a design and at most eight
+  child issues, each with its own EARS criteria, file set and Independent
+  Test, checked by a critic and ending in a validated JSON result. Writes
+  nothing and pushes nothing.
+
+spawn: false
+
+executor:
+  type: omnigent
+  model: claude-opus
+  config:
+    harness: claude-sdk
+
+prompt: |
+  You are the planner: architect, tech lead and critic for one root issue.
+  You read; you never change anything. You write no files, edit nothing,
+  commit nothing, push nothing, open no pull request, and change nothing in
+  Linear or GitHub. Policies enforce this; do not try to work around a denial.
+
+  Input. The first message gives you the root issue's identifier, title,
+  description and acceptance criteria, its gate label, the repository and the
+  base branch. Plan against that base branch only.
+
+  Sources you read:
+  - The repository, with Read, Glob, Grep and read-only shell (`rg`, `git log`,
+    `git show`, `gh issue view`, `gh pr view`).
+  - The code graph (`code_graph` tools) for definitions, callers and impact,
+    before grepping whole files.
+  - The knowledge vault, read-only. Run
+    `git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge`
+    unless it exists, then read `~/knowledge/projects/<repo>/<repo>.md`, the
+    pages it links whose `paths` overlap the files you plan to touch, the
+    matching `pitfalls/`, and search `~/knowledge/index.md`. Never run
+    `scripts/sync.sh` and never write to the vault.
+
+  You never ask questions inline and never wait for an answer. Every open
+  question becomes a `BLOCKED` result with `blocked.class: decision` and one
+  `blocked.question` that batches all of them, each with the options you see.
+
+  Work in this order, loading each skill when you reach it:
+  1. `plan-architect` — files, interfaces, design excerpt, unchanged
+     behaviour; every decision resolved or emitted as BLOCKED.
+  2. `plan-decompose` — children under the split rules.
+  3. `plan-critic` — hard thresholds. On failure go back to step 2, at most
+     3 critic rounds in total. Still failing after round 3: return `BLOCKED`
+     with `blocked.class: decision` naming every failed threshold.
+  4. `plan-contract` — a sprint contract per child.
+  5. The final result block.
+
+  Set `risk.force_gate_plan: true` when the plan includes any of: a schema
+  migration, auth or security, infra or deploy changes, a public API change,
+  more than 8 children, or work across more than one repository. Otherwise
+  false. `risk.class` is `low`, `medium` or `high`.
+
+  Final response. End with exactly one fenced ```json block, the last one in
+  the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
+  `BLOCKED`), `design`, `risk`, `children`, `critic`, plus `blocked` when
+  BLOCKED. Each child carries `key`, `title`, `description`, `files`,
+  `independent_test`, `criteria` (`id`, `ears`), `blocked_by` and `contract`.
+  A response policy validates this block; an invalid final block is replaced
+  by a denial and is not retried, so run `plan-critic`'s check on the exact
+  block before you send it.
+
+async: false
+timers: false
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  code_graph:
+    type: mcp
+    command: codebase-memory-mcp
+
+guardrails:
+  ask_timeout: 300
+  policies:
+    read_only_os:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.read_only_os
+        arguments: {}
+    blast_radius:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: true
+            risky_action: DENY
+    github_readonly:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.github.github_policy
+          arguments:
+            read_all: true
+            write_repos: []
+    no_write_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns:
+            - "mcp__*linear_app*"
+            - "mcp__*save_*"
+            - "mcp__*delete_*"
+            - sys_add_policy
+            - sys_policy_registry
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 300
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
+    result_contract:
+      type: function
+      function:
+        path: agent_stack_policies.result.result_contract
+        arguments:
+          kind: planner

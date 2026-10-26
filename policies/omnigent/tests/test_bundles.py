@@ -8,6 +8,7 @@ IN_IMAGE = os.environ.get("AGENT_STACK_IN_IMAGE") == "1"
 REPO = Path(__file__).resolve().parents[3]
 BUNDLES = REPO / "bundles"
 SERVER_CONFIG = REPO / "config" / "omnigent" / "config.yaml"
+FIXTURES = Path(__file__).parent / "fixtures"
 RANK = {"ALLOW": 0, "ASK": 1, "DENY": 2}
 
 
@@ -100,6 +101,10 @@ def run_sequence(agent: str, calls: list[tuple[str, dict]]) -> list[str]:
     return actions
 
 
+def fenced(name: str) -> str:
+    return "Plan ready.\n```json\n" + (FIXTURES / name).read_text() + "\n```"
+
+
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
 
 CASES: list[Case] = [
@@ -126,6 +131,18 @@ CASES: list[Case] = [
     Case("polly/agents/codex", "tool_call", "Bash", {"command": "rg foo"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm build/a.txt"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm -rf build"}, "ALLOW"),
+    Case("planner", "tool_call", "Write", {"file_path": "README.md", "content": "x"}, "DENY"),
+    Case("planner", "tool_call", "Edit", {"file_path": "src/a.py"}, "DENY"),
+    Case("planner", "tool_call", "Bash", {"command": "git push origin feat/x"}, "DENY"),
+    Case("planner", "tool_call", "Bash", {"command": "gh pr create --title x --body y"}, "DENY"),
+    Case("planner", "tool_call", "Bash", {"command": "gh issue view 1 --repo routivo/routivo-monorepo"}, "ALLOW"),
+    Case("planner", "tool_call", "Bash", {"command": "rg -n foo"}, "ALLOW"),
+    Case("planner", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+    Case("planner", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
+    Case("planner", "tool_call", "Bash", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 300}),
+    Case("planner", "response", None, "Here is the plan.", "DENY", turn_final=True),
+    Case("planner", "response", None, fenced("planner-valid.json"), "ALLOW", turn_final=True),
+    Case("planner", "response", None, fenced("planner-invalid-uncovered.json"), "DENY", turn_final=True),
 ]
 
 
@@ -175,6 +192,36 @@ class BundleVerdictTest(unittest.TestCase):
             with self.subTest(policy=name):
                 self.assertEqual(out[name].action.name, "ALLOW", out[name].reason)
                 self.assertIn(key, [op.key for op in out[name].state_updates or []])
+
+    def test_planner_normal_run_allowed(self):
+        draft = r"""'```json' '{"status": "DONE", "design": "it'\''s"}' '```'"""
+        run = [
+            ("Bash", {"command": "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"}),
+            ("Read", {"file_path": "~/knowledge/projects/routivo-monorepo/routivo-monorepo.md"}),
+            ("Bash", {"command": "gh issue view 42 --repo routivo/routivo-monorepo --json title,body,labels"}),
+            ("mcp__code_graph__search_graph", {"name_pattern": "Order.*"}),
+            ("mcp__code_graph__trace_path", {"function_name": "createOrder", "direction": "inbound"}),
+            ("Bash", {"command": "rg -n createOrder backend/src"}),
+            ("Read", {"file_path": "backend/src/orders/service.ts"}),
+            ("Glob", {"pattern": "backend/src/orders/**/*.test.ts"}),
+            ("Bash", {"command": "git log --oneline -5 -- backend/src/orders"}),
+            ("Bash", {"command": rf"printf '%s\n' {draft} | python3 -m agent_stack_policies.result planner"}),
+        ]
+        self.assertEqual(run_sequence("planner", run), ["ALLOW"] * len(run))
+        final = Case("planner", "response", None, fenced("planner-valid.json"), "ALLOW", turn_final=True)
+        self.assertEqual(verdict(BUNDLES / "planner", final), "ALLOW")
+
+    def test_planner_flags(self):
+        from omnigent.spec import load
+
+        spec = load(BUNDLES / "planner", expand_env=False)
+        self.assertIs(spec.spawn, False)
+        self.assertIs(spec.async_enabled, False)
+        self.assertIs(spec.timers, False)
+        self.assertEqual(spec.guardrails.ask_timeout, 300)
+        self.assertEqual([(m.name, m.command) for m in spec.mcp_servers], [("code_graph", "codebase-memory-mcp")])
+        skills = sorted(s.name for s in spec.skills)
+        self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-critic", "plan-decompose"])
 
     def test_polly_spawn_disabled(self):
         from omnigent.spec import load

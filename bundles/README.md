@@ -5,3 +5,4 @@ Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this director
 | Bundle | Contents |
 | --- | --- |
 | `polly/` | Orchestrator adapted from Omnigent's example. `config.yaml` holds its instructions and tools, `agents/claude_code` and `agents/codex` the workers, `skills/` the skills `cross-review`, `fanout` and `investigate` |
+| `planner/` | Read-only planner. `config.yaml` holds its instructions, the `code_graph` MCP server and its policies (no writes, no pushes, GitHub read-only, validated final result), `skills/` the skills `plan-architect`, `plan-decompose`, `plan-critic` and `plan-contract` |
