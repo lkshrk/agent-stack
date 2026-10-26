@@ -26,7 +26,7 @@ dependency).
    `scripts/sandbox-check.sh`) with PNG screenshots pushed to a
    `pr-assets/<task-branch>` branch and their blob URLs linked in a PR comment;
    missing e2e evidence is a blocking review finding.
-   For a long-running `claude_code` or `codex` implementation with an explicit
+   For a long-running `claude_code` implementation with an explicit
    completion condition, the `input` may instead be one standalone
    `/goal <condition>` command containing that same task, worktree, acceptance
    contract, green gates, and PR requirement.

@@ -44,8 +44,8 @@ prompt: |
   and watch or TAKE OVER:
   - `claude_code` — Claude Code (`claude-native` harness): the IMPLEMENTER and
     the default for EXPLORE / SEARCH.
-  - `codex` — Codex (`codex-native` harness): the REVIEWER. It does not
-    implement unless the human asks for it explicitly.
+  - `codex` — Codex (`codex-native` harness): the REVIEWER. It is
+    read-only: dispatch it only to review or explore, never to implement.
 
   Roster preflight (FIRST turn, before any dispatch). Before delegating
   anything, run exactly ONE `sys_session_get_info({})` and read its
@@ -115,14 +115,14 @@ prompt: |
       contract; the reviewer reads the file and reports issues, never edits.
     - `explore` / `search` — read-only investigation that returns a findings report.
 
-  Goal mode is opt-in for long-running IMPLEMENT dispatches to `claude_code`
-  and `codex`. When a task has an explicit completion condition and benefits
+  Goal mode is opt-in for long-running IMPLEMENT dispatches to `claude_code`.
+  When a task has an explicit completion condition and benefits
   from the worker continuing autonomously until it is satisfied, make
   `args.input` one standalone `/goal <condition>` command. `/goal` must be the
   first non-whitespace token; put the full `IMPLEMENT` task, worktree path,
   acceptance contract, required green gates, and PR requirement inside the
-  condition. Do not use child goal mode for `review`, `explore`, or `search`,
-  or for `codex`. Goal mode is expressed in
+  condition. Do not use child goal mode for `review`, `explore`, or `search`.
+  Goal mode is expressed in
   the input command — do not invent a `sys_session_send` goal parameter.
 
   Treat real investigation as delegated work. If the human asks you to
@@ -310,19 +310,16 @@ tools:
 
 # Mechanism-layer enforcement — runner-side tool gate, no server change.
 guardrails:
-  # Day-long approval window (the runner previously hard-coded 120s and
-  # ignored this knob) — an ASK should outlive a human stepping away.
-  ask_timeout: 86400
+  ask_timeout: 300
   policies:
     blast_radius:
       type: function
       function:
-        path: omnigent.policies.builtins.orchestration.blast_radius
+        path: agent_stack_policies.unattended.deny_on_ask
         arguments:
-          # Orchestrator runs unattended; don't ASK on push/merge/deploy. The
-          # catastrophic DENY set (force-push, rm -rf /, hard-reset to a remote
-          # ref) still applies.
-          gate_pushes: false
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: false
     spawn_bounds:
       type: function
       function:
@@ -345,8 +342,9 @@ guardrails:
     detect_loop:
       type: function
       function:
-        path: omnigent.policies.builtins.safety.detect_loop
-        arguments: {}
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.safety.detect_loop
     no_policy_tools:
       type: function
       function:

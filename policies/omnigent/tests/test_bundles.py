@@ -42,7 +42,7 @@ def _fires(policy_spec, case: Case) -> bool:
     )
 
 
-def verdict(agent_dir: Path, case: Case) -> str:
+def decide(agent_dir: Path, case: Case) -> tuple[str, str | None]:
     from omnigent.policies.function import resolve_function_policy
     from omnigent.policies.types import EvaluationContext
     from omnigent.spec import load
@@ -57,7 +57,7 @@ def verdict(agent_dir: Path, case: Case) -> str:
         session_state=dict(case.session_state),
         turn_final=case.turn_final,
     )
-    result = "ALLOW"
+    result, reason = "ALLOW", None
     for policy_spec in specs:
         if not isinstance(policy_spec, FunctionPolicySpec):
             raise TypeError(f"{agent_dir}: {policy_spec.name} is not a function policy")
@@ -66,8 +66,12 @@ def verdict(agent_dir: Path, case: Case) -> str:
         decision = asyncio.run(resolve_function_policy(policy_spec).evaluate(ctx, {}))
         action = decision.action.name
         if RANK[action] > RANK[result]:
-            result = action
-    return result
+            result, reason = action, decision.reason
+    return result, reason
+
+
+def verdict(agent_dir: Path, case: Case) -> str:
+    return decide(agent_dir, case)[0]
 
 
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
@@ -94,6 +98,8 @@ CASES: list[Case] = [
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push --force origin feat/x"}, "DENY"),
     Case("polly/agents/codex", "tool_call", "Write", {"file_path": "src/a.py", "content": "x"}, "DENY"),
     Case("polly/agents/codex", "tool_call", "Bash", {"command": "rg foo"}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm build/a.txt"}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm -rf build"}, "ALLOW"),
 ]
 
 
@@ -103,6 +109,17 @@ class BundleVerdictTest(unittest.TestCase):
         for case in CASES:
             with self.subTest(case=case):
                 self.assertEqual(verdict(BUNDLES / case.agent, case), case.expected)
+
+    def test_polly_loop_denied_not_asked(self):
+        from omnigent.policies.builtins.safety import _args_hash
+
+        data = {"command": "make test"}
+        repeats = [_args_hash("sys_os_shell", data)] * 2
+        state = {"_policy_loop_recent_hashes": repeats}
+        case = Case("polly", "tool_call", "sys_os_shell", data, "DENY", state)
+        action, reason = decide(BUNDLES / case.agent, case)
+        self.assertEqual(action, "DENY")
+        self.assertIn("unattended:", reason)
 
     def test_polly_spawn_disabled(self):
         from omnigent.spec import load
