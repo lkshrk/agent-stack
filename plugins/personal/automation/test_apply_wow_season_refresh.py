@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import (advance_verified, drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
+from apply_wow_season_refresh import (advance_verified, summarize_patches, drop_negligible, load_bundle, main as apply_main, merge_parts, record_errors,
                                       source_mapping_errors, validate)
 from check_wow_season_updates import active_bundle, analyze
 
@@ -442,6 +442,42 @@ class PipelineRuns(unittest.TestCase):
         self.assertIn('unchanged outcome must not edit', output['rejected']['265'])
         self.assertEqual(saved['spec-265.json']['recommendations'], old['spec-265.json']['recommendations'])
         self.assertEqual(saved['spec-265.json']['verified_patch'], '12.1')
+
+    def test_claude_unchanged_outcome_acknowledges_the_differences_and_the_next_prediff_skips_it(self):
+        from prediff_wow_specs import classify as prediff
+        old, observation = spec_fixture(flask='item:241324')
+        sources = observation['current']['sources']
+        self.assertEqual(prediff(old, sources)[265]['status'], 'changed')
+        output, saved = self.run_pipeline(old, observation, [(self.part('unchanged'), {})])
+        self.assertEqual(sorted(saved['spec-265.json']['acknowledged_differences']), ['differences', 'sections'])
+        self.assertFalse(output['release'])
+        self.assertEqual(prediff(saved, sources)[265]['status'], 'unchanged')
+        sources[LIVE_GUIDE]['extract']['stats'] += ' Edited.'
+        self.assertEqual(prediff(saved, sources)[265]['status'], 'changed')
+
+    def test_updating_a_spec_clears_its_acknowledgement(self):
+        old, observation = spec_fixture(flask='item:241324')
+        old['spec-265.json']['acknowledged_differences'] = {'differences': 'a', 'sections': 'b'}
+        edited = copy.deepcopy(old['spec-265.json'])
+        edited['recommendations']['consumables']['flask'] = 'item:241326'
+        _, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': edited})])
+        self.assertNotIn('acknowledged_differences', saved['spec-265.json'])
+
+    def test_a_candidate_may_not_write_or_edit_acknowledged_differences(self):
+        old, observation = spec_fixture(flask='item:241324')
+        forged = copy.deepcopy(old['spec-265.json'])
+        forged['acknowledged_differences'] = {'differences': 'a', 'sections': 'b'}
+        output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': forged})])
+        self.assertIn('acknowledged_differences', output['rejected']['265'])
+        self.assertNotIn('acknowledged_differences', saved['spec-265.json'])
+
+    def test_index_patch_is_the_oldest_spec_patch_with_a_coverage_map(self):
+        docs = {'index.json': {'specs': [{'spec_id': 1}, {'spec_id': 2}, {'spec_id': 3}]},
+                'spec-1.json': {'verified_patch': '12.1.5'}, 'spec-2.json': {'verified_patch': '12.0.7'},
+                'spec-3.json': {'verified_patch': '12.0.7'}}
+        summarize_patches(docs)
+        self.assertEqual(docs['index.json']['verified_patch'], '12.0.7')
+        self.assertEqual(docs['index.json']['patch_coverage'], {'12.0.7': 2, '12.1.5': 1})
 
     def test_unresolved_result_keeps_the_old_spec_and_fingerprint(self):
         old, observation = spec_fixture(flask='item:241324')
