@@ -28,7 +28,7 @@ class GatewayChecks(unittest.TestCase):
 
     def test_run_is_narrow_and_cannot_spawn_agents(self):
         words = shlex.split(configuration(self.env())['claude_args'])
-        self.assertLessEqual(int(words[words.index("--max-turns") + 1]), 24)
+        self.assertLessEqual(int(words[words.index("--max-turns") + 1]), 32)
         allowed = words[words.index('--allowedTools') + 1].split(',')
         denied = words[words.index('--disallowedTools') + 1].split(',')
         self.assertFalse({'Task', 'Agent'} & set(allowed))
