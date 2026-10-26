@@ -171,3 +171,36 @@ class SubstitutionTest(unittest.TestCase):
 
     def test_abstains_on_agent_start_probe(self):
         self.assertIsNone(no_merge()(tool_call_event("sys_agent_start")))
+
+
+class FinalReviewMergeTest(unittest.TestCase):
+    def test_substitution_reason_names_the_fix(self):
+        reason = run("git push -u origin $(git branch --show-current)")["reason"]
+        self.assertIn("name the branch literally", reason)
+
+    def test_graphql_merge_mutations_denied(self):
+        for command in (
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+            "gh api graphql -F query=@q.graphql -f q='enablePullRequestAutoMerge'",
+        ):
+            decision = run(command)
+            self.assertEqual(decision["result"], "DENY", command)
+            self.assertIn("graphql", decision["reason"])
+        self.assertEqual(run("gh api graphql -f query='{ viewer { login } }'")["result"], "ALLOW")
+
+    def test_wrappers_resolved(self):
+        for command in (
+            "timeout 60 git push origin main",
+            "setsid git push --force origin feat/x",
+            "flock /tmp/l -c 'gh pr merge 5'",
+            "script -qc 'git push origin main' /dev/null",
+            "parallel ::: 'gh pr merge 5'",
+            "env -S 'git push origin main'",
+        ):
+            self.assertEqual(run(command)["result"], "DENY", command)
+
+    def test_list_and_other_command_shapes(self):
+        policy = no_merge()
+        self.assertEqual(policy(tool_call_event("shell", {"command": ["bash", "-lc", "gh pr merge 5"]}))["result"], "DENY")
+        self.assertEqual(policy(tool_call_event("shell", {"command": ["git", "status"]}))["result"], "ALLOW")
+        self.assertEqual(policy(tool_call_event("shell", {"command": {"a": 1}}))["result"], "DENY")
