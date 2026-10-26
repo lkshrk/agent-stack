@@ -116,3 +116,17 @@ class ShellCommandTest(unittest.TestCase):
         self.assertIsNone(shell_command({"command": ["bash", 1]}))
         self.assertIsNone(shell_command({"command": {"a": 1}}))
         self.assertIsNone(shell_command({"command": 5}))
+
+
+class ProcessSubstitutionTest(unittest.TestCase):
+    def test_bodies_become_statements(self):
+        cases = {
+            "cat <(touch x)": ["touch", "x"],
+            "rg x <(git push origin feat/x)": ["git", "push", "origin", "feat/x"],
+            "diff <(rg a)<(rm b)": ["rm", "b"],
+            "tee >(git commit -am x)": ["git", "commit", "-am", "x"],
+            "bash -lc 'cat <(gh pr review 1 --approve)'": ["gh", "pr", "review", "1", "--approve"],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertIn(expected, [resolve(t).argv for t in walk(command)])

@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import DEFAULT_PROTECTED, push_branch, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, group_token, push_branch, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, glob_match
 
 _VCS = frozenset({"git", "gh"})
@@ -148,7 +148,7 @@ def _segments(tokens: list[str]) -> list[list[str]]:
     """Split at subshell, group and `$(` tokens, which `_shell.parse` leaves inside a statement."""
     segments, current = [], []
     for token in tokens:
-        if token in _GROUPING:
+        if token in _GROUPING or group_token(token):
             segments.append(current)
             current = []
         else:

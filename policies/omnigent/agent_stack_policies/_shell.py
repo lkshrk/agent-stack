@@ -376,12 +376,17 @@ def _walk_quietly(command: str) -> list[list[str]]:
         return _rough(command)
 
 
+def group_token(token: str) -> bool:
+    """`(`, `)`, `$`, and punctuation runs that open or close one, such as `<(`, `>(` and `)<(`."""
+    return token in _GROUPING or (bool(token) and set(token) <= _PUNCTUATION and bool(set(token) & {"(", ")"}))
+
+
 def _groups(tokens: list[str]) -> list[list[str]]:
-    if not any(t in _GROUPING for t in tokens):
+    if not any(group_token(t) for t in tokens):
         return []
     segments, current = [], []
     for token in tokens:
-        if token in _GROUPING:
+        if group_token(token):
             segments.append(current)
             current = []
         else:
