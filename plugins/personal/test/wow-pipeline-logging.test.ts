@@ -112,8 +112,22 @@ test("each changed spec gets its own capped Claude run on the gateway without su
   expect(claude.with.claude_args).toBe("${{ steps.provider.outputs.claude_args }}");
   expect(claude.with.prompt).toContain("${{ matrix.spec }}");
   expect(wow.permissions).toEqual({ contents: "read" });
-  expect(wow.jobs.publish.permissions).toEqual({ contents: "write", "pull-requests": "write" });
+  expect(wow.jobs.publish.permissions).toEqual({ contents: "read", "id-token": "write" });
   expect(wow.concurrency).toEqual({ group: "wow-season-source-check", "cancel-in-progress": false });
+});
+
+test("publish pushes and opens the PR as the h-cloud-npa app via octo-sts", () => {
+  const text = readFileSync(new URL("../../../.github/workflows/wow-season-updates.yml", import.meta.url), "utf8");
+  const publish = wow.jobs.publish;
+  const sts = publish.steps.find((step: any) => step.id === "sts");
+  expect(sts.uses).toMatch(/^octo-sts\/action@[0-9a-f]{40}$/);
+  expect(sts.with).toEqual({ scope: "lkshrk/agent-stack", identity: "agent-stack-wow-refresh" });
+  expect(publish.steps.indexOf(sts)).toBe(0);
+  expect(publish.steps.find((step: any) => step.id === "pr").env.GH_TOKEN).toBe("${{ steps.sts.outputs.token }}");
+  const checkout = publish.steps.find((step: any) => step.id === "checkout");
+  expect(checkout.with.token).toBe("${{ steps.sts.outputs.token }}");
+  expect(text).toContain('git config user.name "h-cloud-npa[bot]"');
+  expect(text).not.toContain("github-actions[bot]");
 });
 
 test("workflow reads the active season from data instead of hardcoding it", () => {

@@ -229,20 +229,27 @@ jobs:
     outputs:
       pushed: ${{ steps.stage.outputs.pushed }}
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      id-token: write
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BASE_SHA: ${{ needs.inspect.outputs.base_sha }}
       BUNDLE_DIR: ${{ needs.inspect.outputs.bundle_dir }}
       STAGING_BRANCH: automation/wow-season-refresh
-      GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Mint app token
+        id: sts
+        uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        with:
+          scope: lkshrk/agent-stack
+          identity: agent-stack-wow-refresh
+
       - name: Check out trusted base
         id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.inspect.outputs.base_sha }}
+          token: ${{ steps.sts.outputs.token }}
 
       - name: Download observation
         id: download
@@ -294,8 +301,8 @@ jobs:
             echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "h-cloud-npa[bot]"
+          git config user.email "337645424+h-cloud-npa[bot]@users.noreply.github.com"
           echo "Accepted changes (file counts only):"
           git diff --cached --stat
           echo "Recommendation change: $RELEASE"
@@ -313,6 +320,7 @@ jobs:
         id: pr
         if: steps.stage.outputs.pushed == 'true'
         env:
+          GH_TOKEN: ${{ steps.sts.outputs.token }}
           RELEASE: ${{ steps.apply.outputs.release }}
         run: |
           title="chore(wow): seasonal bundle refresh"
@@ -344,7 +352,7 @@ jobs:
           elif os.environ['PUSHED'] == 'false':
               lines += ['', 'No accepted data changes: no staging push or pull request needed.']
           else:
-              lines += ['', 'Accepted update staged and pull request opened; it awaits review and merge. Checks do not start automatically for a pull request opened by the workflow token.']
+              lines += ['', 'Accepted update staged and pull request opened; it awaits review and merge.']
           if stages.get('apply', {}).get('outcome') == 'success':
               with open(os.path.join(os.environ['RUNNER_TEMP'], 'wow-apply.json')) as source:
                   data = json.load(source)
