@@ -16,7 +16,7 @@
       "independent_test": "pytest tests/test_k0.py",
       "criteria": [
         {
-          "id": "AC-0",
+          "id": "k0-1",
           "ears": "WHEN input k0 arrives THE SYSTEM SHALL handle k0"
         }
       ],
@@ -32,7 +32,7 @@
       "independent_test": "pytest tests/test_k1.py",
       "criteria": [
         {
-          "id": "AC-1",
+          "id": "k1-1",
           "ears": "WHEN input k1 arrives THE SYSTEM SHALL handle k1"
         }
       ],
@@ -48,7 +48,7 @@
       "independent_test": "pytest tests/test_k2.py",
       "criteria": [
         {
-          "id": "AC-2",
+          "id": "k2-1",
           "ears": "WHEN input k2 arrives THE SYSTEM SHALL handle k2"
         }
       ],
@@ -64,7 +64,7 @@
       "independent_test": "pytest tests/test_k3.py",
       "criteria": [
         {
-          "id": "AC-3",
+          "id": "k3-1",
           "ears": "WHEN input k3 arrives THE SYSTEM SHALL handle k3"
         }
       ],
@@ -80,7 +80,7 @@
       "independent_test": "pytest tests/test_k4.py",
       "criteria": [
         {
-          "id": "AC-4",
+          "id": "k4-1",
           "ears": "WHEN input k4 arrives THE SYSTEM SHALL handle k4"
         }
       ],
@@ -96,7 +96,7 @@
       "independent_test": "pytest tests/test_k5.py",
       "criteria": [
         {
-          "id": "AC-5",
+          "id": "k5-1",
           "ears": "WHEN input k5 arrives THE SYSTEM SHALL handle k5"
         }
       ],
@@ -112,7 +112,7 @@
       "independent_test": "pytest tests/test_k6.py",
       "criteria": [
         {
-          "id": "AC-6",
+          "id": "k6-1",
           "ears": "WHEN input k6 arrives THE SYSTEM SHALL handle k6"
         }
       ],
@@ -128,7 +128,7 @@
       "independent_test": "pytest tests/test_k7.py",
       "criteria": [
         {
-          "id": "AC-7",
+          "id": "k7-1",
           "ears": "WHEN input k7 arrives THE SYSTEM SHALL handle k7"
         }
       ],
@@ -144,7 +144,7 @@
       "independent_test": "pytest tests/test_k8.py",
       "criteria": [
         {
-          "id": "AC-8",
+          "id": "k8-1",
           "ears": "WHEN input k8 arrives THE SYSTEM SHALL handle k8"
         }
       ],
@@ -155,39 +155,39 @@
     "rounds": 2,
     "coverage": [
       {
-        "criterion": "AC-0",
+        "criterion": "k0-1",
         "child": "k0"
       },
       {
-        "criterion": "AC-1",
+        "criterion": "k1-1",
         "child": "k1"
       },
       {
-        "criterion": "AC-2",
+        "criterion": "k2-1",
         "child": "k2"
       },
       {
-        "criterion": "AC-3",
+        "criterion": "k3-1",
         "child": "k3"
       },
       {
-        "criterion": "AC-4",
+        "criterion": "k4-1",
         "child": "k4"
       },
       {
-        "criterion": "AC-5",
+        "criterion": "k5-1",
         "child": "k5"
       },
       {
-        "criterion": "AC-6",
+        "criterion": "k6-1",
         "child": "k6"
       },
       {
-        "criterion": "AC-7",
+        "criterion": "k7-1",
         "child": "k7"
       },
       {
-        "criterion": "AC-8",
+        "criterion": "k8-1",
         "child": "k8"
       }
     ]

@@ -109,6 +109,8 @@ def _check_children(children: object, errors: list[str]) -> tuple[set[str], list
             if cid in ids:
                 errors.append(f"criterion id {cid!r} is duplicated")
             ids.add(cid)
+            if _text(key) and not re.fullmatch(re.escape(key) + r"-[1-9][0-9]*", cid):
+                errors.append(f"criterion {cid!r} must be <child-key>-<n>, e.g. {key}-1")
             ears = criterion.get("ears")
             if not isinstance(ears, str) or not _EARS.match(ears):
                 errors.append(f"criterion {cid!r} is not in EARS form (WHEN ... THE SYSTEM SHALL ...)")

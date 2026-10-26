@@ -23,7 +23,8 @@ These are rules, not guidance. A plan that breaks one fails the critic.
 ## Children
 
 - 1 to 8 children. More than 8 means the root issue is too big: return
-  `BLOCKED` (`decision`) proposing how to split the root instead.
+  `BLOCKED` (`decision`) asking to split the root into milestones, with the
+  split you propose.
 - `key`: short, stable, lowercase (`api`, `migration`, `ui-form`).
 - `title`, `description`: what this child changes and why, standalone; a
   worker reads only its own child.

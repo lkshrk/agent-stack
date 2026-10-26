@@ -25,16 +25,22 @@ prompt: |
   base branch. Plan against that base branch only.
 
   Sources you read:
-  - The repository, with Read, Glob, Grep and read-only shell (`rg`, `git log`,
-    `git show`, `gh issue view`, `gh pr view`).
+  - The repository, with the `sys_os_*` read tools and read-only shell (`rg`,
+    `git log`, `git show`, `gh issue view`, `gh pr view`).
   - The code graph (`code_graph` tools) for definitions, callers and impact,
     before grepping whole files.
   - The knowledge vault, read-only. Run
-    `git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge`
-    unless it exists, then read `~/knowledge/projects/<repo>/<repo>.md`, the
+    `git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge`,
+    or `git -C ~/knowledge pull --ff-only` when it exists, then read `~/knowledge/projects/<repo>/<repo>.md`, the
     pages it links whose `paths` overlap the files you plan to touch, the
     matching `pitfalls/`, and search `~/knowledge/index.md`. Never run
     `scripts/sync.sh` and never write to the vault.
+
+  Shell: one plain command or pipeline per call. The policies deny `$(…)`,
+  backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line
+  continuations, and `git`, `gh` or `.git` inside `find` or `xargs`; use plain
+  pipes, `python3 -c` and separate calls instead, and rephrase a denied read
+  rather than retrying it.
 
   You never ask questions inline and never wait for an answer. Every open
   question becomes a `BLOCKED` result with `blocked.class: decision` and one
@@ -52,8 +58,7 @@ prompt: |
 
   Set `risk.force_gate_plan: true` when the plan includes any of: a schema
   migration, auth or security, infra or deploy changes, a public API change,
-  more than 8 children, or work across more than one repository. Otherwise
-  false. `risk.class` is `low`, `medium` or `high`.
+  or work across more than one repository. Otherwise false. `risk.class` is `low`, `medium` or `high`.
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
@@ -61,8 +66,8 @@ prompt: |
   BLOCKED. Each child carries `key`, `title`, `description`, `files`,
   `independent_test`, `criteria` (`id`, `ears`), `blocked_by` and `contract`.
   A response policy validates this block; an invalid final block is replaced
-  by a denial and is not retried, so run `plan-critic`'s check on the exact
-  block before you send it.
+  by a denial and is not retried, so check the exact final text with
+  `result_check`'s `validate_result` before you send it.
 
 async: false
 timers: false
@@ -77,6 +82,10 @@ tools:
   code_graph:
     type: mcp
     command: codebase-memory-mcp
+  result_check:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.mcp"]
 
 guardrails:
   ask_timeout: 300
@@ -111,9 +120,12 @@ guardrails:
         path: agent_stack_policies.tools.deny_tools
         arguments:
           patterns:
-            - "mcp__*linear_app*"
-            - "mcp__*save_*"
-            - "mcp__*delete_*"
+            - "*linear_app*"
+            - "*__linear-*"
+            - "*save_*"
+            - "*delete_*"
+            - "*manage_adr"
+            - "*ingest_traces"
             - sys_add_policy
             - sys_policy_registry
     max_tool_calls_per_session:

@@ -16,7 +16,7 @@
       "independent_test": "pytest tests/test_a.py",
       "criteria": [
         {
-          "id": "AC-1",
+          "id": "a-1",
           "ears": "WHEN input a arrives THE SYSTEM SHALL handle a"
         }
       ],
@@ -35,7 +35,7 @@
       "independent_test": "pytest tests/test_b.py",
       "criteria": [
         {
-          "id": "AC-2",
+          "id": "b-1",
           "ears": "WHEN input b arrives THE SYSTEM SHALL handle b"
         }
       ],
@@ -53,7 +53,7 @@
       "independent_test": "pytest tests/test_c.py",
       "criteria": [
         {
-          "id": "AC-3",
+          "id": "c-1",
           "ears": "WHEN input c arrives THE SYSTEM SHALL handle c"
         }
       ],
@@ -64,15 +64,15 @@
     "rounds": 2,
     "coverage": [
       {
-        "criterion": "AC-1",
+        "criterion": "a-1",
         "child": "a"
       },
       {
-        "criterion": "AC-2",
+        "criterion": "b-1",
         "child": "b"
       },
       {
-        "criterion": "AC-3",
+        "criterion": "c-1",
         "child": "c"
       }
     ]

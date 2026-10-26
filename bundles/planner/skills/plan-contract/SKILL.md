@@ -27,5 +27,5 @@ Add a `contract` object to every child:
 - `docs`: every doc, README or vault page this change makes stale; `[]` when
   none.
 
-After adding contracts, run the `plan-critic` validator once more on the
-final block. Then send the final response with that block last.
+After adding contracts, run `validate_result` once more on the exact final
+response. Then send the final response with that block last.

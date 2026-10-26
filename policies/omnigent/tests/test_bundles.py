@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import unittest
 from dataclasses import dataclass, field
@@ -105,6 +106,47 @@ def fenced(name: str) -> str:
     return "Plan ready.\n```json\n" + (FIXTURES / name).read_text() + "\n```"
 
 
+def infra_plan() -> dict:
+    steps = [
+        ("chart", "deploy/charts/orders/values.yaml", "`helm upgrade --install orders deploy/charts/orders` rolls out"),
+        ("crd", "deploy/crds/order-queue.yaml", "`kubectl apply -f deploy/crds/order-queue.yaml` registers the CRD"),
+        ("migration", "backend/migrations/0042_orders.sql", "the migration job (`kubectl delete job migrate` first) runs"),
+        ("api", "backend/src/orders/api.ts", "a client posts to `/v1/orders` with \"priority\": \"high\""),
+        ("service", "backend/src/orders/service.ts", "the service's queue reports $(depth) > 100"),
+        ("worker", "backend/src/orders/worker.ts", "a message arrives; # retries stay at 3"),
+        ("ui", "frontend/src/orders/OrderForm.tsx", "the user's form submits | the API returns 201"),
+        ("docs", "docs/orders.md", "an operator reads the runbook"),
+    ]
+    children = []
+    for i, (key, path, when) in enumerate(steps):
+        children.append({
+            "key": key,
+            "title": f"Orders {key}",
+            "description": f"Change {path} so that {when}.",
+            "files": [path],
+            "independent_test": f"make test-{key}",
+            "criteria": [
+                {"id": f"{key}-1", "ears": f"WHEN {when} THE SYSTEM SHALL accept it"},
+                {"id": f"{key}-2", "ears": f"WHEN {when} twice THE SYSTEM SHALL keep one result"},
+            ],
+            "blocked_by": [steps[i - 1][0]] if i in (1, 2) else [],
+            "contract": {"criteria": [f"{key}-1", f"{key}-2"], "independent_test": f"make test-{key}", "files": [path], "docs": []},
+        })
+    coverage = [
+        {"criterion": c["id"], "child": child["key"], "root": "ROU-12-1", "test": child["independent_test"]}
+        for child in children
+        for c in child["criteria"]
+    ]
+    design = "Roll out with `helm upgrade` after `kubectl apply` of the CRD.\n\n| wave | children |\n| --- | --- |\n| 1 | chart, api |"
+    return {
+        "status": "DONE",
+        "design": design,
+        "risk": {"class": "high", "force_gate_plan": True},
+        "children": children,
+        "critic": {"rounds": 2, "coverage": coverage},
+    }
+
+
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
 
 CASES: list[Case] = [
@@ -131,15 +173,23 @@ CASES: list[Case] = [
     Case("polly/agents/codex", "tool_call", "Bash", {"command": "rg foo"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm build/a.txt"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "rm -rf build"}, "ALLOW"),
-    Case("planner", "tool_call", "Write", {"file_path": "README.md", "content": "x"}, "DENY"),
-    Case("planner", "tool_call", "Edit", {"file_path": "src/a.py"}, "DENY"),
-    Case("planner", "tool_call", "Bash", {"command": "git push origin feat/x"}, "DENY"),
-    Case("planner", "tool_call", "Bash", {"command": "gh pr create --title x --body y"}, "DENY"),
-    Case("planner", "tool_call", "Bash", {"command": "gh issue view 1 --repo routivo/routivo-monorepo"}, "ALLOW"),
-    Case("planner", "tool_call", "Bash", {"command": "rg -n foo"}, "ALLOW"),
+    Case("planner", "tool_call", "sys_os_write", {"path": "README.md", "content": "x"}, "DENY"),
+    Case("planner", "tool_call", "sys_os_edit", {"path": "src/a.py", "old": "a", "new": "b"}, "DENY"),
+    Case("planner", "tool_call", "sys_os_shell", {"command": "git push origin feat/x"}, "DENY"),
+    Case("planner", "tool_call", "sys_os_shell", {"command": "gh pr create --title x --body y"}, "DENY"),
+    Case("planner", "tool_call", "sys_os_shell", {"command": "gh issue view 1 --repo routivo/routivo-monorepo"}, "ALLOW"),
+    Case("planner", "tool_call", "sys_os_shell", {"command": "rg -n foo"}, "ALLOW"),
+    Case("planner", "tool_call", "sys_os_read", {"path": "README.md"}, "ALLOW"),
     Case("planner", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+    Case("planner", "tool_call", "mcp__litellm-tools__linear-create_attachment", {"issue": "x"}, "DENY"),
+    Case("planner", "tool_call", "code_graph__delete_project", {"project": "x"}, "DENY"),
+    Case("planner", "tool_call", "code_graph__manage_adr", {"project": "x"}, "DENY"),
+    Case("planner", "tool_call", "code_graph__ingest_traces", {"project": "x"}, "DENY"),
+    Case("planner", "tool_call", "code_graph__search_graph", {"name_pattern": "x"}, "ALLOW"),
+    Case("planner", "tool_call", "code_graph__index_repository", {"repo_path": "."}, "ALLOW"),
+    Case("planner", "tool_call", "result_check__validate_result", {"kind": "planner", "text": "x"}, "ALLOW"),
     Case("planner", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
-    Case("planner", "tool_call", "Bash", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 300}),
+    Case("planner", "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 300}),
     Case("planner", "response", None, "Here is the plan.", "DENY", turn_final=True),
     Case("planner", "response", None, fenced("planner-valid.json"), "ALLOW", turn_final=True),
     Case("planner", "response", None, fenced("planner-invalid-uncovered.json"), "DENY", turn_final=True),
@@ -194,21 +244,28 @@ class BundleVerdictTest(unittest.TestCase):
                 self.assertIn(key, [op.key for op in out[name].state_updates or []])
 
     def test_planner_normal_run_allowed(self):
-        draft = r"""'```json' '{"status": "DONE", "design": "it'\''s"}' '```'"""
+        from agent_stack_policies.result import validate_result
+
+        plan = infra_plan()
+        self.assertEqual(validate_result("planner", plan), [])
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(plan, indent=2) + "\n```"
+        knowledge = "~/knowledge/projects/routivo-monorepo/routivo-monorepo.md"
         run = [
-            ("Bash", {"command": "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"}),
-            ("Read", {"file_path": "~/knowledge/projects/routivo-monorepo/routivo-monorepo.md"}),
-            ("Bash", {"command": "gh issue view 42 --repo routivo/routivo-monorepo --json title,body,labels"}),
-            ("mcp__code_graph__search_graph", {"name_pattern": "Order.*"}),
-            ("mcp__code_graph__trace_path", {"function_name": "createOrder", "direction": "inbound"}),
-            ("Bash", {"command": "rg -n createOrder backend/src"}),
-            ("Read", {"file_path": "backend/src/orders/service.ts"}),
-            ("Glob", {"pattern": "backend/src/orders/**/*.test.ts"}),
-            ("Bash", {"command": "git log --oneline -5 -- backend/src/orders"}),
-            ("Bash", {"command": rf"printf '%s\n' {draft} | python3 -m agent_stack_policies.result planner"}),
+            ("sys_os_shell", {"command": "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"}),
+            ("sys_os_shell", {"command": "git -C ~/knowledge pull --ff-only"}),
+            ("sys_os_read", {"path": knowledge}),
+            ("sys_os_shell", {"command": "gh issue view 42 --repo routivo/routivo-monorepo --json title,body,labels"}),
+            ("code_graph__index_repository", {"repo_path": "."}),
+            ("code_graph__search_graph", {"name_pattern": "Order.*"}),
+            ("code_graph__trace_path", {"function_name": "createOrder", "direction": "inbound"}),
+            ("sys_os_shell", {"command": "rg -n createOrder backend/src"}),
+            ("sys_os_read", {"path": "backend/src/orders/service.ts"}),
+            ("sys_os_shell", {"command": "git log --oneline -5 -- backend/src/orders"}),
+            ("result_check__validate_result", {"kind": "planner", "text": response.replace('"rounds": 2', '"rounds": 1')}),
+            ("result_check__validate_result", {"kind": "planner", "text": response}),
         ]
         self.assertEqual(run_sequence("planner", run), ["ALLOW"] * len(run))
-        final = Case("planner", "response", None, fenced("planner-valid.json"), "ALLOW", turn_final=True)
+        final = Case("planner", "response", None, response, "ALLOW", turn_final=True)
         self.assertEqual(verdict(BUNDLES / "planner", final), "ALLOW")
 
     def test_planner_flags(self):
@@ -219,7 +276,9 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertIs(spec.async_enabled, False)
         self.assertIs(spec.timers, False)
         self.assertEqual(spec.guardrails.ask_timeout, 300)
-        self.assertEqual([(m.name, m.command) for m in spec.mcp_servers], [("code_graph", "codebase-memory-mcp")])
+        servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
+        python = ("/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])
+        self.assertEqual(servers, [("code_graph", "codebase-memory-mcp", []), ("result_check", *python)])
         skills = sorted(s.name for s in spec.skills)
         self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-critic", "plan-decompose"])
 

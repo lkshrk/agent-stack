@@ -84,6 +84,17 @@ class PlannerTest(unittest.TestCase):
     def test_planner_tbd_placeholder(self):
         self.assertTrue(any("placeholder" in e for e in self.errors("planner-invalid-tbd.json")))
 
+    def test_planner_criterion_id_names_its_child(self):
+        planner = load("planner-valid.json")
+        for bad in ("AC-1", "b-1", "a-0", "a-x", "a1"):
+            planner["children"][0]["criteria"][0]["id"] = bad
+            planner["critic"]["coverage"][0]["criterion"] = bad
+            errors = result.validate_result("planner", planner)
+            self.assertTrue(any("<child-key>-<n>" in e for e in errors), (bad, errors))
+        planner["children"][0]["criteria"][0]["id"] = "a-12"
+        planner["critic"]["coverage"][0]["criterion"] = "a-12"
+        self.assertEqual(result.validate_result("planner", planner), [])
+
     def test_planner_dependent_children_may_share_files(self):
         planner = load("planner-valid.json")
         self.assertIn("src/a.py", planner["children"][1]["files"])
