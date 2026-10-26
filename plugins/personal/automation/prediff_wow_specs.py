@@ -133,8 +133,9 @@ def classify(documents, sources):
         if not guides:
             partial = live_guides(setup, sources, complete=False)
             reason = {u: missing_parts(g['extract']) for u, g in partial.items()}
-            result[entry['spec_id']] = {**info, 'status': 'unavailable', 'differences': {},
-                                        'reason': 'Guide layout incomplete: ' + json.dumps(reason) if reason else 'No readable guide'}
+            result[entry['spec_id']] = ({**info, 'status': 'incomplete', 'differences': {},
+                                         'reason': 'Guide layout incomplete: ' + json.dumps(reason)} if reason else
+                                        {**info, 'status': 'unavailable', 'differences': {}, 'reason': 'No readable guide'})
             continue
         differences = diff_spec(setup, guides)
         result[entry['spec_id']] = {**info, 'status': 'changed' if differences else 'unchanged', 'differences': differences}
@@ -159,13 +160,14 @@ def summarize(documents, observation, cap=DEFAULT_CAP, force=False):
     specs = classify(documents, sources)
     baseline = documents['source-watch.json'].get('sources', {})
     changed = sorted(i for i, v in specs.items() if v['status'] == 'changed')
-    ordered = changed + (sorted(i for i, v in specs.items() if v['status'] == 'unchanged') if force else [])
+    incomplete = sorted(i for i, v in specs.items() if v['status'] == 'incomplete')
+    ordered = changed + incomplete + (sorted(i for i, v in specs.items() if v['status'] == 'unchanged') if force else [])
     selected = ordered[:cap]
     advance = sorted(e['spec_id'] for e in documents['index.json']['specs']
                      if specs[e['spec_id']]['status'] == 'unchanged' and e['spec_id'] not in selected
                      and needs_advance(documents[e['file']], live_guides(documents[e['file']], sources), baseline))
     return {'schema_version': 1, 'cap': cap, 'specs': {str(k): v for k, v in specs.items()},
-            'changed': changed, 'selected': selected, 'deferred': ordered[cap:],
+            'changed': changed, 'incomplete': incomplete, 'selected': selected, 'deferred': ordered[cap:],
             'unchanged': sorted(i for i, v in specs.items() if v['status'] == 'unchanged'),
             'advance': advance,
             'unavailable': sorted(i for i, v in specs.items() if v['status'] == 'unavailable')}
@@ -184,7 +186,7 @@ def spec_task(documents, observation, spec_id, prediff, bundle_path):
     entry = next(e for e in documents['index.json']['specs'] if e['spec_id'] == spec_id)
     setup = documents[entry['file']]
     sources = observation['current']['sources']
-    guides = live_guides(setup, sources)
+    guides = live_guides(setup, sources, complete=False)
     records = documents['catalog.json']['records']
     live = set()
     for guide in guides.values():

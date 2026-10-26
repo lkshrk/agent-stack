@@ -80,6 +80,7 @@ jobs:
           summary = report(data['rows'], data['current'], force_refresh=force)
           summary += ('\n## Spec pre-diff\n\n'
                       f'{len(prediff["unchanged"])} unchanged (no Claude call); {len(prediff["changed"])} with differences; '
+                      f'{len(prediff["incomplete"])} with a guide missing a parsable part; '
                       f'{len(prediff["unavailable"])} without a readable guide. '
                       f'Claude runs: {len(prediff["selected"])} (cap {cap}); deferred: {len(prediff["deferred"])}.\n')
           print(summary, flush=True)

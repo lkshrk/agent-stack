@@ -336,7 +336,7 @@ def advance_verified(docs, spec_ids, sources, today, require_unchanged):
     for sid in spec_ids:
         name = f'spec-{sid}.json'
         setup = copy.deepcopy(docs[name])
-        guides = live_guides(setup, live)
+        guides = live_guides(setup, live, complete=require_unchanged)
         if not guides or (require_unchanged and (verdicts[sid]['status'] != 'unchanged'
                                                  or not needs_advance(setup, guides, watch['sources']))):
             continue

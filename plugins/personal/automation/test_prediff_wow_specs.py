@@ -132,7 +132,29 @@ class PreDiff(unittest.TestCase):
                 sources = {GUIDE: {'kind': 'guide', 'spec_ids': [265], 'sha256': digest, **extra}}
                 verdict = classify(documents(), sources)[265]
                 self.assertNotEqual(verdict['status'], 'unchanged')
-                self.assertTrue(verdict['status'] == 'changed' or 'layout incomplete' in verdict['reason'])
+                self.assertTrue(verdict['status'] == 'changed' or verdict['status'] == 'incomplete')
+
+    def test_guide_without_a_stat_ranking_goes_to_claude_after_real_diffs_before_force_picks(self):
+        feral = PAGE.replace('Crit &gt; Haste = Mastery &gt; Versatility', 'sim your gear').replace('Haste = Crit &gt; Mastery &gt; Versatility', 'sim it')
+        digest, extra = analyze('guide', feral)
+        sources = {GUIDE: {'kind': 'guide', 'spec_ids': [265], 'sha256': digest, **extra}}
+        docs = documents()
+        verdict = classify(docs, sources)[265]
+        self.assertEqual(verdict['status'], 'incomplete')
+        self.assertIn('stats', verdict['reason'])
+        for sid in (266, 267, 268):
+            docs['index.json']['specs'].append({'spec_id': sid, 'file': f'spec-{sid}.json'})
+            docs[f'spec-{sid}.json'] = {**copy.deepcopy(docs['spec-265.json']), 'spec_id': sid, 'sources': [{'url': 'https://m.test/' + str(sid)}]}
+        docs['spec-268.json']['recommendations']['consumables']['flask'] = 'item:241324'
+        for sid in (266, 268):
+            sources[f'https://m.test/{sid}'] = live()
+        summary = summarize(docs, {'current': {'sources': sources}}, cap=3, force=True)
+        self.assertEqual(summary['selected'], [268, 265, 266])
+        self.assertEqual(summary['incomplete'], [265])
+        self.assertNotIn(265, summary['unavailable'])
+        task = spec_task(docs, {'current': {'sources': sources}}, 265, summary, 'bundle')
+        self.assertIn(GUIDE, task['live_guides'])
+        self.assertEqual(classify(docs, {GUIDE: {'kind': 'guide', 'error': 'HTTP 403'}})[265]['status'], 'unavailable')
 
     def test_force_sends_unchanged_specs_to_claude_after_the_differing_ones_within_the_cap(self):
         docs = documents()
