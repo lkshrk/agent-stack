@@ -43,6 +43,7 @@ class DetectLoopTest(unittest.TestCase):
         self.assertEqual(decision["result"], "DENY")
         self.assertTrue(decision["reason"].startswith("agent-stack: loop: "))
         self.assertIn("3 times in a row", decision["reason"])
+        self.assertIn("change the arguments or the approach", decision["reason"])
         self.assertNotIn("state_updates", decision)
 
     def test_interrupted_repeats_allow(self):

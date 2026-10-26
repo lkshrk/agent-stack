@@ -37,7 +37,10 @@ def detect_loop(
         history = [h for h in stored if isinstance(h, str)] if isinstance(stored, list) else []
         run = _streak(history, current)
         if run >= threshold:
-            return deny(f"loop: {name} called with identical arguments {run} times in a row")
+            return deny(
+                f"loop: {name} called with identical arguments {run} times in a row; "
+                "change the arguments or the approach, repeating the same call is denied"
+            )
         recent = [*history, current][-window:]
         return allow(state_updates=[{"key": LOOP_STATE_KEY, "action": "set", "value": recent}])
 
