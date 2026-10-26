@@ -98,6 +98,8 @@ class DocsVcsTest(unittest.TestCase):
             "git add docs/v1.2",
             "git add docs/conf.py",
             "git add LICENSE",
+            "git add src/img/diagram.png",
+            "git add docs/img/diagram.png.d",
         ):
             self.assertDenied(command, "git add")
 
@@ -107,6 +109,8 @@ class DocsVcsTest(unittest.TestCase):
             "git add docs/NOTICE.txt",
             "git add docs/CONTRIBUTING.rst",
             "git add docs/guide.mdx docs/guide.markdown docs/a.adoc docs/b.txt",
+            "git add docs/img/diagram.png docs/img/a.jpg docs/img/b.jpeg docs/img/c.gif",
+            "git add docs/img/d.svg docs/img/e.webp docs/arch.drawio docs/img/F.PNG",
             "git add README.rst",
             "git add CHANGELOG",
         ):
@@ -142,6 +146,16 @@ class DocsVcsTest(unittest.TestCase):
             "git log > docs/log.md",
             "git log 2>docs/err.md",
             "gh pr diff 7 > /tmp/pr.diff",
+            "git log 2>&1>out",
+            "git log &>out",
+            "git log >&out",
+            "git log 2>&1>>out",
+            "git log 1>&2>out",
+            "git log 2>&1&>out",
+            "git log 3>out",
+            "git log 1>out",
+            "gh pr diff 7 &>out",
+            "git push origin HEAD:feat/x &>out",
             "git log >> notes.md",
             "git branch feat/new",
             "git branch -D feat/x",
@@ -193,6 +207,14 @@ class DocsVcsTest(unittest.TestCase):
             "git push --follow-tags origin HEAD:feat/x",
             "git push --all origin",
             "git push --mirror origin",
+            "git push origin HEAD:heads/main",
+            "git push origin heads/main",
+            "git push origin HEAD:heads/master",
+            "git push origin HEAD:heads/feat/x",
+            "git push origin HEAD:tags/v1",
+            "git push origin HEAD:refs/tags/v1",
+            "git push origin HEAD:remotes/origin/x",
+            "git push origin HEAD:notes/x",
         ):
             self.assertDenied(command, "git push")
 

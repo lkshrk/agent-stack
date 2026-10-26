@@ -3,22 +3,19 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import shell_command, substituted, walk
+from ._shell import push_branch, push_destination, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")
+_REF_FLAGS = ("--tags", "--follow-tags", "--mirror", "--all")
+_HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
 
 
 def _is_force_flag(token: str) -> bool:
     if token.startswith("--"):
         return token.split("=", 1)[0] in _FORCE_LONG
     return token.startswith("-") and "f" in token[1:]
-
-
-def _refspec_destination(refspec: str) -> str:
-    destination = refspec.lstrip("+").rsplit(":", 1)[-1]
-    return destination.removeprefix("refs/heads/")
 
 
 def _has_substitution(tokens: list[str]) -> bool:
@@ -50,9 +47,14 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
             refspecs = positionals[1:]
             if any(_is_force_flag(f) for f in flags) or any(r.startswith("+") for r in refspecs):
                 return "force-push"
+            if any(f.split("=", 1)[0] in _REF_FLAGS for f in flags):
+                return "pushing tags or all refs"
             for refspec in refspecs:
-                if _refspec_destination(refspec) in protected:
-                    return f"push to protected branch {_refspec_destination(refspec)}"
+                resolved = _HEADS_PREFIX.sub("", push_destination(refspec))
+                if resolved in protected:
+                    return f"push to protected branch {resolved}"
+                if push_branch(refspec) is None:
+                    return f"push to tag or non-branch ref {refspec}"
     return None
 
 

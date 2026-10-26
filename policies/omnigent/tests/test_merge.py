@@ -73,6 +73,32 @@ class NoMergeTest(unittest.TestCase):
         ):
             self.assertDenied(command, "force-push")
 
+    def test_no_merge_short_ref_and_tag_pushes_denied(self):
+        for command in (
+            "git push origin HEAD:heads/main",
+            "git push origin heads/main",
+            "git push origin HEAD:heads/master",
+            "git push origin +HEAD:heads/main",
+            "git push origin HEAD:tags/v1",
+            "git push origin HEAD:refs/tags/v1",
+            "git push origin refs/tags/v1",
+            "git push origin tags/v1",
+            "git push origin HEAD:refs/notes/x",
+            "git push origin HEAD:refs/heads/refs/heads/main",
+            "git push --tags origin",
+            "git push origin --tags",
+            "git push --follow-tags origin HEAD:feat/x",
+            "git push --mirror origin",
+            "git push --all origin",
+        ):
+            self.assertDenied(command)
+        self.assertDenied("git push origin HEAD:heads/main", "main")
+        self.assertDenied("git push origin HEAD:refs/tags/v1", "tag")
+
+    def test_no_merge_branch_pushes_still_allowed(self):
+        for command in ("git push origin HEAD:feat/x", "git push -u origin feat/x", "git push origin refs/heads/feat/x"):
+            self.assertEqual(run(command)["result"], "ALLOW", command)
+
     def test_no_merge_substitution_denied(self):
         self.assertDenied("git push origin `echo main`")
         self.assertDenied("git push origin $(echo main)")

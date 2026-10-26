@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import shell_command, substituted, walk
+from ._shell import push_branch, shell_command, substituted, walk
 from .paths import SHELL_TOOLS, glob_match
 
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -22,10 +22,13 @@ _GH_API_WRITE_FLAGS = ("-f", "-F", "--field", "--raw-field", "--input")
 _PROTECTED = frozenset({"main", "master"})
 _GROUPING = frozenset({"(", ")", "{", "}", "$"})
 _KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until"})
-_DOC_EXTS = frozenset({".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc"})
+_DOC_EXTS = frozenset(
+    {".md", ".mdx", ".markdown", ".rst", ".txt", ".adoc", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".drawio"}
+)
 _DOC_NAMES = frozenset({"README", "CHANGELOG", "LICENSE", "NOTICE", "CONTRIBUTING"})
 _PAGER_OFF = frozenset({"--no-pager", "-P"})
 _ALLOWED_GIT_ENV = frozenset({"GIT_PAGER=cat"})
+_FUSED_REDIRECT = re.compile(r">&|&>")
 _STDERR_REDIRECT = re.compile(r"(?<=\s)2>\s*(?:&1|/dev/null)(?=$|[\s;|&)])")
 
 ADD_FORM = "only `git add -- <doc paths>` naming doc files is allowed"
@@ -81,8 +84,9 @@ def _check_commit(args: list[str]) -> str | None:
 def _check_push(args: list[str]) -> str | None:
     if len(args) != 2 or args[0] != "origin" or not args[1].startswith("HEAD:"):
         return PUSH_FORM
-    branch = args[1].removeprefix("HEAD:").removeprefix("refs/heads/")
-    if not branch or ":" in branch or branch in _PROTECTED or branch.startswith("refs/"):
+    destination = args[1].removeprefix("HEAD:")
+    branch = push_branch(destination)
+    if not branch or ":" in destination or branch in _PROTECTED:
         return PUSH_FORM
     return None
 
@@ -202,6 +206,8 @@ def docs_vcs(
         if arguments.get("_unparseable"):
             return _deny("unparseable tool arguments")
         command = _STDERR_REDIRECT.sub("", shell_command(arguments))
+        if _FUSED_REDIRECT.search(command) and re.search(r"\b(git|gh)\b", command):
+            return _deny("redirecting git or gh output is not allowed; only `2>&1` or `2>/dev/null` alone")
         try:
             statements = walk(command)
         except ValueError:

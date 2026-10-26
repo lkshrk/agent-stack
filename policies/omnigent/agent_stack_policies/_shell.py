@@ -102,6 +102,21 @@ def walk(command: str) -> list[list[str]]:
     return result
 
 
+_REF_NAMESPACES = frozenset({"refs", "heads", "tags", "remotes", "notes"})
+
+
+def push_destination(refspec: str) -> str:
+    return refspec.lstrip("+").rsplit(":", 1)[-1]
+
+
+def push_branch(refspec: str) -> str | None:
+    """Branch a push refspec writes to, or None for `heads/x`, tags, notes and other refs git resolves outside a plain branch name."""
+    destination = push_destination(refspec).removeprefix("refs/heads/")
+    if destination.split("/", 1)[0] in _REF_NAMESPACES:
+        return None
+    return destination
+
+
 def shell_command(arguments: dict) -> str:
     command = arguments.get("command", arguments.get("cmd", ""))
     return command if isinstance(command, str) else ""
