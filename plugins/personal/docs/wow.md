@@ -16,29 +16,31 @@ Warcraft helper. Ask in plain language — no commands or coding needed.
 
 ## Install
 
-Download [wow-skills.zip](https://github.com/lkshrk/useful-skills/releases/latest/download/wow-skills.zip)
-and double-click it. You get a folder with one file per skill. Don't unzip those.
+For Claude Code and Codex, install the `personal` plugin from the agent-stack marketplace (below).
+For the ChatGPT and Claude apps, zip a skill folder from `plugins/personal/skills/` in
+[lkshrk/agent-stack](https://github.com/lkshrk/agent-stack), one zip per skill.
 
 ### ChatGPT
 
 1. Open **Plugins** in the sidebar, then the **Skills** tab.
-2. Click **Create** → **Upload from your computer** and pick a file from the folder.
+2. Click **Create** → **Upload from your computer** and pick a zip.
    Repeat for each skill you want.
 3. Start a new chat and ask away. ChatGPT picks the right skill by itself.
 
 Web and desktop app keep separate skill lists, so upload in each one you use.
-To update, download and upload again.
+To update, zip and upload again.
 
 ### Claude app
 
 1. Open **Customize → Skills**.
-2. Click **+** → **Create skill** → **Upload a skill** and pick a file from the folder.
+2. Click **+** → **Create skill** → **Upload a skill** and pick a zip.
    Repeat for each skill you want.
 
 ### Claude Code, Codex
 
 ```sh
-npx skills add lkshrk/useful-skills --skill wow-help wow-spec wow-account-setup wow-achievement-plan wow-achievement-dashboard wow-duo-world-tour
+claude plugin marketplace add lkshrk/agent-stack
+claude plugin install personal@agent-stack
 ```
 
 ## Getting started

@@ -3,17 +3,17 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 test("weekly WoW source check distinguishes changes, noise and unavailable sources", () => {
-  const script = fileURLToPath(new URL("../scripts/test_wow_season_updates.py", import.meta.url));
+  const script = fileURLToPath(new URL("../automation/test_wow_season_updates.py", import.meta.url));
   execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
 });
 
 test("AI refresh publishes validated data while rejecting unsafe or incomplete candidates", () => {
-  const script = fileURLToPath(new URL("../scripts/test_apply_wow_season_refresh.py", import.meta.url));
+  const script = fileURLToPath(new URL("../automation/test_apply_wow_season_refresh.py", import.meta.url));
   execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
 });
 
-test("custom refresh gateway configuration routes explicitly without exposing credentials", () => {
-  const script = fileURLToPath(new URL("../scripts/test_wow_refresh_provider.py", import.meta.url));
+test("refresh run configuration targets the gateway root without exposing credentials", () => {
+  const script = fileURLToPath(new URL("../automation/test_prepare_wow_refresh.py", import.meta.url));
   execFileSync("python3", [script], { timeout: 30_000, stdio: "pipe" });
 });
 
