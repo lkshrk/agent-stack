@@ -13,8 +13,8 @@ function summary(job: string, env: Record<string, string>, result?: object) {
   try {
     const file = path.join(dir, "summary.md");
     if (result) {
-      mkdirSync(path.join(dir, "wow-result"));
-      writeFileSync(path.join(dir, "wow-result/wow-refresh-result.json"), JSON.stringify(result));
+      mkdirSync(path.join(dir, "wow-refresh"));
+      writeFileSync(path.join(dir, "wow-refresh/wow-refresh-result.json"), JSON.stringify(result));
     }
     const run = spawnSync("bash", ["-e", "-o", "pipefail", "-c", summaryStep(job).run], {
       env: { ...process.env, ...env, GITHUB_STEP_SUMMARY: file, RUNNER_TEMP: dir }, encoding: "utf8",
@@ -42,12 +42,12 @@ test("pipeline outcome explains no-op, branch skip, failures and pull request ha
 
 test("refresh summary exposes only outcomes and distinguishes skipped AI from failed AI", () => {
   const stages = { inspect: { outcome: "success" }, provider: { outcome: "skipped", outputs: { secret: "NEVER-LOG-THIS" } }, refresh: { outcome: "skipped" } };
-  const skipped = summary("refresh", { JOB_STATUS: "success", NEEDED: "false", STAGES: JSON.stringify(stages) });
+  const skipped = summary("refresh", { EVENT: "schedule", FORCE_REFRESH: "false", PROVIDER_MODEL: "", JOB_STATUS: "success", NEEDED: "false", STAGES: JSON.stringify(stages) });
   expect(skipped).toContain("force_refresh enabled");
   expect(skipped).toContain("Claude Code refresh | skipped");
   expect(skipped).not.toContain("NEVER-LOG-THIS");
   stages.refresh.outcome = "failure";
-  const failed = summary("refresh", { JOB_STATUS: "failure", NEEDED: "true", STAGES: JSON.stringify(stages) });
+  const failed = summary("refresh", { EVENT: "schedule", FORCE_REFRESH: "false", PROVIDER_MODEL: "", JOB_STATUS: "failure", NEEDED: "true", STAGES: JSON.stringify(stages) });
   expect(failed).toContain("not evidence of unchanged sources");
   expect(failed).not.toContain("AI candidate generated");
 });
@@ -69,18 +69,18 @@ test("publication summaries distinguish no-op, pull request and partial failure"
   expect(summary("publish", { JOB_STATUS: "failure", STAGES: "{}" })).toContain("Publication incomplete");
 });
 
-test("summary environments allow only stage outcomes, and required successful refresh artifacts cannot be skipped", () => {
+test("summary environments allow only stage outcomes, and the output artifact is uploaded even after a failed refresh", () => {
   for (const job of ["refresh", "publish"]) {
     for (const match of summaryStep(job).env.STAGES.matchAll(/\$\{\{\s*(.*?)\s*\}\}/g)) {
       expect(match[1]).toMatch(/^steps\.\w+\.outcome$/);
     }
-    const text = summary(job, { JOB_STATUS: "failure", NEEDED: "", STAGES: JSON.stringify({ bun: { outcome: "failure" } }) });
-    expect(text).toContain("Bun setup | failure");
+    const text = summary(job, { JOB_STATUS: "failure", NEEDED: "", EVENT: "schedule", FORCE_REFRESH: "false", PROVIDER_MODEL: "", STAGES: JSON.stringify({ checkout: { outcome: "failure" } }) });
+    expect(text).toContain(job === "refresh" ? "Checkout | failure" : "Trusted checkout | failure");
   }
-  const condition = wow.jobs.refresh.steps.find((step: any) => step.id === "result").if;
-  for (const exists of [true, false]) {
-    const evaluated = condition.replaceAll("always()", "true").replaceAll("hashFiles('wow-refresh-result.json')", JSON.stringify(exists ? "hash" : ""));
-    expect(new Function(`return (${evaluated})`)()).toBe(exists);
+  const condition = wow.jobs.refresh.steps.find((step: any) => step.id === "collect").if;
+  for (const outcome of ["success", "failure", "skipped"]) {
+    const evaluated = condition.replaceAll("always()", "true").replaceAll("steps.inspect.outcome", JSON.stringify(outcome));
+    expect(new Function(`return (${evaluated})`)()).toBe(outcome === "success");
   }
 });
 
