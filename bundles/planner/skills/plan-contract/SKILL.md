@@ -1,6 +1,6 @@
 ---
 name: plan-contract
-description: Fourth planner step. Give every child the sprint contract Polly's cross-review grades the PR against — criteria IDs, the Independent Test command, the file set and the docs to update.
+description: Planner step after the critic passes. Give every child the sprint contract Polly's cross-review grades the PR against — criteria IDs, the Independent Test command, the file set and the docs to update.
 ---
 
 # plan-contract — what the reviewer grades

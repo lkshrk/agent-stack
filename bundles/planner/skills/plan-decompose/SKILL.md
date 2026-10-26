@@ -39,7 +39,7 @@ criteria into what this child alone delivers.
 - ID: `<child-key>-<n>`, numbered from 1 per child (`api-1`, `api-2`).
 - Text in EARS form: `WHEN <condition> THE SYSTEM SHALL <behaviour>`.
 - Every root criterion lands in at least one child criterion. Keep the
-  mapping; `plan-critic` checks it.
+  mapping; the critic checks it.
 - No placeholders: no `TBD`, no `[NEEDS CLARIFICATION`, no "handle edge
   cases".
 

@@ -3,12 +3,13 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.spawn.max_dispatches_per_session",
         "kind": "factory",
         "name": "max_dispatches_per_session",
-        "description": "Deny session dispatches beyond a per-session cap.",
+        "description": "Deny session dispatches beyond a per-session cap and count result collections.",
         "params_schema": {
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "minimum": 1},
                 "dispatch_tools": {"type": "array", "items": {"type": "string"}},
+                "collect_tools": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["limit"],
             "additionalProperties": False,
@@ -119,13 +120,33 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.readonly.read_only_shell",
+        "kind": "factory",
+        "name": "read_only_shell",
+        "description": (
+            "Allow only listed read commands in the shell (rg, cat, git read verbs and similar), "
+            "with no output redirection to files."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"extra_commands": {"type": "array", "items": {"type": "string"}}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.result.result_contract",
         "kind": "factory",
         "name": "result_contract",
-        "description": "Require the final response to carry a valid bundle result block.",
+        "description": (
+            "Require the final response to carry a valid bundle result block; with await_dispatches, "
+            "a turn that ends while a dispatched sub-agent's result is uncollected may end without one."
+        ),
         "params_schema": {
             "type": "object",
-            "properties": {"kind": {"type": "string", "enum": ["planner", "security", "documenter"]}},
+            "properties": {
+                "kind": {"type": "string", "enum": ["planner", "security", "documenter"]},
+                "await_dispatches": {"type": "boolean"},
+            },
             "required": ["kind"],
             "additionalProperties": False,
         },

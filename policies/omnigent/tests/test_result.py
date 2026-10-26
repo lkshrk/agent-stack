@@ -277,6 +277,17 @@ class ContractTest(unittest.TestCase):
         }
         self.assertEqual(self.policy(event)["result"], "ALLOW")
 
+    def test_contract_waits_while_a_dispatch_is_uncollected(self):
+        policy = result.result_contract(kind="planner", await_dispatches=True)
+        waiting = {**response("Sent the draft to the critic.", True), "session_state": {"agent_stack_dispatches": 1}}
+        self.assertIsNone(policy(waiting))
+        self.assertEqual(self.policy(waiting)["result"], "DENY")
+        collected = {**waiting, "session_state": {"agent_stack_dispatches": 1, "agent_stack_collections": 1}}
+        self.assertEqual(policy(collected)["result"], "DENY")
+        self.assertEqual(policy(response("all done", True))["result"], "DENY")
+        invalid = {**response(fenced({"status": "DONE"}), True), "session_state": {"agent_stack_dispatches": 1}}
+        self.assertEqual(policy(invalid)["result"], "DENY")
+
     def test_contract_rejects_unknown_kind(self):
         with self.assertRaises(ValueError):
             result.result_contract(kind="coder")

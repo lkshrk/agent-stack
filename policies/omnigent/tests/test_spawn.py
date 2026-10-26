@@ -1,7 +1,7 @@
 import unittest
 
 from agent_stack_policies import spawn
-from agent_stack_policies.spawn import DISPATCH_STATE_KEY, max_dispatches_per_session
+from agent_stack_policies.spawn import COLLECT_STATE_KEY, DISPATCH_STATE_KEY, awaiting, max_dispatches_per_session
 
 from . import assert_not_ask, tool_call_event
 
@@ -10,6 +10,7 @@ EVENTS = [
     tool_call_event("sys_session_send", {}, {DISPATCH_STATE_KEY: 9}),
     tool_call_event("sys_session_send"),
     tool_call_event("bash", {"command": "ls"}, {}),
+    tool_call_event("sys_read_inbox", {}, {DISPATCH_STATE_KEY: 1}),
     {"type": "other"},
 ]
 
@@ -57,3 +58,20 @@ class SpawnTest(unittest.TestCase):
     def test_abstains_on_agent_start_probe(self):
         probe = {**tool_call_event("sys_agent_start"), "session_state": {DISPATCH_STATE_KEY: 99}}
         self.assertIsNone(max_dispatches_per_session(limit=1, dispatch_tools=["sys_agent_start"])(probe))
+
+    def test_collect_tools_count_collections(self):
+        policy = max_dispatches_per_session(limit=3, collect_tools=["sys_read_inbox"])
+        decision = policy(tool_call_event("sys_read_inbox", {}, {DISPATCH_STATE_KEY: 1}))
+        self.assertEqual(decision["result"], "ALLOW")
+        self.assertEqual(
+            decision["state_updates"],
+            [{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}],
+        )
+        self.assertIsNone(max_dispatches_per_session(limit=3)(tool_call_event("sys_read_inbox")))
+
+    def test_awaiting(self):
+        self.assertFalse(awaiting({}))
+        self.assertTrue(awaiting({DISPATCH_STATE_KEY: 1}))
+        self.assertFalse(awaiting({DISPATCH_STATE_KEY: 1, COLLECT_STATE_KEY: 1}))
+        self.assertTrue(awaiting({DISPATCH_STATE_KEY: 2, COLLECT_STATE_KEY: 1}))
+        self.assertFalse(awaiting({DISPATCH_STATE_KEY: "x"}))

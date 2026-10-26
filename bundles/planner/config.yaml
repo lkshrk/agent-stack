@@ -3,8 +3,8 @@ name: planner
 description: >-
   Read-only planner. Turns one root issue into a design and at most eight
   child issues, each with its own EARS criteria, file set and Independent
-  Test, checked by a critic and ending in a validated JSON result. Writes
-  nothing and pushes nothing.
+  Test, graded by a separate read-only critic agent and ending in a
+  validated JSON result. Writes nothing and pushes nothing.
 
 spawn: false
 
@@ -15,8 +15,9 @@ executor:
     harness: claude-sdk
 
 prompt: |
-  You are the planner: architect, tech lead and critic for one root issue.
-  You read; you never change anything. You write no files, edit nothing,
+  You are the planner: architect and tech lead for one root issue. You
+  never grade your own plan; the `critic` sub-agent does. You read; you
+  never change anything. You write no files, edit nothing,
   commit nothing, push nothing, open no pull request, and change nothing in
   Linear or GitHub. Policies enforce this; do not try to work around a denial.
 
@@ -42,19 +43,30 @@ prompt: |
   pipes, `python3 -c` and separate calls instead, and rephrase a denied read
   rather than retrying it.
 
-  You never ask questions inline and never wait for an answer. Every open
-  question becomes a `BLOCKED` result with `blocked.class: decision` and one
+  You never ask questions inline and never wait for a human answer. Every
+  open question becomes a `BLOCKED` result with `blocked.class: decision` and one
   `blocked.question` that batches all of them, each with the options you see.
 
   Work in this order, loading each skill when you reach it:
   1. `plan-architect` — files, interfaces, design excerpt, unchanged
      behaviour; every decision resolved or emitted as BLOCKED.
   2. `plan-decompose` — children under the split rules.
-  3. `plan-critic` — hard thresholds. On failure go back to step 2, at most
-     3 critic rounds in total. Still failing after round 3: return `BLOCKED`
-     with `blocked.class: decision` naming every failed threshold.
-  4. `plan-contract` — a sprint contract per child.
-  5. The final result block.
+  3. Critic round. Build the draft final response (`critic.rounds` set to
+     this round, your `critic.coverage` map) and send it with
+     `sys_session_send(agent="critic", title="plan-critic",
+     args={input: "Round <n>. Root criteria: <IDs and text>. Draft:
+     <the exact draft response>"})`. Then end your turn with one status
+     line and no result block; the runtime wakes you when the critic
+     finishes. Collect its findings with one `sys_read_inbox` call.
+  4. Findings with `pass: false`: revise the draft yourself (back to step 2,
+     or step 1 for a design gap) and send the next round to the same title.
+     At most 3 rounds; a 4th send is denied. Still failing after round 3:
+     return `BLOCKED` with `blocked.class: decision` naming every failed
+     threshold from the last findings. Never drop a root criterion or merge
+     children just to pass without saying so in the design.
+  5. `plan-contract` — a sprint contract per child, after the critic passes.
+  6. The final result block, with `critic.rounds` the rounds used and
+     `critic.coverage` the map the critic confirmed.
 
   Set `risk.force_gate_plan: true` when the plan includes any of: a schema
   migration, auth or security, infra or deploy changes, a public API change,
@@ -69,7 +81,7 @@ prompt: |
   by a denial and is not retried, so check the exact final text with
   `result_check`'s `validate_result` before you send it.
 
-async: false
+async: true
 timers: false
 
 os_env:
@@ -86,6 +98,8 @@ tools:
     type: mcp
     command: /opt/venv/bin/python3
     args: ["-I", "-m", "agent_stack_policies.mcp"]
+  agents:
+    - critic
 
 guardrails:
   ask_timeout: 300
@@ -125,6 +139,7 @@ guardrails:
             - "*delete_*"
             - "*manage_adr"
             - "*ingest_traces"
+            - sys_call_async
     no_policy_tools:
       type: function
       function:
@@ -132,6 +147,20 @@ guardrails:
         path: agent_stack_policies.tools.deny_tools
         arguments:
           patterns: [sys_add_policy, sys_policy_registry]
+    spawn_bounds:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.spawn_bounds
+        arguments:
+          max_dispatches_per_turn: 1
+          dispatch_tools: [sys_session_send]
+    max_dispatches_per_session:
+      type: function
+      function:
+        path: agent_stack_policies.spawn.max_dispatches_per_session
+        arguments:
+          limit: 3
+          collect_tools: [sys_read_inbox]
     max_tool_calls_per_session:
       type: function
       function:
@@ -149,3 +178,4 @@ guardrails:
         path: agent_stack_policies.result.result_contract
         arguments:
           kind: planner
+          await_dispatches: true

@@ -102,7 +102,7 @@ class InImageTest(unittest.TestCase):
         from omnigent.spec import load
 
         dirs = bundle_dirs()
-        self.assertTrue(dirs)
+        self.assertIn(BUNDLES / "planner" / "agents" / "critic", dirs)
         for agent_dir in dirs:
             with self.subTest(agent=str(agent_dir.relative_to(BUNDLES))):
                 load(agent_dir, expand_env=False)

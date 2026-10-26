@@ -85,13 +85,20 @@ def verdict(agent_dir: Path, case: Case) -> str:
     return decide(agent_dir, case)[0]
 
 
-def run_sequence(agent: str, calls: list[tuple[str, dict]]) -> list[str]:
+PHASES = ("request", "response")
+
+
+def run_sequence(agent: str, calls: list[tuple[str, object]]) -> list[str]:
+    """Tool calls in order; a ("request", text) or ("response", text) entry is that phase, a response turn-final."""
     from omnigent.runtime.policies.engine import _apply_one
 
     state: dict = {}
     actions = []
     for tool, data in calls:
-        case = Case(agent, "tool_call", tool, data, "", dict(state))
+        if tool in PHASES:
+            case = Case(agent, tool, None, data, "", dict(state), turn_final=True if tool == "response" else None)
+        else:
+            case = Case(agent, "tool_call", tool, data, "", dict(state))
         out = results(BUNDLES / agent, case)
         action = max((r.action.name for r in out.values()), key=RANK.__getitem__, default="ALLOW")
         actions.append(action)
@@ -148,6 +155,9 @@ def infra_plan() -> dict:
 
 
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
+CRITIC = "planner/agents/critic"
+CRITIC_SEND = {"agent": "critic", "title": "plan-critic", "args": {"input": "Round 1. Root criteria ROU-12-1. Draft: ..."}}
+WAKE = "[System: sub-agent critic finished; call sys_read_inbox]"
 
 CASES: list[Case] = [
     Case("polly", "tool_call", "Write", {"file_path": ".github/workflows/ci.yml", "content": "x"}, "DENY"),
@@ -313,6 +323,29 @@ CASES: list[Case] = [
     Case("security-review", "tool_call", "Bash", {"command": "cat deploy/.env.sops.yaml AGENTS.md"}, "ALLOW"),
     Case("planner", "tool_call", "sys_os_shell", {"command": "sed -n 1,40p CLAUDE.md"}, "ALLOW"),
     Case("security-review", "tool_call", "Bash", {"command": "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'"}, "DENY"),
+    Case(CRITIC, "tool_call", "Write", {"file_path": "plan.md", "content": "x"}, "DENY"),
+    Case(CRITIC, "tool_call", "Edit", {"file_path": "plan.md", "old_string": "a", "new_string": "b"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_write", {"path": "plan.md", "content": "x"}, "DENY"),
+    Case(CRITIC, "tool_call", "Bash", {"command": "echo x > plan.md"}, "DENY"),
+    Case(CRITIC, "tool_call", "Bash", {"command": "sed -i s/a/b/ plan.md"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "rm plan.md"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "git commit -am x"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "git push origin feat/x"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "gh pr create --title x --body y"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "claude -p x"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "rg -n createOrder backend/src"}, "ALLOW"),
+    Case(CRITIC, "tool_call", "Bash", {"command": "git log --oneline -5 -- backend/src/orders"}, "ALLOW"),
+    Case(CRITIC, "tool_call", "sys_os_read", {"path": "backend/src/orders/service.ts"}, "ALLOW"),
+    Case(CRITIC, "tool_call", "result_check__validate_result", {"kind": "planner", "text": "x"}, "ALLOW"),
+    Case(CRITIC, "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
+    Case(CRITIC, "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 150}),
+    Case(CRITIC, "response", None, "Round 1: threshold 2 fails for api-1.", "ALLOW", turn_final=True),
+    Case("planner", "tool_call", "sys_session_send", CRITIC_SEND, "ALLOW", {"agent_stack_dispatches": 2}),
+    Case("planner", "tool_call", "sys_session_send", CRITIC_SEND, "DENY", {"agent_stack_dispatches": 3}),
+    Case("planner", "tool_call", "sys_call_async", {"tool": "sys_os_write", "arguments": {}}, "DENY"),
+    Case("planner", "response", None, "Draft sent to the critic.", "ALLOW", {"agent_stack_dispatches": 1}, turn_final=True),
+    Case("planner", "response", None, "Plan done.", "DENY", {"agent_stack_dispatches": 1, "agent_stack_collections": 1}, turn_final=True),
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]
 
@@ -424,14 +457,85 @@ class BundleVerdictTest(unittest.TestCase):
 
         spec = load(BUNDLES / "planner", expand_env=False)
         self.assertIs(spec.spawn, False)
-        self.assertIs(spec.async_enabled, False)
+        self.assertIs(spec.async_enabled, True)
         self.assertIs(spec.timers, False)
         self.assertEqual(spec.guardrails.ask_timeout, 300)
         servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
         python = ("/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])
         self.assertEqual(servers, [("code_graph", "codebase-memory-mcp", []), ("result_check", *python)])
         skills = sorted(s.name for s in spec.skills)
-        self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-critic", "plan-decompose"])
+        self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-decompose"])
+        self.assertEqual(spec.tools.agents, ["critic"])
+
+    def test_planner_critic_flags(self):
+        import yaml
+        from omnigent.spec import load
+
+        planner = load(BUNDLES / "planner", expand_env=False)
+        (critic,) = planner.sub_agents
+        self.assertEqual(critic.name, "critic")
+        self.assertEqual(critic.executor.model, "claude-sonnet")
+        self.assertEqual(critic.executor.config["harness"], "claude-sdk")
+        self.assertIs(critic.spawn, False)
+        self.assertIs(critic.async_enabled, False)
+        self.assertIs(critic.timers, False)
+        self.assertFalse(critic.tools.agents)
+        self.assertEqual(critic.guardrails.ask_timeout, 300)
+        servers = [(m.name, m.command, m.args) for m in critic.mcp_servers]
+        self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
+        self.assertEqual([s.name for s in critic.skills], ["plan-critic"])
+        paths = {p.function.path for p in agent_policies(critic)}
+        self.assertIn("omnigent.policies.builtins.orchestration.read_only_os", paths)
+        self.assertIn("agent_stack_policies.readonly.read_only_shell", paths)
+        self.assertNotIn("agent_stack_policies.result.result_contract", paths)
+        planner_only = {
+            "agent_stack_policies.result.result_contract",
+            "agent_stack_policies.spawn.max_dispatches_per_session",
+            "omnigent.policies.builtins.orchestration.spawn_bounds",
+        }
+        self.assertLessEqual({p.function.path for p in agent_policies(planner)} - planner_only, paths)
+        handlers = {p.function.arguments.get("handler") for p in agent_policies(critic)}
+        self.assertLessEqual(
+            {"omnigent.policies.builtins.orchestration.blast_radius", "omnigent.policies.builtins.github.github_policy"},
+            handlers,
+        )
+        harnesses = yaml.safe_load(SERVER_CONFIG.read_text())["sandbox"]["host_config"]["inference"]["harnesses"]
+        self.assertIn(critic.executor.model, harnesses["claude-sdk"]["model_allowlist"])
+
+    def test_planner_critic_rounds(self):
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(infra_plan(), indent=2) + "\n```"
+
+        def send(n):
+            return ("sys_session_send", {**CRITIC_SEND, "args": {"input": f"Round {n}. Draft: ..."}})
+
+        collect = [("request", WAKE), ("sys_read_inbox", {})]
+        run = [
+            ("sys_os_shell", {"command": "rg -n createOrder backend/src"}),
+            ("result_check__validate_result", {"kind": "planner", "text": response}),
+            send(1),
+            ("response", "Draft sent to the critic for round 1."),
+            *collect,
+            send(2),
+            ("response", "Revised draft sent for round 2."),
+            *collect,
+            send(3),
+            ("response", "Revised draft sent for round 3."),
+            *collect,
+            send(4),
+            ("result_check__validate_result", {"kind": "planner", "text": response}),
+            ("response", response),
+        ]
+        expected = ["ALLOW"] * len(run)
+        expected[-3] = "DENY"
+        self.assertEqual(run_sequence("planner", run), expected)
+
+    def test_planner_one_critic_per_turn(self):
+        send = ("sys_session_send", CRITIC_SEND)
+        self.assertEqual(run_sequence("planner", [send, send]), ["ALLOW", "DENY"])
+
+    def test_planner_final_without_result_denied_after_collection(self):
+        run = [("sys_session_send", CRITIC_SEND), ("request", WAKE), ("sys_read_inbox", {}), ("response", "Done.")]
+        self.assertEqual(run_sequence("planner", run), ["ALLOW", "ALLOW", "ALLOW", "DENY"])
 
     def test_security_review_normal_run_allowed(self):
         response = "Security review of #3.\n```json\n" + (FIXTURES / "security-valid.json").read_text() + "\n```"

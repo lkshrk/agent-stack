@@ -4,7 +4,8 @@ import re
 import sys
 from collections.abc import Callable
 
-from ._event import Decision, Event, allow, deny, is_response, response_text, turn_final
+from ._event import Decision, Event, allow, deny, is_response, response_text, session_state, turn_final
+from .spawn import awaiting
 
 KINDS = ("planner", "security", "documenter")
 STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED")
@@ -284,7 +285,7 @@ def validate_result(kind: str, result: dict) -> list[str]:
     return errors
 
 
-def result_contract(*, kind: str) -> Callable[[Event], Decision | None]:
+def result_contract(*, kind: str, await_dispatches: bool = False) -> Callable[[Event], Decision | None]:
     if kind not in KINDS:
         raise ValueError(f"unknown kind {kind!r}")
 
@@ -296,7 +297,7 @@ def result_contract(*, kind: str) -> Callable[[Event], Decision | None]:
             return None
         result = extract_result(response_text(event))
         if result is None:
-            if final is True:
+            if final is True and not (await_dispatches and awaiting(session_state(event))):
                 return deny(f"final {kind} response has no ```json result block")
             return None
         errors = validate_result(kind, result)
