@@ -111,8 +111,13 @@ guardrails:
             - "*delete_*"
             - "*manage_adr"
             - "*ingest_traces"
-            - sys_add_policy
-            - sys_policy_registry
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
     max_tool_calls_per_session:
       type: function
       function:

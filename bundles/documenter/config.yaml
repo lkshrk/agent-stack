@@ -44,7 +44,8 @@ prompt: |
     (listing), `remote -v`, `fetch`, `merge-base`, optionally with
     `--no-pager` or `GIT_PAGER=cat`;
   - `git add -- <doc file> …`, naming each doc file (Markdown, reST, text,
-    AsciiDoc, or README, CHANGELOG, LICENSE, NOTICE, CONTRIBUTING);
+    AsciiDoc, README, CHANGELOG, LICENSE, NOTICE, CONTRIBUTING, or an image
+    or diagram: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.drawio`);
   - `git commit -m "docs: <summary>"`, without `-a`, `--amend` or
     `--no-verify`;
   - `git push origin HEAD:<head branch>`;
@@ -108,8 +109,6 @@ guardrails:
             - "**/.codex/**"
             - ".github/copilot-instructions.md"
             - "**/GEMINI.md"
-            - "**/AGENTS.md"
-            - "**/CLAUDE.md"
             - "**/skills/**/SKILL.md"
             - "bundles/**"
             - "**/.git/**"
@@ -136,22 +135,21 @@ guardrails:
           handler: omnigent.policies.builtins.orchestration.blast_radius
           arguments:
             gate_pushes: false
-    docs_no_merge:
-      type: function
-      function:
-        path: agent_stack_policies.merge.no_merge
-        arguments: {}
     blocked_tools:
       type: function
       function:
-        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
         path: agent_stack_policies.tools.deny_tools
         arguments:
           patterns:
             - "*linear_app*"
             - "*__linear-*"
-            - sys_add_policy
-            - sys_policy_registry
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
     max_tool_calls_per_session:
       type: function
       function:

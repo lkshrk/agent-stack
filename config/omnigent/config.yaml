@@ -48,21 +48,8 @@ policies:
     function:
       path: agent_stack_policies.merge.no_merge
       arguments: {}
-  path_guard:
+  no_nested_agents:
     type: function
     function:
-      path: agent_stack_policies.paths.path_guard
-      arguments:
-        deny:
-          - ".github/workflows/**"
-          - "**/*.sops.yaml"
-          - "**/.env"
-          - "**/.env.*"
-          - "**/*.pem"
-          - "**/*.key"
-          - ".pilot/**"
-          - AGENTS.md
-          - CLAUDE.md
-          - "lefthook.y*ml"
-          - CODEOWNERS
-        exempt: ["**/.env.example"]
+      path: agent_stack_policies.agents.no_nested_agents
+      arguments: {}

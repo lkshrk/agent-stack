@@ -60,6 +60,25 @@ os_env:
 guardrails:
   ask_timeout: 300
   policies:
+    path_guard:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.paths.path_guard
+        arguments:
+          deny:
+            - ".github/workflows/**"
+            - "**/*.sops.yaml"
+            - "**/.env"
+            - "**/.env.*"
+            - "**/*.pem"
+            - "**/*.key"
+            - ".pilot/**"
+            - AGENTS.md
+            - CLAUDE.md
+            - "lefthook.y*ml"
+            - CODEOWNERS
+          exempt: ["**/.env.example"]
     blast_radius:
       type: function
       on: [tool_call]
@@ -69,3 +88,10 @@ guardrails:
           handler: omnigent.policies.builtins.orchestration.blast_radius
           arguments:
             gate_pushes: false
+    no_policy_tools:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
