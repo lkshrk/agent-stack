@@ -4,14 +4,14 @@
   "spec": "Destruction Warlock",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal simulation.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/destruction-warlock/stats-races-and-consumables",
-      "updated": "2026-08-15"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/warlock/destruction/m+",
@@ -62,5 +62,9 @@
   "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
   "derivation_notes": [
     "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
-  ]
+  ],
+  "acknowledged_differences": {
+    "differences": "e777b3ae4d7f8b9573c06d0894b3021ae9e9dd28b5212657189d6bea23c5f7a1",
+    "sections": "bba092ff6ec7c47568d943947bad84f022c990b224d506a9fdac0db360cb7c66"
+  }
 }

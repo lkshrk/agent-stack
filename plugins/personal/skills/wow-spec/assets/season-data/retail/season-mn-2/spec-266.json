@@ -4,14 +4,14 @@
   "spec": "Demonology Warlock",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal simulation.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/demonology-warlock/stats-races-and-consumables",
-      "updated": "2026-09-27"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/warlock/demonology/m+",
@@ -62,5 +62,9 @@
   "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
   "derivation_notes": [
     "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
-  ]
+  ],
+  "acknowledged_differences": {
+    "differences": "e650f9801b1adc052c48e96136e3f94f99a1a308f25de2435af98033c31084f5",
+    "sections": "9074239f29b47cbe6f44cc2d77f6e10275ecd3ae75a35b79a1064f03b1c5f331"
+  }
 }

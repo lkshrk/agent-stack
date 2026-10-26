@@ -59,5 +59,9 @@
     "Poison selection and interaction with oil not verified.",
     "Exact item quality ranks and full use/cooldown restrictions not independently verified."
   ],
-  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation.",
+  "acknowledged_differences": {
+    "differences": "e23b6c9cccc48d0628973b289b3529383133bb3b5b58eb4304e93a989f44c9b4",
+    "sections": "a0477f1a3aee8a9cf2bbca4e30277a24018f17db907a8d3ba1b8393ab6ce82b5"
+  }
 }

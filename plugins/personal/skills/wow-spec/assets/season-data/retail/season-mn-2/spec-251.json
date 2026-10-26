@@ -88,5 +88,9 @@
   "unresolved": [
     "Exact item qualities, tooltip restrictions and consumable timings not independently checked."
   ],
-  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown."
+  "validation_scope": "Current guide recommendations and linked identities checked; unknown item mechanics remain unknown.",
+  "acknowledged_differences": {
+    "differences": "a8cefd6803e12f0c89b1dcc2cb0ae5f5e1911ee05e86388a29a71c92d0bab540",
+    "sections": "576b04834b142ddee25951cad692a197c1f97a55e2cff8e1aae5acac1b1b100e"
+  }
 }

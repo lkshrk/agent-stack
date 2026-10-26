@@ -4,14 +4,14 @@
   "spec": "Windwalker Monk",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/windwalker-monk/stats-races-and-consumables",
-      "updated": "2026-08-18"
+      "updated": "2026-10-14"
     },
     {
       "url": "https://murlok.io/monk/windwalker/m+",
@@ -30,7 +30,7 @@
       "legs": "item:244641",
       "feet": "item:243953",
       "rings": "item:243957",
-      "weapon": "item:244031"
+      "weapon": "item:273071"
     },
     "gems": {
       "unique": "item:240983",

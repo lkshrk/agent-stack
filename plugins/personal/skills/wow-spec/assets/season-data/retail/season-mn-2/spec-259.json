@@ -63,5 +63,9 @@
   "validation_scope": "Guide-backed baseline and tooltip-verified linked identities; conditional examples and remaining limitations are explicit.",
   "derivation_notes": [
     "Named examples were resolved from sourced stat-family requirements plus live item tooltips; no character simulation was performed."
-  ]
+  ],
+  "acknowledged_differences": {
+    "differences": "af2983a91bd6e76d79fd1974416c35699ae360e6e9680016647da41e8795a60d",
+    "sections": "d2f7d42972fcf01085e99a7648932a3b88f487742c2a2904a7bd8cea1386c891"
+  }
 }
