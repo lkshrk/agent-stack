@@ -83,6 +83,23 @@ def verdict(agent_dir: Path, case: Case) -> str:
     return decide(agent_dir, case)[0]
 
 
+def run_sequence(agent: str, calls: list[tuple[str, dict]]) -> list[str]:
+    from omnigent.runtime.policies.engine import _apply_one
+
+    state: dict = {}
+    actions = []
+    for tool, data in calls:
+        case = Case(agent, "tool_call", tool, data, "", dict(state))
+        out = results(BUNDLES / agent, case)
+        action = max((r.action.name for r in out.values()), key=RANK.__getitem__, default="ALLOW")
+        actions.append(action)
+        if action == "ALLOW":
+            for r in out.values():
+                for op in r.state_updates or []:
+                    _apply_one(state, op)
+    return actions
+
+
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
 
 CASES: list[Case] = [
@@ -128,6 +145,24 @@ class BundleVerdictTest(unittest.TestCase):
         action, reason = decide(BUNDLES / case.agent, case)
         self.assertEqual(action, "DENY")
         self.assertIn("agent-stack: loop:", reason)
+
+    def test_polly_fanout_inbox_reads_allowed(self):
+        registry = ".polly/registry.json"
+        completion = [
+            ("sys_read_inbox", {}),
+            ("Read", {"file_path": registry}),
+            ("Write", {"file_path": registry, "content": "{}"}),
+        ]
+        self.assertEqual(run_sequence("polly", completion * 3), ["ALLOW"] * 9)
+
+    def test_polly_back_to_back_repeat_denied(self):
+        make = ("Bash", {"command": "make test"})
+        self.assertEqual(run_sequence("polly", [make] * 3), ["ALLOW", "ALLOW", "DENY"])
+
+    def test_polly_interrupted_repeat_allowed(self):
+        make = ("Bash", {"command": "make test"})
+        other = ("Bash", {"command": "git status"})
+        self.assertEqual(run_sequence("polly", [make, make, other, make]), ["ALLOW"] * 4)
 
     def test_polly_state_updates_accepted_by_engine(self):
         case = Case("polly", "tool_call", "sys_session_send", DISPATCH, "ALLOW", {"agent_stack_dispatches": 3})

@@ -56,12 +56,16 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.loop.detect_loop",
         "kind": "factory",
         "name": "detect_loop",
-        "description": "Deny a tool call repeated with identical arguments within a window.",
+        "description": (
+            "Deny a tool call repeated with identical arguments a threshold number of times "
+            "back to back (consecutive repeats only); window bounds the stored history."
+        ),
         "params_schema": {
             "type": "object",
             "properties": {
                 "window": {"type": "integer", "minimum": 2},
                 "threshold": {"type": "integer", "minimum": 2},
+                "exempt_tools": {"type": "array", "items": {"type": "string"}},
             },
             "additionalProperties": False,
         },
