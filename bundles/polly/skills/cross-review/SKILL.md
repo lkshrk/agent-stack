@@ -10,10 +10,12 @@ review is a sub-agent that returns a structured report, not a transcript
 anyone needs to read through.
 
 ## Procedure
-0. Bring the task branch up to date with `origin/main`: rebase if the branch was
-   never pushed, otherwise `git merge origin/main`. On a conflict, send it back
-   to the implementer through `sys_session_send` instead of resolving it
-   yourself. Push without force, and only then snapshot the diff.
+0. Have the implementer bring its branch up to date; never rebase, merge or
+   push it yourself. Send to the SAME implementer conversation (its original
+   `agent` + `title`, `purpose: "implement"`): rebase onto `origin/main` if the
+   branch was never pushed, otherwise `git merge origin/main`; resolve any
+   conflict, rerun the gates, push without force and report the new head SHA.
+   End your turn, and snapshot the diff only after that report arrives.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
    redirect (`gh pr diff <pr> > <absolute shared diff path>` or
    `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > <absolute shared diff path>`).
