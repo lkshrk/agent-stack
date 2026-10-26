@@ -4,14 +4,14 @@
   "spec": "Devourer Demon Hunter",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/devourer-demon-hunter/stats-races-and-consumables",
-      "updated": "2026-09-18"
+      "updated": "2026-10-18"
     },
     {
       "url": "https://murlok.io/demon-hunter/devourer/m+",
@@ -44,7 +44,7 @@
     "consumables": {
       "flask": "item:241322",
       "combat_potion": "item:241288",
-      "combat_potion_alternative": "item:241308",
+      "combat_potion_alternative": "item:271887",
       "healing_potion": "item:271884",
       "food": "item:255846",
       "food_alternative": "item:242275",
@@ -57,7 +57,7 @@
   "conditions": [
     "Intellect spec: use spellthread, not Agility armor kit.",
     "Powerful setup uses three colours: Amethyst, Garnet, Peridot; fill remaining with Quick Amethyst.",
-    "If Recklessness does not grant Mastery or Crit, compare Light’s Potential."
+    "Liquid Luster is the guide's alternative combat potion to Potion of Recklessness."
   ],
   "unresolved": [
     "Exact item quality ranks and full use/cooldown restrictions not independently verified."

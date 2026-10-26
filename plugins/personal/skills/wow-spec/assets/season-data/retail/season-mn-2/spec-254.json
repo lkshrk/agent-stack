@@ -4,14 +4,14 @@
   "spec": "Marksmanship Hunter",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; not personalized optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/marksmanship-hunter/stats-races-and-consumables",
-      "updated": "2026-09-05"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/hunter/marksmanship/m+",
@@ -37,7 +37,7 @@
       "remaining": "item:240908"
     },
     "consumables": {
-      "food": "item:242747",
+      "food": "item:255846",
       "flask": "item:241326",
       "combat_potion": "item:241288",
       "healing_potion": "item:271884",
@@ -48,13 +48,12 @@
   "content_overrides": [],
   "conditions": [
     "Potion of Recklessness assumes Crit is highest; guide suggests Light's Potential for a later potion near fight end, subject to cooldown availability.",
-    "Magisters is another listed flask option."
+    "Magisters is another listed flask option.",
+    "Guide lists feasts first (Harandar Celebration, Silvermoon Parade); Hearty Royal Roast is the listed personal food when no feast is available."
   ],
   "unresolved": [
-    "Recommendations may rely on the Survival Hunter guide and must be rechecked against the Marksmanship Hunter guide.",
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
     "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
-  "recheck": "Survival Hunter guide removed from sources; recommendations unverified against the Marksmanship Hunter guide alone."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
 }

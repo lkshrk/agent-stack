@@ -55,7 +55,8 @@
   "unresolved": [
     "Stat guidance and every recommendation were drawn partly from the Elemental Shaman and Survival Hunter guides and must be rechecked against the Beast Mastery Hunter guide.",
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
-    "No personal simulation."
+    "No personal simulation.",
+    "Automated refresh rejected: ValueError: Cannot accept an unrelated source"
   ],
   "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
   "recheck": "Sources corrected to the Beast Mastery Hunter guide and murlok page; stat guidance cleared and recommendations unverified against that guide."
