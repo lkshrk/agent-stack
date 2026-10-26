@@ -4,14 +4,14 @@
   "spec": "Enhancement Shaman",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; not personalized optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/enhancement-shaman/stats-races-and-consumables",
-      "updated": "2026-08-24"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/shaman/enhancement/m+",

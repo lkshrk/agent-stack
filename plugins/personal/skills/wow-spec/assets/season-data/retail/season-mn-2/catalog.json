@@ -3,7 +3,7 @@
   "game": "retail",
   "expansion": "Midnight",
   "season": "season-mn-2",
-  "verified_at": "2026-10-04",
+  "verified_at": "2026-10-26",
   "records": {
     "item:244007": {
       "item_id": 244007,
@@ -541,7 +541,7 @@
       "quality_rank": null,
       "quality_note": "Exact quality rank not independently verified; linked ID is a named item variant, not a claim that it is maximum quality.",
       "consumed_on_use": "yes",
-      "cooldown_seconds": null,
+      "cooldown_seconds": 3,
       "shared_use_restrictions": null,
       "unknown_fields": [
         "unlisted restrictions",
@@ -590,7 +590,8 @@
       "persists_through_death": true,
       "verification_basis": "current guide recommendation and linked identity only",
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241308": {
       "item_id": 241308,
@@ -1008,7 +1009,7 @@
       "name": "Enchant Shoulders - Silvermoon's Mending",
       "category": "enchant",
       "slot": "Shoulders",
-      "effect": null,
+      "effect": "Permanently enchants shoulder armor with Silvermoon's Mending, increasing Leech by 166. Cannot be applied to items lower than level 120. Thalassian Talents - Eversong Empowerments",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1018,7 +1019,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1068,14 +1068,15 @@
         "https://nether.wowhead.com/tooltip/item/244021"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244003": {
       "item_id": 244003,
       "name": "Enchant Chest - Mark Of The Magister",
       "category": "enchant",
       "slot": "Chest",
-      "effect": null,
+      "effect": "Permanently enchants chest armor with Mark of the Magister, increasing Intellect by 40 and total Mana by 5%. Cannot be applied to items lower than level 120. Thalassian Talents - Silvermoon's Spellpower",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1085,7 +1086,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1114,14 +1114,15 @@
         "https://nether.wowhead.com/tooltip/item/244003"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240155": {
       "item_id": 240155,
       "name": "Arcanoweave Spellthread",
       "category": "enchant",
       "slot": "Legs",
-      "effect": null,
+      "effect": "Apply Arcanoweave Spellthread to your leggings, permanently increasing its Intellect by 41 and increasing the wearer's maximum mana by 4%.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1131,7 +1132,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1166,14 +1166,15 @@
         "https://nether.wowhead.com/tooltip/item/240155"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243983": {
       "item_id": 243983,
       "name": "Enchant Boots - Shaladrassil's Roots",
       "category": "enchant",
       "slot": "Feet",
-      "effect": null,
+      "effect": "Permanently enchants boots with Shaladrassil's Roots, increasing Leech by 28 and Stamina by 232. Cannot be applied to items lower than level 120. Haranir Heightening - Worldsoul Wards",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1183,7 +1184,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1229,14 +1229,15 @@
         "https://nether.wowhead.com/tooltip/item/243983"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243959": {
       "item_id": 243959,
       "name": "Enchant Ring - Zul'jin's Mastery",
       "category": "enchant",
       "slot": "Rings",
-      "effect": null,
+      "effect": "Permanently enchants a ring with Zul'jin's Mastery, increasing Mastery by 29. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1246,7 +1247,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1281,7 +1281,8 @@
         "https://nether.wowhead.com/tooltip/item/243959"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240969": {
       "item_id": 240969,
@@ -1391,8 +1392,8 @@
       "name": "Hearty Silvermoon Parade",
       "category": "consumable",
       "slot": "food_alternative",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Place a Hearty Silvermoon Parade for all players to enjoy! Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Hearty Well Fed If you spend at least 10 seconds eating, you will become Hearty Well Fed gaining 98 Stamina and 50 primary stat for 1 hour. This effect persists through death.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -1401,8 +1402,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank",
@@ -1433,14 +1432,15 @@
         "https://nether.wowhead.com/tooltip/item/266985"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241300": {
       "item_id": 241300,
       "name": "Lightfused Mana Potion",
       "category": "consumable",
       "slot": "mana_potion",
-      "effect": null,
+      "effect": "Restores 26200 mana.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1450,7 +1450,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1479,7 +1478,8 @@
         "https://nether.wowhead.com/tooltip/item/241300"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240900": {
       "item_id": 240900,
@@ -1610,7 +1610,7 @@
       "name": "Forest Hunter's Armor Kit",
       "category": "enchant",
       "slot": "Legs",
-      "effect": null,
+      "effect": "Apply a Forest Hunter's Armor Kit to your leg armor, permanently increasing its Agility or Strength by 41. Additionally, the item also gains 115 Stamina.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1620,7 +1620,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1665,14 +1664,15 @@
         "https://nether.wowhead.com/tooltip/item/244641"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244015": {
       "item_id": 244015,
       "name": "Enchant Ring - Silvermoon's Alacrity",
       "category": "enchant",
       "slot": "Rings",
-      "effect": null,
+      "effect": "Permanently enchants a ring with Silvermoon's Alacrity, increasing Haste by 29. Cannot be applied to items lower than level 120. Thalassian Talents - Silvermoon's Spellpower",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -1682,7 +1682,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -1714,7 +1713,8 @@
         "https://nether.wowhead.com/tooltip/item/244015"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240890": {
       "item_id": 240890,
@@ -1841,8 +1841,8 @@
       "name": "Potion Of Recklessness",
       "category": "consumable",
       "slot": "combat_potion",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Gain 1725 of your highest secondary stat while losing 232 of your lowest secondary stat for 30 sec.",
+      "duration_seconds": 30,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -1851,8 +1851,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank",
@@ -1903,7 +1901,8 @@
         "https://nether.wowhead.com/tooltip/item/241288"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "spell:433568": {
       "spell_id": 433568,
@@ -2004,7 +2003,7 @@
       "name": "Enchant Helm - Rune of Avoidance",
       "category": "enchant",
       "slot": "Head",
-      "effect": null,
+      "effect": "Permanently enchants helm armor with Rune of Avoidance, increasing Avoidance by 22. Cannot be applied to items lower than level 120. Thalassian Talents - Eversong Empowerments",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2014,7 +2013,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2048,7 +2046,8 @@
         "https://nether.wowhead.com/tooltip/item/244005"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243991": {
       "item_id": 243991,
@@ -2119,7 +2118,7 @@
       "name": "Enchant Weapon - Rite Of The Hash'ey",
       "category": "enchant",
       "slot": "Weapon",
-      "effect": null,
+      "effect": "Permanently enchants a weapon with Rite of the Hash'ey, causing your spells and abilities to grant you Hash'ey's Might, granting you 139 of a random secondary stat for 15 sec and favors your highest secondary stat when you're above 80% health. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2129,7 +2128,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2167,7 +2165,8 @@
         "https://nether.wowhead.com/tooltip/item/273072"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241304": {
       "item_id": 241304,
@@ -2222,15 +2221,18 @@
         "https://nether.wowhead.com/tooltip/item/241304"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "unresolved": [
+        "Tooltip effect amount equals the item id 241304; real amount not derivable"
+      ]
     },
     "item:244031": {
       "item_id": 244031,
       "name": "Enchant Weapon - Arcane Mastery",
       "category": "consumable",
       "slot": "Weapon",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Permanently enchants a weapon with Arcane Mastery, causing your spells and abilities to grant you Genius Insight, increasing your Mastery by 124 for 15 sec. Cannot be applied to items lower than level 120. Thalassian Talents - Silvermoon's Spellpower",
+      "duration_seconds": 15,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -2239,8 +2241,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank",
@@ -2271,14 +2271,15 @@
         "https://nether.wowhead.com/tooltip/item/244031"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241294": {
       "item_id": 241294,
       "name": "Potion Of Devoured Dreams",
       "category": "consumable",
       "slot": null,
-      "effect": null,
+      "effect": "Elevate your focus to restore 39300 mana over 10 sec, but you are defenseless until your focus is broken.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2288,7 +2289,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2305,7 +2305,8 @@
         "https://nether.wowhead.com/tooltip/item/241294"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240906": {
       "item_id": 240906,
@@ -2359,7 +2360,7 @@
       "name": "Enchant Ring - Nature's Fury",
       "category": "enchant",
       "slot": "Rings",
-      "effect": null,
+      "effect": "Permanently enchants a ring with Nature's Fury, increasing Critical Strike by 29. Cannot be applied to items lower than level 120. Haranir Heightening - Azerothian Arms",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2369,7 +2370,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2396,7 +2396,8 @@
         "https://nether.wowhead.com/tooltip/item/243987"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240908": {
       "item_id": 240908,
@@ -2455,23 +2456,20 @@
       "name": "Flask Of The Shattered Sun",
       "category": "consumable",
       "slot": "flask",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Increases your Critical Strike by 165 for 1 hour. Lasts 1 hour and through death. Consuming an identical flask will add another 1 hour. (3 Sec Cooldown)",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
       "quality_note": "Exact linked variant; quality rank not independently verified.",
       "consumed_on_use": true,
-      "cooldown_seconds": null,
+      "cooldown_seconds": 3,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank",
         "application eligibility",
-        "cooldown and sharing",
         "consumed-on-use behavior",
         "effect and amount",
         "duration and cooldown",
@@ -2512,7 +2510,8 @@
         "https://nether.wowhead.com/tooltip/item/241326"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240894": {
       "item_id": 240894,
@@ -2608,7 +2607,7 @@
       "name": "Enchant Helm - Empowered Blessing of Speed",
       "category": "enchant",
       "slot": "Head",
-      "effect": null,
+      "effect": "Permanently enchants helm armor with Empowered Blessing of Speed, increasing Speed by 22. Also grants you 1 charge of skyriding abilities whenever you defeat a foe while outdoors in Midnight zones once per 30 sec. Cannot be applied to items lower than level 120. Haranir Heightening - Worldsoul Wards",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2618,7 +2617,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2640,14 +2638,15 @@
         "https://nether.wowhead.com/tooltip/item/243981"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243962": {
       "item_id": 243962,
       "name": "Enchant Shoulders - Akil'zon's Swiftness",
       "category": "enchant",
       "slot": "Shoulders",
-      "effect": null,
+      "effect": "Permanently enchants shoulder armor with Akil'zon's Swiftness, increasing Speed by 52. Cannot be applied to items lower than level 120. Amani Augments - Berserker Brawn",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2657,7 +2656,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2673,14 +2671,15 @@
         "https://nether.wowhead.com/tooltip/item/243962"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244008": {
       "item_id": 244008,
       "name": "Enchant Boots - Farstrider's Hunt",
       "category": "enchant",
       "slot": "Feet",
-      "effect": null,
+      "effect": "Permanently enchants boots with Farstrider's Hunt, increasing Speed by 9 and Stamina by 186. Cannot be applied to items lower than level 120. Thalassian Talents - Eversong Empowerments",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2690,7 +2689,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2706,14 +2704,15 @@
         "https://nether.wowhead.com/tooltip/item/244008"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243956": {
       "item_id": 243956,
       "name": "Enchant Ring - Eyes of the Eagle",
       "category": "enchant",
       "slot": "Rings",
-      "effect": null,
+      "effect": "Permanently enchants a ring with Eyes of the Eagle, increasing critical strike effectiveness by 1%. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2723,7 +2722,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2744,14 +2742,15 @@
         "https://nether.wowhead.com/tooltip/item/243956"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243973": {
       "item_id": 243973,
       "name": "Enchant Weapon - Berserker's Rage",
       "category": "enchant",
       "slot": "Weapon",
-      "effect": null,
+      "effect": "Permanently enchants a weapon with Berserker's Rage, causing your spells and abilities to grant you Frenzied Focus, increasing your Haste by 124 for 15 sec. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2761,7 +2760,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "cooldown and sharing rules",
         "eligibility",
@@ -2789,15 +2787,16 @@
         "https://nether.wowhead.com/tooltip/item/243973"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:242285": {
       "item_id": 242285,
       "name": "Warped Wise Wings",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed and gain 58 Mastery for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -2806,8 +2805,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank"
@@ -2822,25 +2819,24 @@
         "https://nether.wowhead.com/tooltip/item/242285"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241325": {
       "item_id": 241325,
       "name": "Flask of the Blood Knights",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Increases your Haste by 152 for 1 hour. Lasts 1 hour and through death. Consuming an identical flask will add another 1 hour. (3 Sec Cooldown)",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
       "quality_note": "Exact linked variant; quality rank not independently verified.",
       "consumed_on_use": true,
-      "cooldown_seconds": null,
+      "cooldown_seconds": 3,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank"
@@ -2855,15 +2851,16 @@
         "https://nether.wowhead.com/tooltip/item/241325"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:242286": {
       "item_id": 242286,
       "name": "Fel-Kissed Filet",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed and gain 58 Haste for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -2872,8 +2869,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "cooldown and sharing rules",
         "eligibility",
         "quality rank"
@@ -2888,14 +2883,15 @@
         "https://nether.wowhead.com/tooltip/item/242286"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244640": {
       "item_id": 244640,
       "name": "Forest Hunter's Armor Kit",
       "category": "enchant",
       "slot": "legs",
-      "effect": null,
+      "effect": "Apply a Forest Hunter's Armor Kit to your leg armor, permanently increasing its Agility or Strength by 32. Additionally, the item also gains 70 Stamina.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2905,7 +2901,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -2925,14 +2920,15 @@
         "https://nether.wowhead.com/tooltip/item/244640"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243952": {
       "item_id": 243952,
       "name": "Enchant Boots - Lynx's Dexterity",
       "category": "enchant",
       "slot": "feet",
-      "effect": null,
+      "effect": "Permanently enchants boots with Lynx's Dexterity, increasing Avoidance by 15 and Stamina by 186. Cannot be applied to items lower than level 120. Amani Augments - Berserker Brawn",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -2942,7 +2938,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -2960,15 +2955,16 @@
         "https://nether.wowhead.com/tooltip/item/243952"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:242747": {
       "item_id": 242747,
       "name": "Hearty Royal Roast",
       "category": "consumable",
       "slot": "food",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Hearty Well Fed If you spend at least 10 seconds eating, you will become Hearty Well Fed and gain 50 primary stat for 1 hour. This food persists through death.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -2977,8 +2973,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "quality rank",
         "application eligibility",
         "cooldown and sharing",
@@ -3001,15 +2995,16 @@
         "https://nether.wowhead.com/tooltip/item/242747"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:271887": {
       "item_id": 271887,
       "name": "Liquid Luster",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Drink to apply Lustrous Gleam every 6 seconds for 30 sec, increasing your Versatility by 420 while this potion is active. Applications of Lustrous Gleam stack up to 5 times.",
+      "duration_seconds": 30,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3018,8 +3013,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "quality rank",
         "application eligibility",
         "cooldown and sharing",
@@ -3035,15 +3028,16 @@
         "https://nether.wowhead.com/tooltip/item/271887"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243733": {
       "item_id": 243733,
       "name": "Thalassian Phoenix Oil",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Coat your weapon with Thalassian Phoenix Oil, increasing your Critical Strike and Haste by 13 for 120 min. Cannot be applied to items lower than level 120.",
+      "duration_seconds": 7200,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3052,8 +3046,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "quality rank",
         "application eligibility",
         "cooldown and sharing",
@@ -3076,14 +3068,15 @@
         "https://nether.wowhead.com/tooltip/item/243733"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243951": {
       "item_id": 243951,
       "name": "Enchant Helm - Empowered Hex Of Leeching",
       "category": "enchant",
       "slot": "head",
-      "effect": null,
+      "effect": "Permanently enchants helm armor with Empowered Hex of Leeching, increasing Leech by 55. Also heals you for 3% Health whenever you defeat a foe outdoors in a Midnight zone once per 5 sec. Cannot be applied to items lower than level 120. Amani Augments - Berserker Brawn",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3093,7 +3086,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -3131,14 +3123,15 @@
         "https://nether.wowhead.com/tooltip/item/243951"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243975": {
       "item_id": 243975,
       "name": "Enchant Chest - Mark Of The Rootwarden",
       "category": "enchant",
       "slot": "chest",
-      "effect": null,
+      "effect": "Permanently enchants chest armor with Mark of the Rootwarden, increasing Agility by 40 and Speed by 15. Cannot be applied to items lower than level 120. Haranir Heightening - Azerothian Arms",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3148,7 +3141,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -3165,7 +3157,8 @@
         "https://nether.wowhead.com/tooltip/item/243975"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240967": {
       "item_id": 240967,
@@ -3227,8 +3220,8 @@
       "name": "Draught Of Rampant Abandon",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Increases Primary Stat by 774 for 30 sec. While under the effects of this potion the Void may extract its toll, opening a void zone at your feet.",
+      "duration_seconds": 30,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3237,8 +3230,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
-        "duration",
         "quality rank",
         "application eligibility",
         "cooldown and sharing",
@@ -3260,7 +3251,8 @@
         "https://nether.wowhead.com/tooltip/item/241292"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240918": {
       "item_id": 240918,
@@ -3309,7 +3301,7 @@
       "name": "Enchant Helm - Empowered Hex of Leeching",
       "category": "enchant",
       "slot": "head",
-      "effect": null,
+      "effect": "Permanently enchants helm armor with Empowered Hex of Leeching, increasing Leech by 44. Also heals you for 2% Health whenever you defeat a foe outdoors in a Midnight zone once per 5 sec. Cannot be applied to items lower than level 120. Amani Augments - Berserker Brawn",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3319,7 +3311,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -3336,14 +3327,15 @@
         "https://nether.wowhead.com/tooltip/item/243950"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243976": {
       "item_id": 243976,
       "name": "Enchant Chest - Mark of the Worldsoul",
       "category": "enchant",
       "slot": "chest",
-      "effect": null,
+      "effect": "Permanently enchants chest armor with Mark of the Worldsoul, increasing your Primary stat by 36. Cannot be applied to items lower than level 120. Haranir Heightening - Azerothian Arms",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3353,7 +3345,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -3370,14 +3361,15 @@
         "https://nether.wowhead.com/tooltip/item/243976"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243971": {
       "item_id": 243971,
       "name": "Enchant Weapon - Jan'alai's Precision",
       "category": "enchant",
       "slot": "weapon",
-      "effect": null,
+      "effect": "Permanently enchants a weapon with Jan'alai's Precision, causing your spells and abilities to sometimes grant you Precision of the Dragonhawk, increasing your Critical Strike by 124 for 15 sec. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3387,7 +3379,6 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "duration",
         "quality rank",
         "application eligibility",
@@ -3408,7 +3399,8 @@
         "https://nether.wowhead.com/tooltip/item/243971"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240910": {
       "item_id": 240910,
@@ -3499,8 +3491,8 @@
       "name": "Impossibly Royal Roast",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed gaining 50 primary stat for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3525,21 +3517,22 @@
         "https://nether.wowhead.com/tooltip/item/255847"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:241320": {
       "item_id": 241320,
       "name": "Flask of Thalassian Resistance",
       "category": "consumable",
       "slot": "flask",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Increases your Versatility by 165 for 1 hour. Lasts 1 hour and through death. Consuming an identical flask will add another 1 hour. (3 Sec Cooldown)",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
       "quality_note": "Linked guide variant; crafting quality not independently checked.",
       "consumed_on_use": null,
-      "cooldown_seconds": null,
+      "cooldown_seconds": 3,
       "shared_use_restrictions": null,
       "unknown_fields": [
         "effect and amount",
@@ -3562,14 +3555,15 @@
         "https://nether.wowhead.com/tooltip/item/241320"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240094": {
       "item_id": 240094,
       "name": "Sunfire Silk Spellthread",
       "category": "enchant",
       "slot": "Legs",
-      "effect": null,
+      "effect": "Apply Sunfire Silk Spellthread to your leggings, permanently increasing its Intellect by 32 and Stamina by 70.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3595,7 +3589,8 @@
         "https://nether.wowhead.com/tooltip/item/240094"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240982": {
       "item_id": 240982,
@@ -3637,8 +3632,8 @@
       "name": "Blooming Feast",
       "category": "consumable",
       "slot": "food",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Place a Blooming Feast for all players to enjoy! Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed gaining 98 Stamina and 64 of your highest secondary stat for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3653,7 +3648,6 @@
         "level and equipment restrictions",
         "shared-use restrictions",
         "effect values",
-        "duration",
         "cooldown and shared-use restrictions",
         "level restrictions"
       ],
@@ -3669,15 +3663,16 @@
         "https://nether.wowhead.com/tooltip/item/242273"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:266996": {
       "item_id": 266996,
       "name": "Hearty Harandar Celebration",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Place a Hearty Harandar Celebration for all players to enjoy! Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Hearty Well Fed If you spend at least 10 seconds eating, you will become Hearty Well Fed gaining 98 Stamina and 50 primary stat for 1 hour. This effect persists through death.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -3702,7 +3697,8 @@
         "https://nether.wowhead.com/tooltip/item/266996"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "spell:326801": {
       "spell_id": 326801,
@@ -3775,7 +3771,7 @@
       "name": "Enchant Shoulders - Flight of the Eagle",
       "category": "enchant",
       "slot": "shoulders",
-      "effect": null,
+      "effect": "Permanently enchants shoulder armor with Flight of the Eagle, increasing Speed by 39. Cannot be applied to items lower than level 120. Amani Augments - Berserker Brawn",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3802,14 +3798,15 @@
         "https://nether.wowhead.com/tooltip/item/243961"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244009": {
       "item_id": 244009,
       "name": "Enchant Boots - Farstrider's Hunt",
       "category": "enchant",
       "slot": "feet",
-      "effect": null,
+      "effect": "Permanently enchants boots with Farstrider's Hunt, increasing Speed by 11 and Stamina by 232. Cannot be applied to items lower than level 120. Thalassian Talents - Eversong Empowerments",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -3837,7 +3834,8 @@
         "https://nether.wowhead.com/tooltip/item/244009"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240966": {
       "item_id": 240966,
@@ -3975,7 +3973,7 @@
       "name": "Enchant Shoulders - Nature's Grace",
       "category": "enchant",
       "slot": "shoulders",
-      "effect": null,
+      "effect": "Permanently enchants shoulder armor with Nature's Grace, increasing Avoidance by 67. Cannot be applied to items lower than level 120. Haranir Heightening - Worldsoul Wards",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -4002,14 +4000,15 @@
         "https://nether.wowhead.com/tooltip/item/243989"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:244643": {
       "item_id": 244643,
       "name": "Blood Knight's Armor Kit",
       "category": "enchant",
       "slot": "legs",
-      "effect": null,
+      "effect": "Apply a Blood Knight's Armor Kit to your leg armor, permanently increasing its Agility or Strength by 41. Additionally, the item also gains 27 armor.",
       "duration_seconds": null,
       "minimum_level": null,
       "minimum_item_level": null,
@@ -4036,15 +4035,16 @@
         "https://nether.wowhead.com/tooltip/item/244643"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:242272": {
       "item_id": 242272,
       "name": "Quel'dorei Medley",
       "category": "consumable",
       "slot": "food",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Place a Quel'dorei Medley for all players to enjoy! Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed gaining 98 Stamina and 64 of your highest secondary stat for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -4070,7 +4070,8 @@
         "https://nether.wowhead.com/tooltip/item/242272"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:240916": {
       "item_id": 240916,
@@ -4109,8 +4110,8 @@
       "name": "Spellfire Filet",
       "category": "consumable",
       "slot": null,
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health and mana every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed and gain 35 primary stat for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -4118,10 +4119,8 @@
       "cooldown_seconds": null,
       "shared_use_restrictions": null,
       "unknown_fields": [
-        "effect",
         "eligible slots and level restrictions",
         "quality rank",
-        "duration",
         "cooldown and shared-use restrictions",
         "consumed-on-use behavior"
       ],
@@ -4135,7 +4134,8 @@
         "https://nether.wowhead.com/tooltip/item/242289"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     },
     "item:243963": {
       "item_id": 243963,
@@ -4175,8 +4175,8 @@
       "name": "Crimson Calamari",
       "category": "consumable",
       "slot": "food_alternative",
-      "effect": null,
-      "duration_seconds": null,
+      "effect": "Restores 7% of your maximum health every second over 20 sec. Must remain seated while eating. Well Fed If you spend at least 10 seconds eating, you will become Well Fed and gain 58 Haste for 1 hour.",
+      "duration_seconds": 3600,
       "minimum_level": null,
       "minimum_item_level": null,
       "quality_rank": null,
@@ -4186,7 +4186,6 @@
       "shared_use_restrictions": null,
       "unknown_fields": [
         "effect values",
-        "duration",
         "cooldown and shared-use restrictions",
         "quality rank",
         "level restrictions"
@@ -4202,7 +4201,72 @@
         "https://nether.wowhead.com/tooltip/item/242277"
       ],
       "identity_verified_at": "2026-10-04",
-      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction."
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
+    },
+    "item:244006": {
+      "item_id": 244006,
+      "name": "Enchant Helm - Empowered Rune of Avoidance",
+      "category": "enchant",
+      "slot": "Head",
+      "effect": "Permanently enchants helm armor with Empowered Rune of Avoidance, increasing Avoidance by 30. Also grants you a burst of Movement Speed whenever you defeat a foe outdoors in a Midnight zone once per 60 sec. Cannot be applied to items lower than level 120. Thalassian Talents - Eversong Empowerments",
+      "duration_seconds": null,
+      "minimum_level": 70,
+      "minimum_item_level": 120,
+      "quality_rank": null,
+      "quality_note": "Exact linked variant; quality rank not independently verified.",
+      "consumed_on_use": "applied/socketed",
+      "cooldown_seconds": null,
+      "shared_use_restrictions": null,
+      "unknown_fields": [
+        "duration",
+        "cooldown and sharing rules",
+        "quality rank"
+      ],
+      "status": "verified",
+      "verified_at": "2026-10-26",
+      "verified_patch": "12.1",
+      "verification_basis": "current guide recommendation and linked identity only",
+      "sources": [
+        "https://www.method.gg/guides/retribution-paladin/stats-races-and-consumables",
+        "https://nether.wowhead.com/tooltip/item/244006"
+      ],
+      "identity_verified_at": "2026-10-26",
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
+    },
+    "item:273071": {
+      "item_id": 273071,
+      "name": "Enchant Weapon - Rite of the Hash'ey",
+      "category": "enchant",
+      "slot": "Weapon",
+      "effect": "Permanently enchants a weapon with Rite of the Hash'ey, causing your spells and abilities to grant you Hash'ey's Might, granting you 120 of a random secondary stat for 15 sec and favors your highest secondary stat when you're above 80% health. Cannot be applied to items lower than level 120. Amani Augments - Zul'Aman Zeal",
+      "duration_seconds": null,
+      "minimum_level": 70,
+      "minimum_item_level": 120,
+      "quality_rank": null,
+      "quality_note": "Exact linked variant; quality rank not independently verified.",
+      "consumed_on_use": "applied/socketed",
+      "cooldown_seconds": null,
+      "shared_use_restrictions": null,
+      "unknown_fields": [
+        "duration",
+        "cooldown and sharing rules",
+        "quality rank",
+        "effect values",
+        "shared-use restrictions"
+      ],
+      "status": "verified",
+      "verified_at": "2026-10-04",
+      "verified_patch": "12.1",
+      "verification_basis": "current guide recommendation and linked identity only",
+      "sources": [
+        "https://www.method.gg/guides/protection-warrior/stats-races-and-consumables",
+        "https://nether.wowhead.com/tooltip/item/273071"
+      ],
+      "identity_verified_at": "2026-10-04",
+      "identity_verification": "Live Wowhead tooltip name matched the linked item/spell ID; this does not verify every usage restriction.",
+      "tooltip_enriched_at": "2026-10-26"
     }
   }
 }
