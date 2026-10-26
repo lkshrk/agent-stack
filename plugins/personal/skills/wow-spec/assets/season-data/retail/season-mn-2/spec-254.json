@@ -55,5 +55,9 @@
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
     "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
+  "acknowledged_differences": {
+    "differences": "bc85c11034c10a0a9e26a574493038a41cc20df3b549e8809a7c9279dd96e06d",
+    "sections": "4a837d50233ee1d89888378cbdcc47c77174bb4dd160a072390d588116d6bebf"
+  }
 }

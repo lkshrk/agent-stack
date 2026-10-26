@@ -4,14 +4,14 @@
   "spec": "Havoc Demon Hunter",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; no personal optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/havoc-demon-hunter/stats-races-and-consumables",
-      "updated": "2026-09-17"
+      "updated": "2026-10-16"
     },
     {
       "url": "https://murlok.io/demon-hunter/havoc/m+",
@@ -62,5 +62,9 @@
   "unresolved": [
     "Exact item quality ranks and full use/cooldown restrictions not independently verified."
   ],
-  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation.",
+  "acknowledged_differences": {
+    "differences": "fcbbb50e98036e215c613c42e5f6e05ccb7f558268f09acde533e286774e8271",
+    "sections": "bb247be8c75a95bcfb78f265ab234a981f79031f1276af3369d3828d6b3f90f3"
+  }
 }

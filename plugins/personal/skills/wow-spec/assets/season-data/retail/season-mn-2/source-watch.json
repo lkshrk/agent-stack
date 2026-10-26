@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-10-26T13:07:47.064742+00:00",
+  "captured_at": "2026-10-26T14:03:50.213421+00:00",
   "season": "season-mn-2",
   "sources": {
     "https://nether.wowhead.com/tooltip/item/240094": {
@@ -1323,7 +1323,11 @@
       "spec_ids": [
         253
       ],
-      "sha256": "f882b5a7baf602168be6b818f5f4ef6f5c071ac3c2290cad108d4537780bd42d"
+      "sha256": "91afe517a72c685fcdc978d7fac1915d20b1c6c33d0aeef3d5f0c83ae3d5516b",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-13"
+      }
     },
     "https://www.method.gg/guides/blood-death-knight/stats-races-and-consumables": {
       "kind": "guide",
@@ -1502,7 +1506,11 @@
       "spec_ids": [
         577
       ],
-      "sha256": "fa1d254a779eff46c4e80de73eb493a98b286a7729e4c17d30582f4e6c0bf2f2"
+      "sha256": "52b581671bbd94d204673bf9b6545245bc0ecfbc32198c9b942f0310551c2514",
+      "meta": {
+        "patch": "12.1.5",
+        "updated": "2026-10-16"
+      }
     },
     "https://www.method.gg/guides/holy-paladin/stats-races-and-consumables": {
       "kind": "guide",

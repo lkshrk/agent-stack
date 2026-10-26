@@ -62,5 +62,9 @@
   "unresolved": [
     "Exact item quality ranks and full use/cooldown restrictions not independently verified."
   ],
-  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation."
+  "validation_scope": "Current guide recommendations and linked item identities; not a personal simulation.",
+  "acknowledged_differences": {
+    "differences": "fcbbb50e98036e215c613c42e5f6e05ccb7f558268f09acde533e286774e8271",
+    "sections": "d5be4b0c2d303524b2a0b8799aee21ee8c1dcdcbf5857a816221e9dbc18afa49"
+  }
 }

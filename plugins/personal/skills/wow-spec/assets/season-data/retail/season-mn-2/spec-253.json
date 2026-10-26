@@ -4,14 +4,14 @@
   "spec": "Beast Mastery Hunter",
   "game": "retail",
   "season": "season-mn-2",
-  "verified_patch": "12.1",
-  "verified_at": "2026-10-04",
+  "verified_patch": "12.1.5",
+  "verified_at": "2026-10-26",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; not personalized optimization.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/beast-mastery-hunter/stats-races-and-consumables",
-      "updated": "2026-09-05"
+      "updated": "2026-10-13"
     },
     {
       "url": "https://murlok.io/hunter/beast-mastery/m+",
@@ -19,8 +19,8 @@
     }
   ],
   "stat_guidance": {
-    "single_target": null,
-    "aoe": null,
+    "single_target": "Weapon Damage > Agility > Mastery > Haste >= Crit > Versatility.",
+    "aoe": "Weapon Damage > Agility > Mastery > Crit > Versatility = Haste.",
     "personal_sim_performed": false
   },
   "recommendations": {
@@ -38,8 +38,8 @@
       "remaining": "item:240898"
     },
     "consumables": {
-      "food": "item:242747",
-      "flask": "item:241322",
+      "food": "item:255846",
+      "flask": "item:241326",
       "combat_potion": "item:271887",
       "healing_potion": "item:271884",
       "weapon_oil": "item:243733",
@@ -49,15 +49,14 @@
   "content_overrides": [],
   "conditions": [
     "Liquid Luster: use six seconds before the pull. Potion of Recklessness is an alternative when Mastery is highest.",
-    "Shattered Sun is another listed flask option.",
-    "Guide stat overview contradicts its ranking on Agility; simulate gear rather than assuming fixed weights."
+    "Flask of the Magisters (Mastery) is the other listed flask option.",
+    "Food: the guide lists Harandar Celebration and Silvermoon Parade as feasts, with Hearty Royal Roast as the personal food.",
+    "The guide writes the single-target Haste/Crit order as \"Haste => Crit\"; treated as Haste at least equal to Crit.",
+    "Guide stat overview says three secondary stats are currently better than Agility, which contradicts its ranking; simulate gear rather than assuming fixed weights."
   ],
   "unresolved": [
-    "Stat guidance and every recommendation were drawn partly from the Elemental Shaman and Survival Hunter guides and must be rechecked against the Beast Mastery Hunter guide.",
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
-    "No personal simulation.",
-    "Automated refresh rejected: ValueError: Cannot accept an unrelated source"
+    "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
-  "recheck": "Sources corrected to the Beast Mastery Hunter guide and murlok page; stat guidance cleared and recommendations unverified against that guide."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
 }
