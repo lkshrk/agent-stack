@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from apply_wow_season_refresh import drop_negligible, load_bundle, main as apply_main, validate
+from apply_wow_season_refresh import drop_negligible, load_bundle, main as apply_main, merge_parts, validate
 from check_wow_season_updates import analyze
 
 
@@ -280,8 +280,8 @@ class PipelineRuns(unittest.TestCase):
             base.mkdir(); parts_dir.mkdir()
             for name, doc in old.items():
                 (base / name).write_text(json.dumps(doc))
-            for result, edits in parts:
-                folder = parts_dir / ('wow-spec-' + str(result['spec_id']))
+            for number, (result, edits) in enumerate(parts):
+                folder = parts_dir / f'wow-spec-{result["spec_id"]}-{number}'
                 (folder / 'candidate').mkdir(parents=True)
                 for name, doc in old.items():
                     doc = edits.get(name, doc)
@@ -440,6 +440,91 @@ class PipelineRuns(unittest.TestCase):
                     self.assertEqual('265' in output['rejected'], not accepted)
                     if not accepted:
                         self.assertIn('enrichment fields', output['rejected']['265'])
+
+    def run_raw_parts(self, old, observation, raw):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'base').mkdir()
+            for name, doc in old.items():
+                (root / 'base' / name).write_text(json.dumps(doc))
+            for folder, (result_text, edits) in raw.items():
+                (root / 'parts' / folder / 'candidate').mkdir(parents=True)
+                for name, doc in old.items():
+                    (root / 'parts' / folder / 'candidate' / name).write_text(json.dumps(edits.get(name, doc)))
+                (root / 'parts' / folder / 'result.json').write_text(result_text)
+            (root / 'observation.json').write_text(json.dumps(observation))
+            with patch('apply_wow_season_refresh.fetch_guides', return_value=observation['current']['sources']), \
+                    patch('sys.stdout', new_callable=io.StringIO), patch('sys.stderr', new_callable=io.StringIO):
+                return apply_main(['--bundle', str(root / 'base'), '--parts', str(root / 'parts'),
+                                   '--observation', str(root / 'observation.json'), '--no-enrich'])
+
+    def test_any_kind_of_malformed_part_is_rejected_without_aborting(self):
+        old, observation = self.two_specs()
+        broken = {'spec-266.json': ['not', 'a', 'dict']}
+        output = self.run_raw_parts(old, observation, {
+            'wow-spec-1': ('[]', {}),
+            'wow-spec-2': ('not json', {}),
+            'wow-spec-3': (json.dumps(self.part('updated', spec_id=266)), broken),
+            'wow-spec-4': (json.dumps({'spec_id': 265, 'outcome': 'updated', 'summary': 5}), {}),
+        })
+        self.assertEqual(len(output['rejected']), 4)
+        self.assertEqual(output['ai_updated'], [])
+
+    def test_missing_curl_rejects_only_the_part(self):
+        old, observation = spec_fixture(flask='item:241324')
+        edited = copy.deepcopy(old)
+        edited['catalog.json']['records']['item:999'] = {**old['catalog.json']['records']['item:1'], 'item_id': 999, 'name': 'New'}
+        edited['index.json']['catalogue_record_count'] = 6
+        with patch('apply_wow_season_refresh.subprocess.run', side_effect=FileNotFoundError('curl')):
+            output, _ = self.run_pipeline(old, observation, [(self.part('updated'), edited)])
+        self.assertIn('Tooltip lookup unavailable', output['rejected']['265'])
+
+    def shared_record_parts(self, second_name):
+        old, observation = self.two_specs()
+        parts = []
+        for sid, name in [(265, 'Shared Flask'), (266, second_name)]:
+            edited = copy.deepcopy(old)
+            edited['catalog.json']['records']['item:999'] = {**old['catalog.json']['records']['item:1'], 'item_id': 999, 'name': name}
+            edited['index.json']['catalogue_record_count'] = 6
+            edited[f'spec-{sid}.json']['recommendations']['consumables']['flask'] = 'item:999'
+            parts.append((self.part('updated', spec_id=sid), edited))
+
+        def proofs(old_docs, candidate):
+            return {k: {'name': r['name'], 'url': 'https://nether.wowhead.com/tooltip/' + k.replace(':', '/'), 'sha256': 'f' * 64}
+                    for k, r in candidate['catalog.json']['records'].items() if r != old_docs['catalog.json']['records'].get(k)}
+        return old, observation, parts, proofs
+
+    def test_conflicting_new_catalogue_records_reject_only_the_later_part(self):
+        old, observation, parts, proofs = self.shared_record_parts('Other Flask')
+        with patch('apply_wow_season_refresh.identity_checks', side_effect=proofs):
+            output, saved = self.run_pipeline(old, observation, parts)
+        self.assertEqual(output['ai_updated'], [265])
+        self.assertIn('Conflicting catalogue edits', output['rejected']['266'])
+        self.assertEqual(saved['catalog.json']['records']['item:999']['name'], 'Shared Flask')
+
+    def test_identical_new_catalogue_records_from_two_parts_are_fine(self):
+        old, observation, parts, proofs = self.shared_record_parts('Shared Flask')
+        with patch('apply_wow_season_refresh.identity_checks', side_effect=proofs):
+            output, saved = self.run_pipeline(old, observation, parts)
+        self.assertEqual((output['ai_updated'], output['rejected']), ([265, 266], {}))
+        self.assertEqual(saved['index.json']['catalogue_record_count'], 6)
+
+    def test_a_second_result_for_the_same_spec_is_ignored(self):
+        old, observation = spec_fixture(flask='item:241324')
+        first = copy.deepcopy(old['spec-265.json'])
+        first['recommendations']['consumables']['flask'] = 'item:241326'
+        second = copy.deepcopy(first)
+        second['recommendations']['consumables']['flask'] = 'item:240967'
+        output, saved = self.run_pipeline(old, observation, [(self.part('updated'), {'spec-265.json': first}),
+                                                             (self.part('updated'), {'spec-265.json': second})])
+        self.assertEqual(saved['spec-265.json']['recommendations']['consumables']['flask'], 'item:241326')
+        self.assertTrue(any('Duplicate result for spec 265' in note for note in output['notes']))
+
+    def test_unresolved_results_contribute_no_accepted_sources(self):
+        old, _ = spec_fixture()
+        part = self.part('unresolved', unresolved_sources=[LIVE_GUIDE], accepted_sources=['https://other.test/'])
+        _, result, _ = merge_parts(old, [(part, copy.deepcopy(old))])
+        self.assertEqual(result['accepted_sources'], [])
 
     def test_unavailable_guide_leaves_the_spec_untouched(self):
         old, observation = spec_fixture()

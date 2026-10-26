@@ -156,6 +156,17 @@ class PreDiff(unittest.TestCase):
         self.assertIn(GUIDE, task['live_guides'])
         self.assertEqual(classify(docs, {GUIDE: {'kind': 'guide', 'error': 'HTTP 403'}})[265]['status'], 'unavailable')
 
+    def test_one_complete_and_one_incomplete_guide_is_not_unchanged(self):
+        other = 'https://www.method.gg/guides/other'
+        docs = documents()
+        docs['spec-265.json']['sources'].append({'url': other, 'updated': None})
+        sparse = PAGE.replace('Crit &gt; Haste = Mastery &gt; Versatility', 'sim').replace('Haste = Crit &gt; Mastery &gt; Versatility', 'sim')
+        digest, extra = analyze('guide', sparse)
+        sources = {GUIDE: live(), other: {'kind': 'guide', 'spec_ids': [265], 'sha256': digest, **extra}}
+        verdict = classify(docs, sources)[265]
+        self.assertEqual(verdict['status'], 'incomplete')
+        self.assertIn(other, verdict['reason'])
+
     def test_force_sends_unchanged_specs_to_claude_after_the_differing_ones_within_the_cap(self):
         docs = documents()
         for sid in (266, 267):

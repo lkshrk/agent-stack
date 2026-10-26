@@ -138,7 +138,14 @@ def classify(documents, sources):
                                         {**info, 'status': 'unavailable', 'differences': {}, 'reason': 'No readable guide'})
             continue
         differences = diff_spec(setup, guides)
-        result[entry['spec_id']] = {**info, 'status': 'changed' if differences else 'unchanged', 'differences': differences}
+        lacking = {u: missing_parts(g['extract']) for u, g in live_guides(setup, sources, complete=False).items() if u not in guides}
+        if differences:
+            result[entry['spec_id']] = {**info, 'status': 'changed', 'differences': differences}
+        elif lacking:
+            result[entry['spec_id']] = {**info, 'status': 'incomplete', 'differences': {},
+                                        'reason': 'Guide layout incomplete: ' + json.dumps(lacking)}
+        else:
+            result[entry['spec_id']] = {**info, 'status': 'unchanged', 'differences': {}}
     return result
 
 

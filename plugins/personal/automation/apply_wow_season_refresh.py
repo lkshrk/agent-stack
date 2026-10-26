@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 from urllib.parse import urlparse
 
 from check_wow_season_updates import active_bundle, fingerprint, observe, refs, targets, watch_record
@@ -57,7 +58,10 @@ def identity_checks(old, candidate):
         if not re.fullmatch(r'(item|spell):\d+', key):
             raise ValueError('Invalid changed catalogue key')
         url = 'https://nether.wowhead.com/tooltip/' + key.replace(':', '/')
-        response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True)
+        try:
+            response = subprocess.run(['curl', '-fsSL', '--max-time', '20', url], capture_output=True, text=True)
+        except OSError:
+            raise ValueError('Tooltip lookup unavailable for ' + key) from None
         if response.returncode:
             raise ValueError('Tooltip lookup failed for ' + key)
         try:
@@ -246,7 +250,8 @@ def merge_parts(old, parts):
                 before, after = ({k: v for k, v in d.items() if k != 'catalogue_record_count'} for d in (before, after))
             if before != after:
                 raise ValueError('Per-spec run changed files outside its scope: ' + other)
-        accepted += result['accepted_sources']
+        if result['outcome'] != 'unresolved':
+            accepted += result['accepted_sources']
         unresolved += result['unresolved_sources']
         summaries.append(f'Spec {spec_id} ({result["outcome"]}): {result["summary"].strip()}')
         by_outcome[result['outcome']].append(spec_id)
@@ -273,6 +278,10 @@ def merge_parts(old, parts):
     return merged, result, by_outcome
 
 
+def describe(error):
+    return (type(error).__name__ + ': ' + str(error))[:200]
+
+
 def load_parts(directory):
     """Yield (spec_id, loaded part or None, failure reason or None) for every per-spec folder."""
     loaded = []
@@ -285,18 +294,22 @@ def load_parts(directory):
             result = json.loads((folder / 'result.json').read_text())
             spec_id = result.get('spec_id', spec_id)
             loaded.append((spec_id, (result, load_bundle(folder / 'candidate')), None))
-        except (ValueError, OSError, KeyError, TypeError) as error:
-            loaded.append((spec_id, None, str(error)[:200]))
+        except Exception as error:
+            loaded.append((spec_id, None, describe(error)))
     return loaded
 
 
 def accept_parts(old, loaded, observation):
     """Validate every part on its own; a rejected part is dropped and its spec reported with the reason."""
-    good, rejected, checked = [], {}, {}
-    for spec_id, part, failure in loaded:
+    good, rejected, notes, checked, taken = [], {}, [], {}, set()
+    for spec_id, part, failure in sorted(loaded, key=lambda item: str(item[0])):
+        proofs = {}
         try:
             if failure:
                 raise ValueError(failure)
+            if spec_id in taken:
+                notes.append(f'Duplicate result for spec {spec_id} ignored; the first one was kept')
+                continue
             merged, result, _ = merge_parts(old, [part])
             proofs = identity_checks(old, merged)
             seen = copy.deepcopy(observation)
@@ -304,12 +317,16 @@ def accept_parts(old, loaded, observation):
                 owners = [d['spec_id'] for n, d in merged.items() if n.startswith('spec-') and key in refs(d)]
                 seen['current']['sources'][proof['url']] = {'kind': 'tooltip', 'spec_ids': sorted(owners), 'sha256': proof['sha256']}
             validate(old, merged, result, seen, proofs)
-        except (ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
-            rejected[spec_id] = str(error)[:200]
+            merge_parts(old, good + [part])
+        except Exception as error:
+            reason = failure or describe(error)
+            print(f'Rejected result for spec {spec_id}: {reason}', file=sys.stderr)
+            rejected[spec_id] = reason
             continue
+        taken.add(spec_id)
         good.append(part)
         checked.update(proofs)
-    return good, rejected, checked
+    return good, rejected, notes, checked
 
 
 def fetch_guides(docs, spec_ids):
@@ -384,7 +401,7 @@ def main(argv=None):
     old = load_bundle(bundle)
     observation = json.loads(args.observation.read_text())
     today = date.today().isoformat()
-    good, rejected, checked = accept_parts(old, load_parts(args.parts), observation)
+    good, rejected, notes, checked = accept_parts(old, load_parts(args.parts), observation)
     candidate, result, outcomes = merge_parts(old, good)
     for key, proof in checked.items():
         owners = [d['spec_id'] for name, d in candidate.items() if name.startswith('spec-') and key in refs(d)]
@@ -411,7 +428,7 @@ def main(argv=None):
     if not args.dry_run:
         for name in changed:
             (bundle / name).write_text(json.dumps(docs[name], indent=2) + '\n')
-    lines = [result['summary']]
+    lines = [result['summary']] + (['', *notes] if notes else [])
     if rejected:
         lines += ['', 'Rejected per-spec results (previous values kept): ' + '; '.join(f'{i}: {r}' for i, r in sorted(rejected.items(), key=str))]
     if advanced:
@@ -422,7 +439,7 @@ def main(argv=None):
     if deferred:
         lines += ['', 'Specs with differences not processed this run (retried next run): ' + ', '.join(map(str, deferred))]
     output = {'changed_files': changed, 'release': release, 'status': result['status'], 'summary': '\n'.join(lines),
-                      'advanced': sorted(advanced), 'ai_updated': outcomes['updated'], 'rejected': {str(k): v for k, v in rejected.items()},
+                      'advanced': sorted(advanced), 'ai_updated': outcomes['updated'], 'rejected': {str(k): v for k, v in rejected.items()}, 'notes': notes,
                'enriched': sorted(enriched)}
     print(json.dumps(output))
     return output
