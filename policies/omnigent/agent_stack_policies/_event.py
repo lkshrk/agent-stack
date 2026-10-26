@@ -54,3 +54,25 @@ def tool_call(event: Event, names: Collection[str]) -> dict | None:
     if not isinstance(arguments, dict):
         return {"_unparseable": True}
     return arguments
+
+
+def is_response(event: Event) -> bool:
+    return event.get("type") == "response"
+
+
+def response_text(event: Event) -> str:
+    data = event.get("data")
+    if isinstance(data, dict):
+        data = data.get("text", data.get("content"))
+    if isinstance(data, str):
+        return data
+    if isinstance(data, list):
+        parts = [b.get("text") for b in data if isinstance(b, dict) and b.get("type") == "text"]
+        return "\n".join(p for p in parts if isinstance(p, str))
+    return ""
+
+
+def turn_final(event: Event) -> bool | None:
+    context = event.get("context")
+    value = context.get("turn_final") if isinstance(context, dict) else None
+    return value if isinstance(value, bool) else None

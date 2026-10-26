@@ -1,0 +1,78 @@
+{
+  "status": "DONE",
+  "design": "Split into three slices.",
+  "risk": {
+    "class": "medium",
+    "force_gate_plan": false
+  },
+  "children": [
+    {
+      "key": "a",
+      "title": "Child a",
+      "description": "Implement part a.",
+      "files": [
+        "src/a.py"
+      ],
+      "independent_test": "pytest tests/test_a.py",
+      "criteria": [
+        {
+          "id": "AC-1",
+          "ears": "WHEN input a arrives THE SYSTEM SHALL handle a"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "b",
+      "title": "Child b",
+      "description": "Implement part b.",
+      "files": [
+        "src/b.py",
+        "src/a.py"
+      ],
+      "independent_test": "pytest tests/test_b.py",
+      "criteria": [
+        {
+          "id": "AC-2",
+          "ears": "WHEN input b arrives THE SYSTEM SHALL handle b"
+        }
+      ],
+      "blocked_by": [
+        "a"
+      ]
+    },
+    {
+      "key": "c",
+      "title": "Child c",
+      "description": "Implement part c.",
+      "files": [
+        "src/c.py"
+      ],
+      "independent_test": "pytest tests/test_c.py",
+      "criteria": [
+        {
+          "id": "AC-1",
+          "ears": "WHEN input c arrives THE SYSTEM SHALL handle c"
+        }
+      ],
+      "blocked_by": []
+    }
+  ],
+  "critic": {
+    "rounds": 2,
+    "coverage": [
+      {
+        "criterion": "AC-1",
+        "child": "a"
+      },
+      {
+        "criterion": "AC-2",
+        "child": "b"
+      },
+      {
+        "criterion": "AC-3",
+        "child": "c"
+      }
+    ]
+  }
+}

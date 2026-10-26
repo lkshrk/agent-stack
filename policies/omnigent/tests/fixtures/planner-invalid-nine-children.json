@@ -1,0 +1,195 @@
+{
+  "status": "DONE",
+  "design": "Split into three slices.",
+  "risk": {
+    "class": "medium",
+    "force_gate_plan": false
+  },
+  "children": [
+    {
+      "key": "k0",
+      "title": "Child k0",
+      "description": "Implement part k0.",
+      "files": [
+        "src/k0.py"
+      ],
+      "independent_test": "pytest tests/test_k0.py",
+      "criteria": [
+        {
+          "id": "AC-0",
+          "ears": "WHEN input k0 arrives THE SYSTEM SHALL handle k0"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k1",
+      "title": "Child k1",
+      "description": "Implement part k1.",
+      "files": [
+        "src/k1.py"
+      ],
+      "independent_test": "pytest tests/test_k1.py",
+      "criteria": [
+        {
+          "id": "AC-1",
+          "ears": "WHEN input k1 arrives THE SYSTEM SHALL handle k1"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k2",
+      "title": "Child k2",
+      "description": "Implement part k2.",
+      "files": [
+        "src/k2.py"
+      ],
+      "independent_test": "pytest tests/test_k2.py",
+      "criteria": [
+        {
+          "id": "AC-2",
+          "ears": "WHEN input k2 arrives THE SYSTEM SHALL handle k2"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k3",
+      "title": "Child k3",
+      "description": "Implement part k3.",
+      "files": [
+        "src/k3.py"
+      ],
+      "independent_test": "pytest tests/test_k3.py",
+      "criteria": [
+        {
+          "id": "AC-3",
+          "ears": "WHEN input k3 arrives THE SYSTEM SHALL handle k3"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k4",
+      "title": "Child k4",
+      "description": "Implement part k4.",
+      "files": [
+        "src/k4.py"
+      ],
+      "independent_test": "pytest tests/test_k4.py",
+      "criteria": [
+        {
+          "id": "AC-4",
+          "ears": "WHEN input k4 arrives THE SYSTEM SHALL handle k4"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k5",
+      "title": "Child k5",
+      "description": "Implement part k5.",
+      "files": [
+        "src/k5.py"
+      ],
+      "independent_test": "pytest tests/test_k5.py",
+      "criteria": [
+        {
+          "id": "AC-5",
+          "ears": "WHEN input k5 arrives THE SYSTEM SHALL handle k5"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k6",
+      "title": "Child k6",
+      "description": "Implement part k6.",
+      "files": [
+        "src/k6.py"
+      ],
+      "independent_test": "pytest tests/test_k6.py",
+      "criteria": [
+        {
+          "id": "AC-6",
+          "ears": "WHEN input k6 arrives THE SYSTEM SHALL handle k6"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k7",
+      "title": "Child k7",
+      "description": "Implement part k7.",
+      "files": [
+        "src/k7.py"
+      ],
+      "independent_test": "pytest tests/test_k7.py",
+      "criteria": [
+        {
+          "id": "AC-7",
+          "ears": "WHEN input k7 arrives THE SYSTEM SHALL handle k7"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "k8",
+      "title": "Child k8",
+      "description": "Implement part k8.",
+      "files": [
+        "src/k8.py"
+      ],
+      "independent_test": "pytest tests/test_k8.py",
+      "criteria": [
+        {
+          "id": "AC-8",
+          "ears": "WHEN input k8 arrives THE SYSTEM SHALL handle k8"
+        }
+      ],
+      "blocked_by": []
+    }
+  ],
+  "critic": {
+    "rounds": 2,
+    "coverage": [
+      {
+        "criterion": "AC-0",
+        "child": "k0"
+      },
+      {
+        "criterion": "AC-1",
+        "child": "k1"
+      },
+      {
+        "criterion": "AC-2",
+        "child": "k2"
+      },
+      {
+        "criterion": "AC-3",
+        "child": "k3"
+      },
+      {
+        "criterion": "AC-4",
+        "child": "k4"
+      },
+      {
+        "criterion": "AC-5",
+        "child": "k5"
+      },
+      {
+        "criterion": "AC-6",
+        "child": "k6"
+      },
+      {
+        "criterion": "AC-7",
+        "child": "k7"
+      },
+      {
+        "criterion": "AC-8",
+        "child": "k8"
+      }
+    ]
+  }
+}

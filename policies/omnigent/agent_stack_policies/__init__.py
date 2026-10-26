@@ -52,4 +52,31 @@ POLICY_REGISTRY: list[dict] = [
             "additionalProperties": False,
         },
     },
+    {
+        "handler": "agent_stack_policies.unattended.deny_on_ask",
+        "kind": "factory",
+        "name": "deny_on_ask",
+        "description": "Wrap another policy and turn its ASK verdicts into DENY.",
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "handler": {"type": "string"},
+                "arguments": {"type": "object"},
+            },
+            "required": ["handler"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "handler": "agent_stack_policies.result.result_contract",
+        "kind": "factory",
+        "name": "result_contract",
+        "description": "Require the final response to carry a valid bundle result block.",
+        "params_schema": {
+            "type": "object",
+            "properties": {"kind": {"type": "string", "enum": ["planner", "security", "documenter"]}},
+            "required": ["kind"],
+            "additionalProperties": False,
+        },
+    },
 ]

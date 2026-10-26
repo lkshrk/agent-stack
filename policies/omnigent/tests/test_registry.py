@@ -1,22 +1,30 @@
+import asyncio
 import importlib
 import inspect
 import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_merge, test_paths, test_spawn, test_tools
+from . import assert_not_ask, test_merge, test_paths, test_result, test_spawn, test_tools
 
 EVENTS_BY_MODULE = {
     "agent_stack_policies.spawn": test_spawn.EVENTS,
     "agent_stack_policies.paths": test_paths.EVENTS,
     "agent_stack_policies.tools": test_tools.EVENTS,
     "agent_stack_policies.merge": test_merge.EVENTS,
+    "agent_stack_policies.unattended": test_tools.EVENTS,
+    "agent_stack_policies.result": test_result.EVENTS,
 }
 DEFAULT_PARAMS = {
     "agent_stack_policies.spawn": {"limit": 3},
     "agent_stack_policies.paths": {"deny": [".github/workflows/**"], "allow_only": ["docs/**"]},
     "agent_stack_policies.tools": {"patterns": ["mcp__*linear_app-*"]},
     "agent_stack_policies.merge": {},
+    "agent_stack_policies.unattended": {
+        "handler": "agent_stack_policies.tools.deny_tools",
+        "arguments": {"patterns": ["mcp__*linear_app-*"]},
+    },
+    "agent_stack_policies.result": {"kind": "planner"},
 }
 
 
@@ -51,4 +59,7 @@ class RegistryTest(unittest.TestCase):
             module, factory = resolve(entry["handler"])
             policy = factory(**DEFAULT_PARAMS[module.__name__])
             for event in EVENTS_BY_MODULE[module.__name__]:
-                assert_not_ask(self, policy(event))
+                decision = policy(event)
+                if inspect.isawaitable(decision):
+                    decision = asyncio.run(decision)
+                assert_not_ask(self, decision)

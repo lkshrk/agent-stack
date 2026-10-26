@@ -1,0 +1,15 @@
+{
+  "status": "DONE",
+  "verdict": "pass",
+  "findings": [
+    {
+      "id": "S-1",
+      "severity": "critical",
+      "file": "src/a.py",
+      "line": 1,
+      "title": "t",
+      "evidence": "e",
+      "fix": "f"
+    }
+  ]
+}
