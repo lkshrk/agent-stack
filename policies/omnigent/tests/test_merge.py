@@ -204,3 +204,23 @@ class FinalReviewMergeTest(unittest.TestCase):
         self.assertEqual(policy(tool_call_event("shell", {"command": ["bash", "-lc", "gh pr merge 5"]}))["result"], "DENY")
         self.assertEqual(policy(tool_call_event("shell", {"command": ["git", "status"]}))["result"], "ALLOW")
         self.assertEqual(policy(tool_call_event("shell", {"command": {"a": 1}}))["result"], "DENY")
+
+
+class StdinArgumentsTest(unittest.TestCase):
+    def test_xargs_into_push_or_merge_denied(self):
+        for command in (
+            "echo main | xargs git push origin",
+            "echo feat/x | xargs git push origin",
+            "echo 5 | xargs gh pr merge",
+            "echo 5 | xargs -I{} gh pr merge {}",
+            "ls | parallel git push origin",
+            "cat <(git push origin main)",
+            "diff <(gh pr merge 5) a",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_xargs_elsewhere_allowed(self):
+        for command in ("ls | xargs wc -l", "echo a | xargs git log -1", "cat <(git log -1)"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

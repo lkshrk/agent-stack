@@ -28,8 +28,9 @@ prompt: |
   Sources you read:
   - The repository, with the `sys_os_*` read tools and read-only shell (`rg`,
     `cat`, `head`, `sed -n <from>,<to>p`, `jq`, `git log`, `git show`,
-    `gh issue view`, `gh pr view`). Other commands, `VAR=` assignments and
-    output redirection are denied.
+    `gh issue view`, `gh pr view`), by bare name. Other commands, wrappers
+    such as `xargs` or `timeout`, `VAR=` assignments and redirection other
+    than `2>/dev/null` and `2>&1` are denied.
   - The code graph (`code_graph` tools) for definitions, callers and impact,
     before grepping whole files.
   - The knowledge vault, read-only. Run exactly

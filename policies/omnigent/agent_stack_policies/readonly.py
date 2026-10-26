@@ -29,7 +29,7 @@ _GH_READ = {
     "api": None,
 }
 _GH_API_WRITE = ("-f", "-F", "--field", "--raw-field", "--input", "-X", "--method")
-_FD_DUP = re.compile(r"\d*[<>]&(?:\d+|-)(?![^\s;&|)])")
+_STDERR_ONLY = re.compile(r"(?<=\s)2>\s*(?:&1|/dev/null)(?=$|[\s;|&)'\"])")
 _FILE_REDIRECT = re.compile(r"&>|>&|>\|")
 _FIND_WRITES = frozenset({"-delete", "-fprint", "-fprint0", "-fprintf", "-fls"})
 _SED_FLAGS = frozenset({"-n", "-E", "-r", "-s", "-u", "-z", "--quiet", "--silent", "--posix"})
@@ -37,6 +37,8 @@ _SED_PRINT = re.compile(r"^(?:\d+|\$)(?:,(?:\d+|\$))?p$")
 _SHELL_SHORT = frozenset("celuxvo")
 _SHELL_OPTIONS = frozenset({"pipefail", "errexit", "nounset", "xtrace"})
 _UNIQ_VALUES = frozenset({"-f", "-s", "-w"})
+_SAFE_WRAPPERS = frozenset({"command", "builtin", "find"})
+_SYSTEM_SHELL_DIRS = ("/bin/", "/usr/bin/")
 _HINT = "this agent is read-only; report the change instead of making it"
 
 
@@ -146,20 +148,29 @@ def _check(tokens: list[str], allowed: frozenset[str], exact: list[list[str]]) -
     for i, token in enumerate(tokens):
         if ">" in token:
             target = tokens[i + 1] if i + 1 < len(tokens) else ""
-            if token not in (">", ">>") or target != "/dev/null":
-                return f"redirecting output to {target or 'a file'} is not allowed"
+            return f"redirecting output to {target or 'a file'} is not allowed; only `2>/dev/null` and `2>&1` are"
     if _FIND_WRITES & set(tokens):
         return "find with -delete or -fprint is not allowed"
     command: Command = resolve(tokens)
     if command.assignments:
         return f"environment assignments ({command.assignments[0].split('=', 1)[0]}=) are not allowed"
+    unsafe = [w for w in command.wrappers if w not in _SAFE_WRAPPERS]
+    if unsafe:
+        return f"{unsafe[0]} is not allowed; run the read command directly"
     if command.stdin_exec:
         return "piping a script into a shell is not allowed"
     if not command.argv:
         return None
-    name, args = os.path.basename(command.argv[0]), command.argv[1:]
-    if name in SHELLS and command.nested and _shell_body_only(command.argv):
-        return None
+    program, args = command.argv[0], command.argv[1:]
+    name = os.path.basename(program)
+    if name in SHELLS:
+        if "find" in command.wrappers:
+            return "a shell through find -exec is not allowed"
+        system = "/" not in program or (program.startswith(_SYSTEM_SHELL_DIRS) and program.count("/") <= 3)
+        if system and command.nested and _shell_body_only(command.argv):
+            return None
+    if "/" in program:
+        return f"{program} is not allowed; run commands by bare name"
     if name not in allowed:
         return f"{name} is not on the read-only command list"
     return _check_args(name, args)
@@ -180,7 +191,7 @@ def read_only_shell(
         command = shell_command(arguments)
         if command is None:
             return deny("shell command is not a string")
-        command = _FD_DUP.sub("", command)
+        command = _STDERR_ONLY.sub("", command)
         if _FILE_REDIRECT.search(command):
             return deny(f"redirecting output to a file is not allowed; {_HINT}")
         try:
@@ -215,8 +226,11 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
                 return deny("unparseable command naming git; simplify it")
             return allow()
         for tokens in statements:
-            argv = resolve(tokens).argv
+            resolved = resolve(tokens)
+            argv = resolved.argv
             if argv and os.path.basename(argv[0]) == "git":
+                if {"xargs", "parallel"} & set(resolved.wrappers):
+                    return deny("git through xargs or parallel is not allowed, since stdin can add arguments")
                 reason = check_git(argv[1:], verbs)
                 if reason:
                     return deny(f"{reason}; hand repository changes to the implementer")

@@ -171,6 +171,33 @@ CRITIC = "planner/agents/critic"
 CRITIC_SEND = {"agent": "critic", "title": "plan-critic", "args": {"input": "Round 1. Root criteria ROU-12-1. Draft: ..."}}
 WAKE = "[System: sub-agent critic finished; call sys_read_inbox]"
 CONSULTED = {"agent_stack_dispatches": 2, "agent_stack_collections": 2}
+N1_PROBES = [
+    "cat <(touch /tmp/p)",
+    "rg x <(touch /tmp/p)",
+    "cat <(git push origin feat/x)",
+    "bash -lc 'cat <(git push origin feat/x)'",
+    "bash -lc 'cat <(gh pr review 1 --approve)'",
+    "tee >(git commit -am x)",
+]
+N2_PROBES = [
+    "npx -p evil-pkg cat f",
+    "uvx --from httpie rg x",
+    "uv run cat f",
+    "mise exec -- cat f",
+    "pnpm exec cat f",
+    "script -qc 'cat f' src/a.py",
+    "flock /tmp/newfile cat f",
+    "/usr/bin/time -o src/a.py cat f",
+    "echo -o/tmp/x | xargs sort f",
+    "echo --pre=sh | xargs rg x",
+    "bash -lc 'echo --output=/tmp/x | xargs git log -1'",
+    "printf 'x; touch /tmp/p' | xargs -I{} bash -c 'cat {}'",
+    "find . -exec bash -c 'cat {}' \\;",
+    "./tools/cat f",
+    "/tmp/x/git status",
+    "timeout 30 rg x",
+    "env rg x",
+]
 I1_PROBES = [
     "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=touch git status",
     "GIT_EXTERNAL_DIFF=bash git diff HEAD~1",
@@ -438,7 +465,35 @@ CASES += [
     Case(agent, "tool_call", tool, {"command": command}, "DENY")
     for agent, tools in READ_ONLY_AGENTS.items()
     for tool in tools
-    for command in I1_PROBES
+    for command in I1_PROBES + N1_PROBES + N2_PROBES
+]
+CASES += [
+    Case("polly", "tool_call", tool, {"command": command}, "DENY")
+    for tool in ("Bash", "sys_os_shell")
+    for command in (
+        "cat <(git push origin feat/x)",
+        "cat <(git -C ../wt commit -am x)",
+        "diff <(git -C .worktrees/t1 rebase origin/main) a",
+        "echo --output=/tmp/x | xargs git log -1",
+        "echo main | xargs git push origin",
+    )
+]
+CASES += [
+    Case("polly/agents/claude_code", "tool_call", tool, {"command": command}, "DENY")
+    for tool in ("Bash", "sys_os_shell")
+    for command in ("echo main | xargs git push origin", "echo 5 | xargs gh pr merge", "cat <(git push origin main)")
+]
+CASES += [
+    Case("polly/agents/codex", "tool_call", "shell", {"command": command}, expected)
+    for command, expected in (
+        (["bash", "-lc", "rg -n x src 2>/dev/null"], "ALLOW"),
+        (["bash", "-lc", "rg -n x src 2>&1 | head -20"], "ALLOW"),
+        (["bash", "-lc", "git log -1 2>/dev/null"], "ALLOW"),
+        (["bash", "-lc", "rg -n x src > /tmp/out"], "DENY"),
+        (["bash", "-lc", "rg -n x src >/dev/null"], "DENY"),
+        (["bash", "-lc", "rg -n x src 2>/tmp/err"], "DENY"),
+        (["bash", "-lc", "rg -n x src >&2"], "DENY"),
+    )
 ]
 
 

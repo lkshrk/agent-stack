@@ -13,6 +13,7 @@ _REF_FLAGS = ("--tags", "--follow-tags", "--mirror", "--all")
 _HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
 _VCS = frozenset({"git", "gh"})
 _PR_HINT = "open or update a pull request instead"
+_STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
 
 
 def _is_force_flag(token: str) -> bool:
@@ -70,6 +71,10 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
 def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None:
     if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
+    command = resolve(tokens)
+    if _STDIN_ARGUMENTS & set(command.wrappers) and command.argv and os.path.basename(command.argv[0]) in _VCS:
+        if _mentions_merge_or_push(command.argv):
+            return f"{command.wrappers[0]} into a merge or push is not allowed, since stdin can supply the branch; {_PR_HINT}"
     for run in _vcs_runs(tokens):
         rest = run[1:]
         if os.path.basename(run[0]) == "gh":

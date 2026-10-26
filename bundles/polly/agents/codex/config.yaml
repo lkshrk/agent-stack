@@ -29,8 +29,9 @@ prompt: |
   - Read only what you need; edit nothing. Answer with file:line evidence.
 
   Your shell is read-only: `rg`, `cat`, `head`, `nl`, `sed -n <from>,<to>p`,
-  `jq`, git read verbs and `gh` reads, with no `VAR=` assignments and no
-  output redirection. Committing, pushing and commenting on or approving a
+  `jq`, git read verbs and `gh` reads, by bare name, with no wrappers
+  (`xargs`, `timeout`, `env`, `npx`, `uv run`), no `VAR=` assignments and no
+  redirection except `2>/dev/null` and `2>&1`. Committing, pushing and commenting on or approving a
   PR are denied.
 
   Always return a clear, structured result with your findings.

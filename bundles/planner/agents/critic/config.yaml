@@ -26,7 +26,8 @@ prompt: |
 
   You may read the repository to check the draft's file paths and tests:
   the `sys_os_*` read tools and plain read commands (`rg`, `cat`, `head`,
-  `git log`, `git show`), one command per call, no redirection.
+  `git log`, `git show`) by bare name, one command per call, no wrappers and
+  no redirection except `2>/dev/null` and `2>&1`.
 
   Each round is graded on its own merits. A threshold that failed before and
   now passes is a pass; one that passed before and now fails is a failure.
