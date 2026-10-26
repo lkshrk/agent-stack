@@ -28,6 +28,11 @@ prompt: |
   EXPLORE / SEARCH — answer a specific question, read-only:
   - Read only what you need; edit nothing. Answer with file:line evidence.
 
+  Your shell is read-only: `rg`, `cat`, `head`, `nl`, `sed -n <from>,<to>p`,
+  `jq`, git read verbs and `gh` reads, with no `VAR=` assignments and no
+  output redirection. Committing, pushing and commenting on or approving a
+  PR are denied.
+
   Always return a clear, structured result with your findings.
   Note anything that did not fit the task.
 
@@ -48,7 +53,25 @@ guardrails:
         arguments:
           handler: omnigent.policies.builtins.orchestration.blast_radius
           arguments:
-            gate_pushes: false
+            gate_pushes: true
+            risky_action: DENY
+    github_readonly:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.github.github_policy
+          arguments:
+            read_all: true
+            write_repos: []
+    read_only_shell:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.readonly.read_only_shell
+        arguments:
+          extra_commands: [gh]
     read_only_os:
       type: function
       on: [tool_call]

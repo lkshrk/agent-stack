@@ -178,7 +178,7 @@ I1_PROBES = [
     "sort -S 1 --compress-program=./x plan.json",
     "cat <> plan.md",
 ]
-READ_ONLY_AGENTS = {"planner/agents/critic": ("Bash", "sys_os_shell"), "planner": ("sys_os_shell",)}
+READ_ONLY_AGENTS = {"planner/agents/critic": ("Bash", "sys_os_shell"), "planner": ("sys_os_shell",), "polly/agents/codex": ("shell",)}
 
 CASES: list[Case] = [
     Case("polly", "tool_call", "Write", {"file_path": ".github/workflows/ci.yml", "content": "x"}, "DENY"),
@@ -370,6 +370,15 @@ CASES: list[Case] = [
     Case("planner", "response", None, "Plan done.", "DENY", {"agent_stack_dispatches": 1, "agent_stack_collections": 1}, turn_final=True),
     Case("polly/agents/codex", "tool_call", "shell", {"command": "cat AGENTS.md"}, "ALLOW"),
     Case("polly/agents/codex", "tool_call", "shell", {"command": "sed -n 1,40p CLAUDE.md"}, "ALLOW"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "git commit -am fix"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "git push origin feat/x"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "git push -u origin feat/x"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "gh pr review 1 --approve"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "gh pr comment 1 -b x"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "echo x > src/a.py"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "sed -i s/a/b/ src/a.py"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": "echo x > .github/workflows/ci.yml"}, "DENY"),
+    Case("polly/agents/codex", "tool_call", "shell", {"command": ["bash", "-lc", "git commit -am fix"]}, "DENY"),
     Case("planner", "tool_call", "sys_os_shell", {"command": "echo x > plan.md"}, "DENY"),
     Case("planner", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ README.md"}, "DENY"),
     Case("planner", "tool_call", "sys_os_shell", {"command": "python3 -c 'open(\"a\", \"w\")'"}, "DENY"),
@@ -505,6 +514,24 @@ class BundleVerdictTest(unittest.TestCase):
         run = [("sys_session_send", CRITIC_SEND), ("response", "Draft sent to the critic.")]
         self.assertEqual(run_sequence("planner", run, state), ["DENY", "DENY"])
         self.assertNotIn("agent_stack_dispatches", state)
+
+    def test_codex_review_run_allowed(self):
+        diff = "/repo/.polly/diffs/t1-def.diff"
+        run = [
+            ("shell", {"command": f"cat {diff}"}),
+            ("shell", {"command": f"rg -n '^\\+\\+\\+ ' {diff}"}),
+            ("shell", {"command": "rg -n createOrder backend/src"}),
+            ("shell", {"command": "sed -n 1,120p backend/src/orders/service.ts"}),
+            ("shell", {"command": "nl -ba backend/src/orders/api.ts"}),
+            ("shell", {"command": "git show def456:backend/src/orders/service.ts"}),
+            ("shell", {"command": "git diff --stat abc123...def456"}),
+            ("shell", {"command": "git log --oneline -5 def456"}),
+            ("shell", {"command": "gh pr view 7 --repo routivo/routivo-monorepo --json files,title"}),
+            ("shell", {"command": "ls backend/src/orders"}),
+            ("shell", {"command": ["bash", "-lc", "rg -n 'priority' backend/src | head -20"]}),
+            ("shell", {"command": "find backend/src/orders -name '*.test.ts'"}),
+        ]
+        self.assertEqual(run_sequence("polly/agents/codex", run), ["ALLOW"] * len(run))
 
     def test_planner_flags(self):
         from omnigent.spec import load
