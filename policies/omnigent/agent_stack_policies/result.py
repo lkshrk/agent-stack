@@ -15,18 +15,23 @@ MAX_CHILDREN = 8
 MAX_ERRORS_SHOWN = 5
 MAX_DEPTH = 64
 
-_BLOCK = re.compile(r"```json[ \t]*\r?\n(.*?)```", re.DOTALL)
+_OPENER = re.compile(r"```json[ \t]*\r?\n", re.IGNORECASE)
+_CLOSER = re.compile(r"\s*```")
 _EARS = re.compile(r"^WHEN .+ THE SYSTEM SHALL .+")
 _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
 
 
 def extract_result(text: str) -> dict | None:
-    blocks = _BLOCK.findall(text)
-    if not blocks:
+    openers = list(_OPENER.finditer(text))
+    if not openers:
         return None
+    start = openers[-1].end()
+    start += len(text[start:]) - len(text[start:].lstrip())
     try:
-        parsed = json.loads(blocks[-1])
+        parsed, end = json.JSONDecoder().raw_decode(text, start)
     except (ValueError, RecursionError):
+        return None
+    if not _CLOSER.match(text, end):
         return None
     return parsed if isinstance(parsed, dict) else None
 

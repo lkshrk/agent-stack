@@ -56,6 +56,21 @@ class ExtractTest(unittest.TestCase):
     def test_extract_none_without_block(self):
         self.assertIsNone(result.extract_result("no block here"))
 
+    def test_extract_fence_inside_string_value(self):
+        data = {"design": "Use:\n```python\nx = 1\n```\nthen ```json\n{}\n``` again"}
+        self.assertEqual(result.extract_result(f"Plan.\n{fenced(data)}"), data)
+
+    def test_extract_trailing_prose_fence(self):
+        text = f"{fenced({'n': 1})}\nRun it with:\n```sh\nmake test\n```\n"
+        self.assertEqual(result.extract_result(text), {"n": 1})
+
+    def test_extract_opener_case_insensitive(self):
+        self.assertEqual(result.extract_result('```JSON\n{"n": 3}\n```'), {"n": 3})
+
+    def test_extract_requires_closing_fence_after_object(self):
+        self.assertIsNone(result.extract_result('```json\n{"n": 1} trailing\n```'))
+        self.assertIsNone(result.extract_result('```json\n{"n": 1}'))
+
 
 class PlannerTest(unittest.TestCase):
     def errors(self, name):
