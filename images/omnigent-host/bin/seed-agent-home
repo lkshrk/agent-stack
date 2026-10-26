@@ -12,6 +12,7 @@ render() {
 cp -a /opt/agent/claude-home/.claude "$HOME/"
 mkdir -p "$HOME/.codex"
 cp /opt/agent/codex-home/AGENTS.md "$HOME/.codex/AGENTS.md"
+cp /opt/agent/codex-home/security-review.config.toml "$HOME/.codex/security-review.config.toml"
 cp -a /opt/agent/agents-home/.agents "$HOME/"
 mkdir -p "$HOME/.omp/agent"
 cp /opt/agent/omp-home/config.yml "$HOME/.omp/agent/config.yml"

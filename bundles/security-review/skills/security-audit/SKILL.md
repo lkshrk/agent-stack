@@ -15,9 +15,9 @@ anything, and never comment on or approve the pull request.
   and `gh pr diff <n> --repo <owner>/<repo>`.
 - Saved diff with base and head SHAs: read the diff file and run
   `git diff --name-only <base> <head>`.
-- `git rev-parse HEAD` must equal the head SHA, so the scanners see the
-  changed code. If it doesn't, return `BLOCKED` with `blocked.class:
-  environment`.
+- The session starts in a checkout of the head SHA; you never check
+  anything out. Run `git rev-parse HEAD`: if it isn't the head SHA, return
+  `BLOCKED` with `blocked.class: environment`.
 
 The changed files are your scope. Read the surrounding code a change calls
 or is called by (`rg -n`, `sed -n`, `git show <head>:<path>`), nothing else.
@@ -33,13 +33,17 @@ Run each one on the changed files that still exist, one call each:
 - Static analysis, all changed source files in one call:
   `uvx semgrep scan --config p/default --error <file> <file> …`.
   Exit 1 means findings.
-- Dependencies, for every ecosystem whose files the diff touches:
-  - Python (`pyproject.toml`, `uv.lock`, `requirements*.txt`, `*.py`):
-    `uv run --with pip-audit pip-audit`.
-  - Node (`package.json`, `pnpm-lock.yaml`, `*.ts`, `*.js`):
-    `pnpm audit --prod`.
+- Dependencies, once per manifest directory the diff touches: the nearest
+  directory above a changed file that holds `pyproject.toml` with `uv.lock`,
+  or `package.json` with `pnpm-lock.yaml`. A monorepo has several, and often
+  none at the root.
+  - Python:
+    `uv export --directory <dir> --frozen --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit -r /dev/stdin --no-deps --disable-pip`.
+  - Node: `pnpm --dir <dir> audit --prod`.
 
-  A non-zero exit with a list of advisories means findings.
+  Never run `uv run`, `uv sync`, `pip install` or `pnpm install` in the
+  checkout: they build and run the pull request's code. A non-zero exit
+  with a list of advisories means findings.
 
 A scanner that cannot run at all (command not found, no network, a crash
 before it scans) makes the result `BLOCKED` with `blocked.class:

@@ -8,13 +8,12 @@ description: >-
 
 spawn: false
 
+# Create sessions with terminal_launch_args ["--profile", "security-review"] (images/omnigent-host/codex).
 executor:
   type: omnigent
   model: gpt-sol
   config:
     harness: codex-native
-    # Unattended: nobody answers Codex approval prompts, and the audits need network.
-    yolo: true
 
 prompt: |
   You are the security reviewer for one pull request. You read; you never
@@ -26,7 +25,9 @@ prompt: |
   Input. The first message gives you either a pull request URL, or a saved
   diff path with its base and head SHAs, plus the risk reason that sent the
   change here (`risk:security`, auth, secrets, dependency or infra). Review
-  only that diff and the code it touches.
+  only that diff and the code it touches. The session starts in a checkout
+  of the head SHA; you never check anything out. If `git rev-parse HEAD`
+  is not the head SHA, return `BLOCKED` with `blocked.class: environment`.
 
   Sources you read: the repository with read-only shell (`rg`, `sed -n`,
   `git diff`, `git show`, `git log`, `gh pr view`, `gh pr diff`).
@@ -98,11 +99,12 @@ guardrails:
     no_write_tools:
       type: function
       function:
-        # read_only_os does not cover Codex's apply_patch.
+        # read_only_os misses Codex's apply_patch, and spawn: false its spawn_agent.
         path: agent_stack_policies.tools.deny_tools
         arguments:
           patterns:
             - apply_patch
+            - "*spawn_agent"
             - "*linear_app*"
             - "*__linear-*"
             - "*save_*"

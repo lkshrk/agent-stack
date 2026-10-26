@@ -48,9 +48,10 @@ class ExtractTest(unittest.TestCase):
         text = f"intro\n{fenced({'n': 1})}\nmiddle\n{fenced({'n': 2})}\ntrailing prose"
         self.assertEqual(result.extract_result(text), {"n": 2})
 
-    def test_extract_skips_unparseable_and_non_dict(self):
-        text = f"{fenced({'n': 1})}\n```json\n[1]\n```\n```json\n{{oops\n```"
-        self.assertEqual(result.extract_result(text), {"n": 1})
+    def test_extract_reads_only_the_last_block(self):
+        for last in ("[1]", "{oops"):
+            text = f"{fenced({'n': 1})}\n```json\n{last}\n```"
+            self.assertIsNone(result.extract_result(text), last)
 
     def test_extract_none_without_block(self):
         self.assertIsNone(result.extract_result("no block here"))
@@ -297,11 +298,10 @@ class DepthTest(unittest.TestCase):
         data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(20, "TBD")}
         self.assertTrue(any("placeholder" in e for e in result.validate_result("security", data)))
 
-    def test_extract_skips_unparseably_deep_block(self):
+    def test_extract_unparseably_deep_last_block_is_no_result(self):
         deep = "[" * 100000 + "]" * 100000
         text = f"{fenced({'n': 1})}\n```json\n{deep}\n```"
-        self.assertEqual(result.extract_result(text), {"n": 1})
-        self.assertIsNone(result.extract_result(f"```json\n{deep}\n```"))
+        self.assertIsNone(result.extract_result(text))
 
     def test_contract_denies_over_deep_block(self):
         data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(500)}

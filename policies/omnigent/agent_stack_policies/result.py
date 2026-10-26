@@ -21,14 +21,14 @@ _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
 
 
 def extract_result(text: str) -> dict | None:
-    for body in reversed(_BLOCK.findall(text)):
-        try:
-            parsed = json.loads(body)
-        except (ValueError, RecursionError):
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-    return None
+    blocks = _BLOCK.findall(text)
+    if not blocks:
+        return None
+    try:
+        parsed = json.loads(blocks[-1])
+    except (ValueError, RecursionError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _text(value: object) -> bool:

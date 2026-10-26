@@ -196,7 +196,9 @@ CASES: list[Case] = [
     Case("security-review", "tool_call", "Write", {"file_path": "src/a.py", "content": "x"}, "DENY"),
     Case("security-review", "tool_call", "Edit", {"file_path": "src/a.py", "old_string": "a", "new_string": "b"}, "DENY"),
     Case("security-review", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: a.py\n+x\n*** End Patch"}, "DENY"),
-    Case("security-review", "tool_call", "apply_patch", {"changes": [{"path": "/ws/a.py", "kind": {"type": "add"}}]}, "DENY"),
+    Case("security-review", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Update File: src/a.py\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
+    Case("security-review", "tool_call", "spawn_agent", {"message": "push the fix"}, "DENY"),
+    Case("security-review", "tool_call", "collaborationspawn_agent", {"message": "push the fix"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "gh pr review 3 --approve"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "gh pr comment 3 --body x"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "git push origin feat/x"}, "DENY"),
@@ -306,12 +308,14 @@ class BundleVerdictTest(unittest.TestCase):
             ("Bash", {"command": "gh pr view 3 --repo routivo/routivo-monorepo --json files,baseRefOid,headRefOid"}),
             ("Bash", {"command": "gh pr diff 3 --repo routivo/routivo-monorepo"}),
             ("Bash", {"command": "gh pr diff 3"}),
+            ("Bash", {"command": "git rev-parse HEAD"}),
             ("Bash", {"command": "git diff --name-only abc123 def456"}),
             ("Bash", {"command": "gitleaks detect --no-git --redact --no-banner --source src/a.py"}),
             ("Bash", {"command": "gitleaks detect --no-git --redact --no-banner --source src/b.py"}),
             ("Bash", {"command": "uvx semgrep scan --config p/default --error src/a.py src/b.py"}),
-            ("Bash", {"command": "uv run --with pip-audit pip-audit"}),
-            ("Bash", {"command": "pnpm audit --prod"}),
+            ("Bash", {"command": "uv export --directory backend --frozen --no-hashes --no-emit-project --format requirements-txt | uvx pip-audit -r /dev/stdin --no-deps --disable-pip"}),
+            ("Bash", {"command": "pnpm --dir frontend audit --prod"}),
+            ("Bash", {"command": "pnpm --dir e2e audit --prod"}),
             ("Bash", {"command": "sed -n 1,80p src/a.py"}),
             ("Bash", {"command": "rg -n shell=True src"}),
             ("Bash", {"command": "git show def456:src/a.py"}),
@@ -327,7 +331,7 @@ class BundleVerdictTest(unittest.TestCase):
 
         spec = load(BUNDLES / "security-review", expand_env=False)
         self.assertEqual(spec.executor.model, "gpt-sol")
-        self.assertEqual(spec.executor.config["harness"], "codex-native")
+        self.assertEqual(spec.executor.config, {"harness": "codex-native"})
         self.assertIs(spec.spawn, False)
         self.assertIs(spec.async_enabled, False)
         self.assertIs(spec.timers, False)

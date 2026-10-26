@@ -1,0 +1,24 @@
+approval_policy = "never"
+default_permissions = "security-review"
+
+[features]
+unified_exec = false
+multi_agent = false
+
+[permissions.security-review.filesystem]
+":root" = "read"
+"/tmp" = "write"
+
+[permissions.security-review.network]
+enabled = true
+
+# The sandbox only writes /tmp, so tool caches live there.
+[shell_environment_policy.set]
+XDG_CACHE_HOME = "/tmp/cache"
+XDG_DATA_HOME = "/tmp/data"
+XDG_STATE_HOME = "/tmp/state"
+UV_CACHE_DIR = "/tmp/cache/uv"
+npm_config_cache = "/tmp/cache/npm"
+SEMGREP_SETTINGS_FILE = "/tmp/cache/semgrep/settings.yml"
+SEMGREP_LOG_FILE = "/tmp/cache/semgrep/semgrep.log"
+SEMGREP_VERSION_CACHE_PATH = "/tmp/cache/semgrep/versions"
