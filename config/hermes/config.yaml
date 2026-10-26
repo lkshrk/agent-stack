@@ -44,8 +44,8 @@ terminal:
   backend: local
 
 mcp_servers:
-  linear:
-    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear
+  linear_read:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_read
     headers:
       x-litellm-api-key: ${LITELLM_API_KEY}
     tools:
@@ -53,7 +53,6 @@ mcp_servers:
         - list_issues
         - get_issue
         - list_comments
-        - save_comment
         - list_projects
         - get_project
         - list_teams
