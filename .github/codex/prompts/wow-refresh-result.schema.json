@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "accepted_sources", "unresolved_sources"],
+  "properties": {
+    "status": {"type": "string", "enum": ["complete", "partial", "blocked"]},
+    "summary": {"type": "string"},
+    "accepted_sources": {"type": "array", "items": {"type": "string"}},
+    "unresolved_sources": {"type": "array", "items": {"type": "string"}}
+  }
+}
