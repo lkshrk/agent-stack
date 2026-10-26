@@ -93,3 +93,11 @@ test("pipeline workflow shell blocks remain syntactically valid", () => {
     }
   }
 });
+
+test("refresh job sets up Bun before the Claude Code step", () => {
+  const steps = wow.jobs.refresh.steps;
+  const bun = steps.findIndex((step: any) => String(step.uses).startsWith("oven-sh/setup-bun@"));
+  const claude = steps.findIndex((step: any) => String(step.uses).startsWith("anthropics/claude-code-action@"));
+  expect(bun).toBeGreaterThanOrEqual(0);
+  expect(bun).toBeLessThan(claude);
+});

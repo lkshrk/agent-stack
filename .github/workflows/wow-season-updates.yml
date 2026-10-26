@@ -40,6 +40,12 @@ jobs:
           echo "Trusted base commit: $sha"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Bun
+        id: bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
       - name: Fetch sources, compare fingerprints and explain AI run decision
         id: inspect
         env:
@@ -131,7 +137,7 @@ jobs:
           FORCE_REFRESH: ${{ inputs.force_refresh || false }}
           PROVIDER_MODEL: ${{ steps.provider.outputs.model }}
           STAGES: >-
-            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"collect":{"outcome":"${{ steps.collect.outcome }}"},"upload":{"outcome":"${{ steps.upload.outcome }}"}}
+            {"checkout":{"outcome":"${{ steps.checkout.outcome }}"},"base":{"outcome":"${{ steps.base.outcome }}"},"bun":{"outcome":"${{ steps.bun.outcome }}"},"inspect":{"outcome":"${{ steps.inspect.outcome }}"},"provider":{"outcome":"${{ steps.provider.outcome }}"},"refresh":{"outcome":"${{ steps.refresh.outcome }}"},"result_file":{"outcome":"${{ steps.result_file.outcome }}"},"collect":{"outcome":"${{ steps.collect.outcome }}"},"upload":{"outcome":"${{ steps.upload.outcome }}"}}
         run: |
           python3 - <<'PY'
           import json, os
@@ -139,7 +145,7 @@ jobs:
           lines = ['## Detection and AI refresh: ' + os.environ['JOB_STATUS'], '',
                    'Trigger: ' + os.environ['EVENT'] + '; force_refresh: ' + os.environ['FORCE_REFRESH'], '',
                    '| Stage | Outcome |', '| --- | --- |']
-          for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('inspect', 'Source fetch and comparison'),
+          for key, label in [('checkout', 'Checkout'), ('base', 'Record trusted commit'), ('bun', 'Bun setup'), ('inspect', 'Source fetch and comparison'),
                              ('provider', 'Gateway configuration'), ('refresh', 'Claude Code refresh'), ('result_file', 'Result file'),
                              ('collect', 'Collect outputs'), ('upload', 'Output artifact')]:
               lines.append('| ' + label + ' | ' + stages.get(key, {}).get('outcome', 'not reached') + ' |')
