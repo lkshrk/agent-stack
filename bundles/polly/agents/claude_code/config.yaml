@@ -30,10 +30,13 @@ prompt: |
   - When green, push your task branch and open a PR with `gh pr create` (clear
     title, what changed, how you verified). Never push to a protected branch
     (e.g. main) or force-push — open a PR and let it be reviewed/merged.
-  - For a change under the repo's UI paths (Routivo: `frontend/**`), run the
-    repository's sandbox check (Routivo: `scripts/sandbox-check.sh`), push its
-    PNG screenshots to a `pr-assets/<task-branch>` branch and link their blob
-    URLs in a PR comment. Missing e2e evidence blocks review.
+  - Verify through the repository's own dev and test entry points (Makefile
+    targets, package scripts, compose files, the CI workflow's steps). Run e2e
+    tests only against loopback URLs (`localhost`, `127.0.0.1`). For a UI
+    change, push the e2e run's PNG screenshots to a `pr-assets/<task-branch>`
+    branch and link their blob URLs in a PR comment. When the sandbox can't
+    run e2e (for example it needs Docker), write `e2e: not run (environment)`
+    in your result; that note doesn't block review.
   - Never edit a path the policy forbids; if the task needs one, ask through
     the orchestrator.
 

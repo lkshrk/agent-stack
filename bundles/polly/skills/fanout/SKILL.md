@@ -21,11 +21,14 @@ dependency).
    work only inside `.worktrees/<task_id>`. The worker drives the task to green
    and opens its OWN PR for the branch. Commits and PR texts carry no AI
    attribution (no Co-authored-by trailer, no session link).
-   For a change under the repo's UI paths (Routivo: `frontend/**`), the
-   contract requires the repository's sandbox check (Routivo:
-   `scripts/sandbox-check.sh`) with PNG screenshots pushed to a
-   `pr-assets/<task-branch>` branch and their blob URLs linked in a PR comment;
-   missing e2e evidence is a blocking review finding.
+   The contract asks the worker to verify through the repository's own dev and
+   test entry points (Makefile targets, package scripts, compose, the CI
+   steps), with e2e only against loopback URLs. For a UI change, the e2e run's
+   PNG screenshots go to a `pr-assets/<task-branch>` branch, linked by blob URL
+   in a PR comment. When the sandbox can't run e2e (for example it needs
+   Docker), the worker reports `e2e: not run (environment)`, a non-blocking
+   note that the Verifying stage covers later. Missing e2e evidence is a
+   blocking review finding only when the sandbox could have run it.
    For a long-running `claude_code` implementation with an explicit
    completion condition, the `input` may instead be one standalone
    `/goal <condition>` command containing that same task, worktree, acceptance

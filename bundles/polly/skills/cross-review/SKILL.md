@@ -24,7 +24,9 @@ anyone needs to read through.
    never regenerate the diff through model output.
 2. Run the deterministic gates first — tests / lint / typecheck via
    `sys_os_shell`. If red, re-dispatch the implementer to drive it green first;
-   don't involve the reviewer yet.
+   don't involve the reviewer yet. Missing e2e evidence is blocking only when
+   the sandbox could have run e2e; `e2e: not run (environment)` is a
+   non-blocking note.
    If a pytest result's count must be recorded or reconciled, collect ground
    truth with `python -m pytest --collect-only -q <same files>` against the
    exact file set/command/commit the implementer reported. Never use
