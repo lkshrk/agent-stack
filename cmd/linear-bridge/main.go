@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -62,9 +61,10 @@ func main() {
 	srv := newServer(listen, mux)
 
 	workerDone := make(chan struct{})
+	abort := make(chan struct{})
 	go func() {
 		defer close(workerDone)
-		work(in.queue, b)
+		work(in.queue, abort, b)
 	}()
 
 	stop := make(chan os.Signal, 1)
@@ -80,10 +80,12 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("linear-bridge: shutdown: %v", err)
+		close(abort)
+	} else {
+		close(in.queue)
 	}
-	close(in.queue)
 	select {
 	case <-workerDone:
 	case <-ctx.Done():
@@ -91,8 +93,23 @@ func main() {
 	}
 }
 
-func work(queue <-chan event, b *bridge) {
-	for ev := range queue {
+func work(queue <-chan event, abort <-chan struct{}, b *bridge) {
+	for {
+		var ev event
+		select {
+		case <-abort:
+			return
+		default:
+		}
+		select {
+		case <-abort:
+			return
+		case e, ok := <-queue:
+			if !ok {
+				return
+			}
+			ev = e
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), eventTimeout)
 		if err := b.handle(ctx, ev); err != nil {
 			log.Printf("linear-bridge: handle %s/%s: %v", ev.Type, ev.Action, err)

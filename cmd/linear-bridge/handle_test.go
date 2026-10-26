@@ -178,8 +178,21 @@ func TestWorkDrainsQueueThenReturns(t *testing.T) {
 	q <- loadEvent(t, "agent_session_created.json", nil)
 	q <- loadEvent(t, "agent_session_created.json", nil)
 	close(q)
-	work(q, b)
+	work(q, make(chan struct{}), b)
 	if len(l.thoughts) != 2 {
 		t.Fatalf("thoughts = %d", len(l.thoughts))
 	}
+}
+
+func TestWorkStopsOnAbortWithoutClosingQueue(t *testing.T) {
+	b, l, _ := newTestBridge()
+	q := make(chan event, 2)
+	q <- loadEvent(t, "agent_session_created.json", nil)
+	abort := make(chan struct{})
+	close(abort)
+	work(q, abort, b)
+	if len(l.thoughts) != 0 {
+		t.Fatalf("thoughts = %d", len(l.thoughts))
+	}
+	q <- loadEvent(t, "agent_session_created.json", nil)
 }
