@@ -58,8 +58,8 @@ runs:
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
           AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
-        cache-from: type=gha,scope=${{ inputs.image }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
+        cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref=ghcr.io/{0}/{1}:buildcache,mode=max,ignore-error=true', github.repository, inputs.image) || '' }}
     - name: Create h-cloud deployment token
       if: inputs.version != '' && inputs.app != ''
       id: deploy-token
