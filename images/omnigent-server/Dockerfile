@@ -2,7 +2,7 @@ ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.19.1
 
 FROM ${OMNIGENT_SERVER_IMAGE}
 
-COPY agents/ /agents/
+COPY bundles/ /agents/
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
