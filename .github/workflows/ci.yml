@@ -91,7 +91,7 @@ jobs:
           file: images/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64
           push: false
-          load: ${{ matrix.image == 'hermes-webui' || matrix.image == 'omnigent-server' }}
+          load: ${{ matrix.image == 'hermes-webui' || matrix.image == 'omnigent-server' || matrix.image == 'omnigent-host' }}
           tags: agent-stack/${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}
       - name: Start hermes-webui offline and require a healthy agent
@@ -118,6 +118,15 @@ jobs:
         run: |
           docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-server:ci \
             /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+      - name: Test the agent-stack policies inside the Omnigent runner
+        if: matrix.image == 'omnigent-host'
+        run: |
+          docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-host:ci \
+            /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+      - name: Start a throwaway PostgreSQL in the Omnigent runner as the sandbox user
+        if: matrix.image == 'omnigent-host'
+        run: |
+          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/with-postgres.sh
 
   gate:
     if: always()
