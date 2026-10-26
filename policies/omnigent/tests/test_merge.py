@@ -102,3 +102,21 @@ class NoMergeTest(unittest.TestCase):
     def test_no_merge_other_tools_abstain(self):
         self.assertIsNone(no_merge()(tool_call_event("Read", {"file_path": "a"})))
         self.assertIsNone(no_merge()({"type": "other"}))
+
+
+class QuoteAwareMergeTest(unittest.TestCase):
+    def test_quoted_text_allowed(self):
+        for command in (
+            'git commit -m "fix: a; b"',
+            "git commit -m \"don't push yet\"",
+            'gh pr create --title x --body "Don\'t merge until CI is green"',
+            'grep -E "merge|push" log',
+            "git commit -m \"$(cat <<'EOF'\nIt's done\nEOF\n)\"",
+        ):
+            self.assertEqual(run(command)["result"], "ALLOW", command)
+
+    def test_newline_separates_statements(self):
+        self.assertEqual(run("echo a\ngh pr merge 5")["result"], "DENY")
+
+    def test_nested_shell_login_flag(self):
+        self.assertEqual(run("bash -lc 'git push origin main'")["result"], "DENY")

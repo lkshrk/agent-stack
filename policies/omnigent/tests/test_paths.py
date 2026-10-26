@@ -142,3 +142,40 @@ class ShellTest(unittest.TestCase):
 
     def test_shell_without_command_allowed(self):
         self.assertEqual(path_guard(deny=[WORKFLOWS])(tool_call_event("bash"))["result"], "ALLOW")
+
+
+class QuoteAwareTest(unittest.TestCase):
+    def test_quoted_operators_allowed(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        for command in (
+            'grep -E "foo|bar" src',
+            'git commit -m "fix: a; b"',
+            "git commit -m \"$(cat <<'EOF'\nIt's done\nEOF\n)\"",
+        ):
+            self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], "ALLOW", command)
+
+    def test_newline_separates_statements(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        decision = policy(tool_call_event("bash", {"command": "echo a\ncat > .github/workflows/x.yml"}))
+        self.assertEqual(decision["result"], "DENY")
+
+    def test_directory_itself_matches_trailing_double_star(self):
+        self.assertTrue(glob_match(".github/workflows", WORKFLOWS))
+        self.assertFalse(glob_match(".github/workflowsx", WORKFLOWS))
+        policy = path_guard(deny=[WORKFLOWS])
+        for command in (
+            "cp new.yml .github/workflows",
+            "mv x.yml .github/workflows",
+            "rm -rf .github/workflows",
+        ):
+            decision = policy(tool_call_event("bash", {"command": command}))
+            self.assertEqual(decision["result"], "DENY", command)
+
+    def test_nested_shell_checked(self):
+        policy = path_guard(deny=[WORKFLOWS])
+        for command in (
+            'bash -c "echo x > .github/workflows/ci.yml"',
+            "sh -lc 'rm .github/workflows/ci.yml'",
+        ):
+            decision = policy(tool_call_event("bash", {"command": command}))
+            self.assertEqual(decision["result"], "DENY", command)

@@ -1,10 +1,10 @@
 import os
 import re
-import shlex
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from .paths import SHELL_TOOLS, shell_command, split_statements
+from ._shell import shell_command, walk
+from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")
@@ -21,21 +21,15 @@ def _refspec_destination(refspec: str) -> str:
     return destination.removeprefix("refs/heads/")
 
 
-def _check_statement(statement: str, protected: frozenset[str]) -> str | None:
-    if ("$(" in statement or "`" in statement) and ("merge" in statement or "push" in statement):
+def _has_substitution(tokens: list[str]) -> bool:
+    return any("`" in t for t in tokens) or any(
+        a == "$" and b == "(" for a, b in zip(tokens, tokens[1:])
+    )
+
+
+def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None:
+    if _has_substitution(tokens) and ("merge" in tokens or "push" in tokens):
         return "command substitution around merge or push"
-    try:
-        tokens = shlex.split(statement)
-    except ValueError:
-        if "merge" in statement or "push" in statement:
-            return "unparseable merge or push command"
-        return None
-    for token in tokens:
-        if re.search(r"\s", token):
-            for inner in split_statements(token):
-                reason = _check_statement(inner, protected)
-                if reason:
-                    return reason
     names = [os.path.basename(t) for t in tokens]
     if "gh" in names:
         rest = tokens[names.index("gh") + 1 :]
@@ -70,8 +64,15 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             return None
         if arguments.get("_unparseable"):
             return deny("unparseable tool arguments")
-        for statement in split_statements(shell_command(arguments)):
-            reason = _check_statement(statement, protected)
+        command = shell_command(arguments)
+        try:
+            statements = walk(command)
+        except ValueError:
+            if "merge" in command or "push" in command:
+                return deny("unparseable merge or push command; simplify the command")
+            return allow()
+        for tokens in statements:
+            reason = _check_statement(tokens, protected)
             if reason:
                 return deny(f"{reason} is not allowed; open or update a pull request instead")
         return allow()

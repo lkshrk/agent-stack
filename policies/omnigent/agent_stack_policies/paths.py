@@ -1,10 +1,10 @@
 import re
-import shlex
 from collections.abc import Callable
 from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
+from ._shell import shell_command, walk
 
 WRITE_TOOLS = frozenset(
     {"Write", "Edit", "MultiEdit", "NotebookEdit", "sys_os_write", "sys_os_edit", "write", "edit"}
@@ -12,8 +12,6 @@ WRITE_TOOLS = frozenset(
 SHELL_TOOLS = frozenset({"sys_os_shell", "Bash", "bash", "Shell", "terminal", "shell"})
 PATH_KEYS = ("file_path", "path", "notebook_path")
 
-_STATEMENT_SPLIT = re.compile(r"&&|\|\||;|\||\n")
-_REDIRECT_PREFIX = re.compile(r"^(?:&>>?|\d*>>?|<)+")
 _FLAG_PREFIX = re.compile(r"^--[^=\s]+=")
 
 
@@ -29,7 +27,10 @@ def _compile(pattern: str) -> re.Pattern:
     out = []
     i = 0
     while i < len(pattern):
-        if pattern.startswith("**/", i):
+        if pattern.startswith("/**", i) and i + 3 == len(pattern):
+            out.append("(?:/.*)?")
+            i += 3
+        elif pattern.startswith("**/", i):
             out.append("(?:.*/)?")
             i += 3
         elif pattern.startswith("**", i):
@@ -56,15 +57,6 @@ def glob_match(path: str, pattern: str) -> bool:
 
 def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(glob_match(path, p) for p in patterns)
-
-
-def split_statements(command: str) -> list[str]:
-    return [s.strip() for s in _STATEMENT_SPLIT.split(command) if s.strip()]
-
-
-def shell_command(arguments: dict) -> str:
-    command = arguments.get("command", arguments.get("cmd", ""))
-    return command if isinstance(command, str) else ""
 
 
 def path_guard(
@@ -96,15 +88,15 @@ def path_guard(
         return allow()
 
     def check_shell(arguments: dict) -> Decision:
-        for statement in split_statements(shell_command(arguments)):
-            try:
-                tokens = shlex.split(statement)
-            except ValueError:
-                if denied:
-                    return _deny("unparseable shell command while forbidden paths are set")
-                continue
+        try:
+            statements = walk(shell_command(arguments))
+        except ValueError:
+            if denied:
+                return _deny("unparseable shell command while forbidden paths are set")
+            return allow()
+        for tokens in statements:
             for token in tokens:
-                candidate = _FLAG_PREFIX.sub("", _REDIRECT_PREFIX.sub("", token))
+                candidate = _FLAG_PREFIX.sub("", token)
                 if candidate and forbidden(candidate):
                     return _deny(
                         f"forbidden path {candidate} in shell command; use the Read tool for reads"
