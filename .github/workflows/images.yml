@@ -41,6 +41,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release version without the leading v, the runner tag the server image pins
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: echo "semver=${VERSION#v}" >>"$GITHUB_OUTPUT"
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
@@ -59,6 +64,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            AGENT_STACK_VERSION=${{ matrix.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
       - name: Create h-cloud deployment token

@@ -128,6 +128,25 @@ jobs:
         run: |
           docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-server:ci \
             /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+      - name: Pin the runner of the same release in a release build of the server
+        if: matrix.image == 'omnigent-server'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: images/omnigent-server/Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: agent-stack/omnigent-server:ci-release
+          build-args: AGENT_STACK_VERSION=9.8.7
+          cache-from: type=gha,scope=${{ matrix.image }}
+      - name: Check the runner pin of both server builds
+        if: matrix.image == 'omnigent-server'
+        run: |
+          set -euo pipefail
+          pin() { docker run --rm --entrypoint "" "$1" grep -E '^    image: ghcr.io/lkshrk/agent-stack/omnigent-host:' /etc/omnigent/config.yaml; }
+          [ "$(pin agent-stack/omnigent-server:ci-release)" = "    image: ghcr.io/lkshrk/agent-stack/omnigent-host:9.8.7" ]
+          [ "$(pin agent-stack/omnigent-server:ci)" = "$(grep -E '^    image: ghcr.io/lkshrk/agent-stack/omnigent-host:' config/omnigent/config.yaml)" ]
       - name: Test the agent-stack policies inside the Omnigent runner
         if: matrix.image == 'omnigent-host'
         run: |

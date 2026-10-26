@@ -8,5 +8,13 @@ COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_sta
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
  && chmod -R a+rX /opt/agent-stack
 
+# Release builds pin the runner of the same release, which carries the policy package these bundles need.
+ARG AGENT_STACK_VERSION=""
+RUN if [ -n "$AGENT_STACK_VERSION" ]; then \
+      printf '%s\n' "$AGENT_STACK_VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?' \
+      && sed -i -E "s#^(    image: ghcr\.io/lkshrk/agent-stack/omnigent-host:).*#\1${AGENT_STACK_VERSION}#" /etc/omnigent/config.yaml \
+      && grep -Fqx "    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}" /etc/omnigent/config.yaml; \
+    fi
+
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
 CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly"]

@@ -5,12 +5,16 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 | Image | Contents |
 | --- | --- |
 | `omnigent-host/` | Runner: Omnigent host, Claude Code, Codex, omp with the workstation's shared skills and MCP servers, the `runner` plugin and others, LSPs and toolchains, project tooling for the sandbox (`with-postgres` for a throwaway PostgreSQL 18, DuckDB with the spatial extension, libvips, osmium, Playwright Chromium), agent home seeding, credential helpers and the `agent_stack_policies` package, which the runner resolves at session start |
-| `omnigent-server/` | Omnigent server with `bundles/`, `config/omnigent/config.yaml` and the `agent_stack_policies` package baked in |
+| `omnigent-server/` | Omnigent server with `bundles/`, `config/omnigent/config.yaml` and the `agent_stack_policies` package baked in. A release build pins the runner image of the same release (see below) |
 | `agent-tools/` | The Go programs from `cmd/` on distroless |
 | `hermes/` | Hermes with its managed configuration from `config/hermes/`, git and the vault tooling |
 | `hermes-webui/` | Hermes web UI; pins the same Hermes image as `hermes/` (checked in CI) |
 
-Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside the server image with `AGENT_STACK_IN_IMAGE=1`.
+Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside both images with `AGENT_STACK_IN_IMAGE=1`.
+
+## Runner pin in the server image
+
+The bundles resolve `agent_stack_policies` handlers inside the runner, so a server image must never point at a runner older than its bundles. `images.yml` builds `omnigent-server` with `AGENT_STACK_VERSION` set to the release version (the leading `v` removed), and the Dockerfile rewrites `sandbox.kubernetes.image` in the baked config to `ghcr.io/lkshrk/agent-stack/omnigent-host:<version>`, the runner built in the same release run. The rewrite is a tag pin without a digest. PR and local builds leave the argument empty and keep the pin checked in to `config/omnigent/config.yaml`. CI builds the server once more with the argument set and checks the rewritten line.
 
 ## Runner sandbox tooling
 
