@@ -40,3 +40,29 @@ sandbox:
       - secret_name: agent-github-tokens
         mount_path: /agent-secrets/github
 
+policy_modules: [agent_stack_policies]
+
+policies:
+  no_merge:
+    type: function
+    function:
+      path: agent_stack_policies.merge.no_merge
+      arguments: {}
+  path_guard:
+    type: function
+    function:
+      path: agent_stack_policies.paths.path_guard
+      arguments:
+        deny:
+          - ".github/workflows/**"
+          - "**/*.sops.yaml"
+          - "**/.env"
+          - "**/.env.*"
+          - "**/*.pem"
+          - "**/*.key"
+          - ".pilot/**"
+          - AGENTS.md
+          - CLAUDE.md
+          - "lefthook.y*ml"
+          - CODEOWNERS
+        exempt: ["**/.env.example"]

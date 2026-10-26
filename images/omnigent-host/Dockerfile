@@ -81,5 +81,9 @@ RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
  && rm -rf /opt/agent/claude-home/.claude/plugins/cache/*/.git \
  && chmod -R a+rX /opt/agent
 
+COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
+RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
+ && chmod -R a+rX /opt/agent-stack
+
 WORKDIR /root
 CMD ["sleep", "infinity"]

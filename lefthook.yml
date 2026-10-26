@@ -24,6 +24,9 @@ pre-commit:
     plugin-tests:
       glob: "plugins/{linear,personal}/**"
       run: 'for d in linear personal; do (cd plugins/$d && env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX bun test) || exit 1; done'
+    policies-tests:
+      glob: "policies/omnigent/**"
+      run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent
 
 pre-push:
   parallel: true

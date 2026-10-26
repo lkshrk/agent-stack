@@ -24,6 +24,7 @@ jobs:
     outputs:
       go: ${{ steps.filter.outputs.go }}
       images: ${{ steps.filter.outputs.images }}
+      policies: ${{ steps.filter.outputs.policies }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: hermes and hermes-webui pin the same Hermes image
@@ -41,9 +42,14 @@ jobs:
               - 'images/**'
               - 'bundles/**'
               - 'config/**'
+              - 'policies/**'
               - 'cmd/**'
               - 'go.mod'
               - 'go.sum'
+            policies:
+              - 'policies/omnigent/**'
+              - 'bundles/**'
+              - 'config/omnigent/**'
 
   go:
     needs: changes
@@ -59,6 +65,14 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
+
+  policies:
+    needs: changes
+    if: needs.changes.outputs.policies == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 
   images:
     needs: changes
@@ -77,7 +91,7 @@ jobs:
           file: images/${{ matrix.image }}/Dockerfile
           platforms: linux/amd64
           push: false
-          load: ${{ matrix.image == 'hermes-webui' }}
+          load: ${{ matrix.image == 'hermes-webui' || matrix.image == 'omnigent-server' }}
           tags: agent-stack/${{ matrix.image }}:ci
           cache-from: type=gha,scope=${{ matrix.image }}
       - name: Start hermes-webui offline and require a healthy agent
@@ -99,10 +113,15 @@ jobs:
           grep -q 'Dependencies already installed' <(docker logs webui 2>&1)
           grep -q 'Hermes agent critical imports verified' <(docker logs webui 2>&1)
           docker exec -u 10000 webui test -r /etc/hermes/config.yaml
+      - name: Test the agent-stack policies inside the Omnigent server
+        if: matrix.image == 'omnigent-server'
+        run: |
+          docker run --rm --entrypoint "" -e AGENT_STACK_IN_IMAGE=1 -v "$PWD:/src:ro" -w /src agent-stack/omnigent-server:ci \
+            /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 
   gate:
     if: always()
-    needs: [changes, go, images]
+    needs: [changes, go, policies, images]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job that ran to succeed
