@@ -50,7 +50,7 @@ func (t *tokenSource) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	if err != nil {
 		return "", err
@@ -141,7 +141,7 @@ func (g *graphQL) post(ctx context.Context, token string, payload []byte) (int, 
 	if err != nil {
 		return 0, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxRespBytes))
 	return resp.StatusCode, raw, err
 }

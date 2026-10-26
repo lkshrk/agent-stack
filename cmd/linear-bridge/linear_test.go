@@ -31,7 +31,7 @@ func newTokenServer(t *testing.T) *tokenServer {
 		ts.auth = r.Header.Get("Authorization")
 		n := ts.calls
 		ts.mu.Unlock()
-		fmt.Fprintf(w, `{"access_token":"tok%d","token_type":"Bearer","expires_in":2592000,"scope":"x"}`, n)
+		_, _ = fmt.Fprintf(w, `{"access_token":"tok%d","token_type":"Bearer","expires_in":2592000,"scope":"x"}`, n)
 	}))
 	t.Cleanup(ts.Close)
 	return ts
@@ -117,7 +117,7 @@ func gqlServer(t *testing.T, respond func(n int, w http.ResponseWriter)) (*httpt
 func TestGraphQLArchiveSendsMutation(t *testing.T) {
 	ts := newTokenServer(t)
 	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
-		fmt.Fprint(w, `{"data":{"issueArchive":{"success":true}}}`)
+		_, _ = fmt.Fprint(w, `{"data":{"issueArchive":{"success":true}}}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
 	if err := g.ArchiveIssue(context.Background(), "issue-1"); err != nil {
@@ -132,7 +132,7 @@ func TestGraphQLArchiveSendsMutation(t *testing.T) {
 func TestGraphQLThoughtSendsMutation(t *testing.T) {
 	ts := newTokenServer(t)
 	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
-		fmt.Fprint(w, `{"data":{"agentActivityCreate":{"success":true}}}`)
+		_, _ = fmt.Fprint(w, `{"data":{"agentActivityCreate":{"success":true}}}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
 	if err := g.Thought(context.Background(), "sess-1", "hello"); err != nil {
@@ -147,7 +147,7 @@ func TestGraphQLThoughtSendsMutation(t *testing.T) {
 func TestGraphQLSuccessFalseIsError(t *testing.T) {
 	ts := newTokenServer(t)
 	srv, _ := gqlServer(t, func(_ int, w http.ResponseWriter) {
-		fmt.Fprint(w, `{"data":{"issueArchive":{"success":false}}}`)
+		_, _ = fmt.Fprint(w, `{"data":{"issueArchive":{"success":false}}}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
 	if err := g.ArchiveIssue(context.Background(), "x"); err == nil {
@@ -158,7 +158,7 @@ func TestGraphQLSuccessFalseIsError(t *testing.T) {
 func TestGraphQLErrorsIsError(t *testing.T) {
 	ts := newTokenServer(t)
 	srv, _ := gqlServer(t, func(_ int, w http.ResponseWriter) {
-		fmt.Fprint(w, `{"errors":[{"message":"nope"}]}`)
+		_, _ = fmt.Fprint(w, `{"errors":[{"message":"nope"}]}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
 	if err := g.Thought(context.Background(), "s", "b"); err == nil || !strings.Contains(err.Error(), "nope") {
@@ -173,7 +173,7 @@ func TestGraphQLRetriesOnceOn401(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		fmt.Fprint(w, `{"data":{"issueArchive":{"success":true}}}`)
+		_, _ = fmt.Fprint(w, `{"data":{"issueArchive":{"success":true}}}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
 	if err := g.ArchiveIssue(context.Background(), "x"); err != nil {

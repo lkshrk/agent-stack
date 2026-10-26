@@ -232,8 +232,8 @@ func TestServerCutsOffStalledBody(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
-	fmt.Fprint(conn, "POST /webhooks/linear HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n{")
+	defer func() { _ = conn.Close() }()
+	_, _ = fmt.Fprint(conn, "POST /webhooks/linear HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\n{")
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	start := time.Now()
 	_, _ = io.ReadAll(conn)
