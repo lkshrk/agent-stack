@@ -14,21 +14,13 @@
       "updated": "2026-09-05"
     },
     {
-      "url": "https://www.method.gg/guides/elemental-shaman/stats-races-and-consumables",
-      "updated": "2026-09-01"
-    },
-    {
-      "url": "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables",
-      "updated": "2026-09-03"
-    },
-    {
       "url": "https://murlok.io/hunter/beast-mastery/m+",
       "updated": null
     }
   ],
   "stat_guidance": {
-    "single_target": "Weapon damage > Agility > Mastery > Haste >= Crit > Versatility.",
-    "aoe": "Weapon damage > Agility > Mastery > Crit > Versatility = Haste.",
+    "single_target": null,
+    "aoe": null,
     "personal_sim_performed": false
   },
   "recommendations": {
@@ -58,12 +50,13 @@
   "conditions": [
     "Liquid Luster: use six seconds before the pull. Potion of Recklessness is an alternative when Mastery is highest.",
     "Shattered Sun is another listed flask option.",
-    "Guide stat overview contradicts its ranking on Agility; simulate gear rather than assuming fixed weights.",
-    "Rite of the Hash'ey application item corroborated by Elemental guide; Hunter guide links its spell."
+    "Guide stat overview contradicts its ranking on Agility; simulate gear rather than assuming fixed weights."
   ],
   "unresolved": [
+    "Stat guidance and every recommendation were drawn partly from the Elemental Shaman and Survival Hunter guides and must be rechecked against the Beast Mastery Hunter guide.",
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
     "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
+  "recheck": "Sources corrected to the Beast Mastery Hunter guide and murlok page; stat guidance cleared and recommendations unverified against that guide."
 }

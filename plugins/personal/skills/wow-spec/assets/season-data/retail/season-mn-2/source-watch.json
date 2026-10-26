@@ -1360,7 +1360,6 @@
     "https://www.method.gg/guides/elemental-shaman/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
-        253,
         262
       ],
       "sha256": "501a31fa6eeccf42bf8ca1c04cb875a56a33feb8863358cfa8af902842899f74"
@@ -1522,8 +1521,6 @@
     "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables": {
       "kind": "guide",
       "spec_ids": [
-        253,
-        254,
         255
       ],
       "sha256": "59a868b9029548f176310ba47717df606a4bc4d8ba4040a6447f44efded382b5"

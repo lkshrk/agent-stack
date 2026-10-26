@@ -44,6 +44,12 @@ class PreDiff(unittest.TestCase):
         self.assertEqual(diff_spec(docs['spec-265.json'], {GUIDE: sources[GUIDE]}), {})
         self.assertEqual(classify(docs, sources)[265]['status'], 'unchanged')
 
+    def test_recheck_flag_sends_an_otherwise_matching_spec_to_claude(self):
+        docs = documents(recheck='sources corrected')
+        status = classify(docs, {GUIDE: live()})[265]
+        self.assertEqual(status['status'], 'incomplete')
+        self.assertIn('sources corrected', status['reason'])
+
     def test_removed_item_and_stat_change_are_reported(self):
         docs = documents()
         docs['spec-265.json']['recommendations']['consumables']['flask'] = 'item:241324'

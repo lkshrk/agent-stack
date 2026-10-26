@@ -139,7 +139,10 @@ def classify(documents, sources):
             continue
         differences = diff_spec(setup, guides)
         lacking = {u: missing_parts(g['extract']) for u, g in live_guides(setup, sources, complete=False).items() if u not in guides}
-        if differences:
+        if setup.get('recheck'):
+            result[entry['spec_id']] = {**info, 'status': 'incomplete', 'differences': differences,
+                                        'reason': 'Marked for recheck: ' + str(setup['recheck'])}
+        elif differences:
             result[entry['spec_id']] = {**info, 'status': 'changed', 'differences': differences}
         elif lacking:
             result[entry['spec_id']] = {**info, 'status': 'incomplete', 'differences': {},

@@ -12,14 +12,14 @@ import sys
 from urllib.parse import urlparse
 
 from check_wow_season_updates import active_bundle, fingerprint, observe, refs, targets, watch_record
-from enrich_wow_catalog import enrich
+from enrich_wow_catalog import UNEVALUATED, enrich
 from prediff_wow_specs import classify, live_guides, needs_advance
 
 ALLOWED = re.compile(r'(catalog|index|source-watch|spec-\d+)\.json')
 # Provenance and verification bookkeeping; a change confined to these is not a player-visible update.
 BOOKKEEPING = {'verified_at', 'identity_verified_at', 'verified_patch', 'captured_at', 'updated', 'sources',
                'unresolved', 'unknown_fields', 'quality_note', 'identity_verification', 'verification_basis',
-               'validation_scope', 'coverage', 'tooltip_enriched_at'}
+               'validation_scope', 'coverage', 'tooltip_enriched_at', 'recheck'}
 
 
 def load_bundle(path):
@@ -48,6 +48,48 @@ def sources_valid(sources):
 def valid_date(value):
     if date.fromisoformat(value) > date.today():
         raise ValueError('Verification date is in the future')
+
+
+def record_errors(key, record):
+    identity = int(key.split(':')[1])
+    for field, value in record.items():
+        if field in ('item_id', 'spell_id', 'sources', 'name'):
+            continue
+        if isinstance(value, str) and (UNEVALUATED.search(value) or re.search(rf'(?<![\d.]){identity}(?![\d.])', value)):
+            raise ValueError(f'Unevaluated expression or item id used as a value in {key}.{field}')
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value == identity:
+            raise ValueError(f'Item id used as a value in {key}.{field}')
+
+
+def slug(text):
+    return re.sub(r'[^a-z0-9]+', '-', text.casefold()).strip('-')
+
+
+def source_mapping_errors(documents, agree=None):
+    errors = []
+    watch = documents['source-watch.json'].get('sources', {})
+    cited = {}
+    for entry in documents['index.json']['specs']:
+        setup = documents[entry['file']]
+        spec_id = entry['spec_id']
+        for source in setup['sources']:
+            url = source['url'] if isinstance(source, dict) else source
+            host, parts = urlparse(url).netloc, [p for p in urlparse(url).path.split('/') if p]
+            if 'class' in entry and 'spec' in entry:
+                if host.endswith('method.gg') and len(parts) >= 2 and parts[0] == 'guides' \
+                        and parts[1] != f'{slug(entry["spec"])}-{slug(entry["class"])}':
+                    errors.append(f'spec {spec_id} cites the {parts[1]} guide: {url}')
+                if host.endswith('murlok.io') and len(parts) >= 2 and parts[:2] != [slug(entry['class']), slug(entry['spec'])]:
+                    errors.append(f'spec {spec_id} cites another spec on murlok.io: {url}')
+            if host.endswith('method.gg'):
+                cited.setdefault(url, set()).add(spec_id)
+    for url in sorted(set(cited) | {u for u, v in watch.items() if v.get('kind') == 'guide'}):
+        if agree is not None and url not in agree:
+            continue
+        recorded = set(watch.get(url, {}).get('spec_ids', []))
+        if recorded != cited.get(url, set()):
+            errors.append(f'{url}: specs cite {sorted(cited.get(url, set()))} but source-watch lists {sorted(recorded)}')
+    return errors
 
 
 def identity_checks(old, candidate):
@@ -110,6 +152,7 @@ def validate(old, candidate, result, observation, checked=None):
             raise ValueError('Invalid item/spell identity')
         if record.get('status') != 'verified' or record['name'].startswith(('Recipe:', 'Formula:')):
             raise ValueError('Unverified identity or recipe used as an item')
+        record_errors(key, record)
         sources_valid(record['sources'])
         valid_date(record['verified_at'])
         valid_date(record['identity_verified_at'])
@@ -191,6 +234,9 @@ def validate(old, candidate, result, observation, checked=None):
         if watch['sources'].get(url) != watch_record(current):
             watch['sources'][url] = watch_record(current)
             fingerprints_changed = True
+    mismatches = source_mapping_errors(refreshed, agree=set(accepted))
+    if mismatches:
+        raise ValueError('Source mapping inconsistent: ' + '; '.join(mismatches))
     if fingerprints_changed:
         watch['captured_at'] = observation['current']['captured_at']
     return refreshed

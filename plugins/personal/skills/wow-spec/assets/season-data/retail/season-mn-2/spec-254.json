@@ -14,10 +14,6 @@
       "updated": "2026-09-05"
     },
     {
-      "url": "https://www.method.gg/guides/survival-hunter/stats-races-and-consumables",
-      "updated": "2026-09-03"
-    },
-    {
       "url": "https://murlok.io/hunter/marksmanship/m+",
       "updated": null
     }
@@ -55,8 +51,10 @@
     "Magisters is another listed flask option."
   ],
   "unresolved": [
+    "Recommendations may rely on the Survival Hunter guide and must be rechecked against the Marksmanship Hunter guide.",
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
     "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
+  "recheck": "Survival Hunter guide removed from sources; recommendations unverified against the Marksmanship Hunter guide alone."
 }

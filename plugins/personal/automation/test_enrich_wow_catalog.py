@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-from enrich_wow_catalog import enrich, parse_tooltip
+from enrich_wow_catalog import evaluate, enrich, parse_tooltip
 
 FIXTURES = Path(__file__).parent / 'fixtures'
 
@@ -60,6 +60,49 @@ class Enrichment(unittest.TestCase):
         data = {'name': 'Enchant X', 'tooltip': '<span id="useText1">Use: Permanently enchants for 15 sec bursts.</span><!--useText:1-->'}
         catalog = {'records': {'item:5': record(item_id=5, name='Enchant X', category='enchant')}}
         self.assertEqual(list(enrich(catalog, 'd', fetcher=lambda *a: data)['item:5']), ['effect'])
+
+
+def use_tooltip(text):
+    return {'name': 'X', 'tooltip': f'<span id="useText1">Use: {text}</span><!--useText:1-->'}
+
+
+class Sanitising(unittest.TestCase):
+    def test_item_id_rendered_as_the_amount_is_not_stored(self):
+        data = tooltip(241304)
+        found = parse_tooltip(data, 241304)
+        self.assertNotIn('effect', found)
+        self.assertIn('241304', found['unresolved_note'])
+
+    def test_item_id_amount_is_recorded_as_unresolved_in_the_catalogue(self):
+        catalog = {'records': {'item:241304': record(item_id=241304, name='Silvermoon Health Potion')}}
+        changes = enrich(catalog, 'd', fetcher=lambda *a: tooltip(241304))
+        stored = catalog['records']['item:241304']
+        self.assertIsNone(stored['effect'])
+        self.assertEqual(len(stored['unresolved']), 1)
+        self.assertNotIn('effect', changes['item:241304'])
+
+    def test_formulas_are_evaluated_and_rounded(self):
+        cases = {'restore ( 3930 * 10) mana over 10 sec': 'restore 39300 mana over 10 sec',
+                 'gain ( 64 * .9) Mastery for 1 hour.': 'gain 58 Mastery for 1 hour.',
+                 'gain ( 50 * .7) primary stat': 'gain 35 primary stat',
+                 'and ( 64 ) of your highest secondary stat': 'and 64 of your highest secondary stat',
+                 'gain ((10 + 5) / 2) Haste': 'gain 8 Haste'}
+        for raw, expected in cases.items():
+            self.assertEqual(parse_tooltip(use_tooltip(raw), 5)['effect'], expected)
+
+    def test_plain_parentheses_are_left_alone(self):
+        self.assertEqual(parse_tooltip(use_tooltip('Unique (1) charge'), 5)['effect'], 'Unique (1) charge')
+
+    def test_unsafe_or_unevaluable_expressions_leave_the_effect_null_with_a_reason(self):
+        for raw in ['gain ( 1 / 0 ) Haste', 'gain ( 2 ** 99999 ) Haste', 'gain ( 1 * $s1 ) Haste', 'gain ( 5 * ) Haste']:
+            found = parse_tooltip(use_tooltip(raw), 5)
+            self.assertNotIn('effect', found, raw)
+            self.assertTrue(found['unresolved_note'], raw)
+
+    def test_evaluate_rejects_names_and_calls(self):
+        for expression in ['__import__("os")', 'a + 1', '2 ** 3', '(1).real', '"x"']:
+            with self.assertRaises((ValueError, SyntaxError)):
+                evaluate(expression)
 
 
 if __name__ == '__main__':
