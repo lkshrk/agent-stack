@@ -28,6 +28,7 @@ type event struct {
 	WebhookTimestamp int64           `json:"webhookTimestamp"`
 	Data             json.RawMessage `json:"data"`
 	AgentSession     json.RawMessage `json:"agentSession"`
+	AgentActivity    json.RawMessage `json:"agentActivity"`
 }
 
 func verifySignature(secret, body []byte, header string) bool {
