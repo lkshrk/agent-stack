@@ -218,6 +218,13 @@ class ApplyPatchTest(unittest.TestCase):
             with self.subTest(header=header):
                 self.assertEqual(self.verdict({"command": patch("*** Add File: src/ok.py", header)}), "DENY")
 
+    def test_indented_header_checked(self):
+        for indent in ("\t", "  ", " \t "):
+            with self.subTest(indent=repr(indent)):
+                text = patch("*** Add File: src/b.py", f"{indent}*** Update File: .github/workflows/ci.yml")
+                self.assertEqual(self.verdict({"command": text}), "DENY")
+        self.assertEqual(self.verdict({"command": patch("  *** Update File: src/a.py")}), "ALLOW")
+
     def test_allowed_paths(self):
         arguments = {"input": patch("*** Add File: src/a.py", "*** Update File: deploy/.env.example")}
         self.assertEqual(self.verdict(arguments), "ALLOW")

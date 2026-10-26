@@ -313,6 +313,7 @@ CASES: list[Case] = [
     Case("security-review", "tool_call", "Bash", {"command": "cat deploy/.env.sops.yaml AGENTS.md"}, "ALLOW"),
     Case("planner", "tool_call", "sys_os_shell", {"command": "sed -n 1,40p CLAUDE.md"}, "ALLOW"),
     Case("security-review", "tool_call", "Bash", {"command": "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'"}, "DENY"),
+    Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]
 
 NESTED_AGENT_CASES = [

@@ -15,7 +15,7 @@ PATH_KEYS = ("file_path", "path", "notebook_path")
 PATCH_KEYS = ("command", "input", "patch")
 
 _FLAG_PREFIX = re.compile(r"^--[^=\s]+=")
-_PATCH_PATH = re.compile(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): *(.*?)\s*$", re.MULTILINE)
+_PATCH_PATH = re.compile(r"^[ \t]*\*\*\* (?:Add File|Update File|Delete File|Move to): *(.*?)\s*$", re.MULTILINE)
 _PATCH_BEGIN = "*** Begin Patch"
 
 
