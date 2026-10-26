@@ -18,7 +18,7 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.paths.path_guard",
         "kind": "factory",
         "name": "path_guard",
-        "description": "Deny writes and shell access to forbidden paths.",
+        "description": "Deny writes, apply_patch changes and shell access to forbidden paths.",
         "params_schema": {
             "type": "object",
             "properties": {
@@ -45,10 +45,24 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.merge.no_merge",
         "kind": "factory",
         "name": "no_merge",
-        "description": "Deny PR merges, pushes to protected branches and force-pushes.",
+        "description": "Deny PR merges, pushes to protected branches, tag and ref pushes and force-pushes.",
         "params_schema": {
             "type": "object",
             "properties": {"protected_branches": {"type": "array", "items": {"type": "string"}}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "handler": "agent_stack_policies.agents.no_nested_agents",
+        "kind": "factory",
+        "name": "no_nested_agents",
+        "description": (
+            "Deny shell commands that start an agent CLI non-interactively (claude -p, codex exec, "
+            "omp -p, opencode run), apply_patch through the shell and scripts piped into a shell."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"extra_commands": {"type": "array", "items": {"type": "string"}}},
             "additionalProperties": False,
         },
     },

@@ -5,9 +5,10 @@ import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_loop, test_merge, test_paths, test_result, test_spawn, test_tools, test_vcs
+from . import assert_not_ask, test_agents, test_loop, test_merge, test_paths, test_result, test_spawn, test_tools, test_vcs
 
 EVENTS_BY_MODULE = {
+    "agent_stack_policies.agents": test_agents.EVENTS,
     "agent_stack_policies.spawn": test_spawn.EVENTS,
     "agent_stack_policies.paths": test_paths.EVENTS,
     "agent_stack_policies.tools": test_tools.EVENTS,
@@ -18,6 +19,7 @@ EVENTS_BY_MODULE = {
     "agent_stack_policies.vcs": test_vcs.EVENTS,
 }
 DEFAULT_PARAMS = {
+    "agent_stack_policies.agents": {},
     "agent_stack_policies.spawn": {"limit": 3},
     "agent_stack_policies.paths": {"deny": [".github/workflows/**"], "allow_only": ["docs/**"]},
     "agent_stack_policies.tools": {"patterns": ["mcp__*linear_app-*"]},
