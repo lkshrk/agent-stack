@@ -13,13 +13,14 @@ from urllib.parse import urlparse
 
 from check_wow_season_updates import active_bundle, fingerprint, observe, refs, targets, watch_record
 from enrich_wow_catalog import UNEVALUATED, enrich
-from prediff_wow_specs import classify, live_guides, needs_advance
+from prediff_wow_specs import acknowledgement, classify, diff_spec, live_guides, needs_advance
 
 ALLOWED = re.compile(r'(catalog|index|source-watch|spec-\d+)\.json')
 # Provenance and verification bookkeeping; a change confined to these is not a player-visible update.
 BOOKKEEPING = {'verified_at', 'identity_verified_at', 'verified_patch', 'captured_at', 'updated', 'sources',
                'unresolved', 'unknown_fields', 'quality_note', 'identity_verification', 'verification_basis',
-               'validation_scope', 'coverage', 'tooltip_enriched_at'}
+               'validation_scope', 'coverage', 'tooltip_enriched_at', 'acknowledged_differences',
+               'patch_coverage'}
 
 
 def load_bundle(path):
@@ -161,6 +162,8 @@ def validate(old, candidate, result, observation, checked=None):
         setup = candidate[name]
         if setup.get('recheck') and setup['recheck'] != old.get(name, {}).get('recheck'):
             raise ValueError('Candidate may not set recheck: ' + name)
+        if setup.get('acknowledged_differences') != old.get(name, {}).get('acknowledged_differences'):
+            raise ValueError('Candidate may not set acknowledged_differences: ' + name)
         if setup.get('schema_version') != 1:
             raise ValueError('Unsupported spec schema')
         if entry['file'] != name or setup['spec_id'] != entry['spec_id']:
@@ -425,10 +428,35 @@ def advance_verified(docs, spec_ids, sources, today, require_unchanged):
     if done:
         index = docs['index.json']
         index['verified_at'] = docs['catalog.json']['verified_at'] = today
-        patches = {docs[f'spec-{e["spec_id"]}.json'].get('verified_patch') for e in index['specs']}
-        if len(patches) == 1:
-            index['verified_patch'] = patches.pop()
     return done
+
+
+def summarize_patches(docs):
+    """index verified_patch is the oldest spec patch; patch_coverage counts specs per patch."""
+    index = docs['index.json']
+    coverage = {}
+    for entry in index['specs']:
+        patch = docs[f'spec-{entry["spec_id"]}.json'].get('verified_patch')
+        if patch:
+            coverage[patch] = coverage.get(patch, 0) + 1
+    if coverage:
+        index['verified_patch'] = min(coverage, key=version_key)
+        index['patch_coverage'] = dict(sorted(coverage.items(), key=lambda item: version_key(item[0])))
+
+
+def acknowledge(docs, spec_ids, sources):
+    """Record the exact pre-diff differences Claude judged harmless, tied to the guide sections it saw."""
+    live = {s: v for s, v in sources.items() if v.get('kind') == 'guide'}
+    for sid in spec_ids:
+        name = f'spec-{sid}.json'
+        setup = copy.deepcopy(docs[name])
+        guides = live_guides(setup, live)
+        differences = diff_spec(setup, guides) if guides else {}
+        if differences:
+            setup['acknowledged_differences'] = acknowledgement(differences, guides)
+        else:
+            setup.pop('acknowledged_differences', None)
+        docs[name] = setup
 
 
 def record_informational(docs, observation):
@@ -472,6 +500,11 @@ def main(argv=None):
     direct = [i for i in rest if i not in outcomes['updated'] and i not in outcomes['unchanged']]
     advanced = advance_verified(docs, direct, sources, today, True)
     advanced += advance_verified(docs, outcomes['updated'] + outcomes['unchanged'], sources, today, False)
+    for spec_id in outcomes['updated']:
+        docs[f'spec-{spec_id}.json'].pop('acknowledged_differences', None)
+    acknowledge(docs, outcomes['unchanged'], sources)
+    if any(docs[n] != old.get(n) for n in docs if n.startswith('spec-')):
+        summarize_patches(docs)
     if any(docs[n] != old.get(n) for n in docs):
         record_informational(docs, observation)
     enriched = {} if args.no_enrich else enrich(docs['catalog.json'], today)

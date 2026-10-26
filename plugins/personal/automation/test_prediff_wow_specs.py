@@ -4,7 +4,7 @@ from pathlib import Path
 import unittest
 
 from check_wow_season_updates import analyze
-from prediff_wow_specs import classify, diff_spec, needs_advance, spec_task, stat_lines, summarize, top_picks
+from prediff_wow_specs import acknowledgement, classify, diff_spec, needs_advance, spec_task, stat_lines, summarize, top_picks
 
 GUIDE = 'https://www.method.gg/guides/affliction-warlock/stats-races-and-consumables'
 PAGE = (Path(__file__).parent / 'fixtures/method-affliction-warlock.html').read_text()
@@ -37,6 +37,52 @@ class StatLines(unittest.TestCase):
 
 
 class PreDiff(unittest.TestCase):
+    def test_equal_options_joined_by_or_or_slash_all_count_as_the_top_pick(self):
+        for spec_food in ('item:242275', 'item:255846'):
+            docs = documents()
+            docs['spec-265.json']['recommendations']['consumables']['food'] = spec_food
+            self.assertNotIn('top_pick_differs', diff_spec(docs['spec-265.json'], {GUIDE: live()}))
+        extract = {'consumables': 'Food: [item:1] Harandar Celebration / [item:2] Royal Roast Potions: [item:3] Light / [item:4] Other / [item:5] Third'}
+        self.assertEqual(top_picks(extract)[('consumables', 'food')], {1, 2})
+        self.assertEqual(top_picks(extract)[('consumables', 'combat_potion')], {3, 4, 5})
+        self.assertEqual(top_picks({'consumables': 'Food: [item:1] Roast, [item:2] Stew'})[('consumables', 'food')], {1})
+        self.assertEqual(top_picks({'gems': '[item:7] Diamond or [item:8] Other Diamond'})[('gems', 'unique')], {7, 8})
+
+    def acknowledged_setup(self, sources=None):
+        docs = documents()
+        docs['spec-265.json']['recommendations']['gems']['unique'] = 'item:111'
+        sources = sources or {GUIDE: live()}
+        found = diff_spec(docs['spec-265.json'], sources)
+        self.assertEqual(found['items_no_longer_listed'], {'gems': [111]})
+        return docs, sources, found
+
+    def test_acknowledged_difference_is_unchanged_until_the_difference_or_the_sections_move(self):
+        docs, sources, found = self.acknowledged_setup()
+        self.assertEqual(classify(docs, sources)[265]['status'], 'changed')
+        docs['spec-265.json']['acknowledged_differences'] = acknowledgement(found, sources)
+        verdict = classify(docs, sources)[265]
+        self.assertEqual((verdict['status'], verdict['acknowledged']), ('unchanged', True))
+        grown = copy.deepcopy(docs)
+        grown['spec-265.json']['recommendations']['consumables']['flask'] = 'item:241324'
+        self.assertEqual(classify(grown, sources)[265]['status'], 'changed')
+
+    def test_a_changed_guide_section_reflags_an_acknowledged_spec(self):
+        docs, sources, found = self.acknowledged_setup()
+        docs['spec-265.json']['acknowledged_differences'] = acknowledgement(found, sources)
+        page = PAGE.replace('Flawless Deadly Lapis', 'Flawless Deadly Lapis Lazuli', 1)
+        edited = {GUIDE: live(page)}
+        self.assertEqual(diff_spec(docs['spec-265.json'], edited), found)
+        self.assertEqual(classify(docs, edited)[265]['status'], 'changed')
+
+    def test_stat_priority_wording_does_not_create_a_difference(self):
+        for wording in ('Crit > Haste approximately Mastery > Versatility', 'Crit > Haste ≈ Mastery > Versatility',
+                        'Crit > Haste ~ Mastery > Versatility', 'Crit > Haste equal to Mastery > Versatility'):
+            self.assertEqual(stat_lines(wording), ['crit>haste=mastery>vers'], wording)
+            docs = documents(stat_guidance={'single_target': wording})
+            self.assertNotIn('stat_priority', diff_spec(docs['spec-265.json'], {GUIDE: live()}))
+        docs = documents(stat_guidance={'single_target': 'Haste > Crit approximately Mastery > Versatility'})
+        self.assertIn('stat_priority', diff_spec(docs['spec-265.json'], {GUIDE: live()}))
+
     def test_matching_spec_is_unchanged_and_needs_no_claude(self):
         docs = documents()
         docs['spec-265.json']['recommendations']['consumables']['flask'] = 'item:241326'
@@ -60,20 +106,20 @@ class PreDiff(unittest.TestCase):
 
     def test_top_listed_pick_per_slot_is_extracted_from_the_fixture(self):
         picks = top_picks(analyze('guide', PAGE)[1]['extract'])
-        self.assertEqual(picks[('enchants', 'head')], 244007)
-        self.assertEqual(picks[('enchants', 'shoulders')], 243991)
-        self.assertEqual(picks[('enchants', 'feet')], 243953)
-        self.assertEqual(picks[('consumables', 'food')], 242275)
-        self.assertEqual(picks[('consumables', 'flask')], 241326)
-        self.assertEqual(picks[('consumables', 'combat_potion')], 241308)
-        self.assertEqual(picks[('gems', 'unique')], 240967)
+        self.assertEqual(picks[('enchants', 'head')], {244007})
+        self.assertEqual(picks[('enchants', 'shoulders')], {243991})
+        self.assertEqual(picks[('enchants', 'feet')], {243953})
+        self.assertEqual(picks[('consumables', 'food')], {242275, 255846})
+        self.assertEqual(picks[('consumables', 'flask')], {241326})
+        self.assertEqual(picks[('consumables', 'combat_potion')], {241308})
+        self.assertEqual(picks[('gems', 'unique')], {240967})
         self.assertNotIn(('consumables', 'healing_potion'), picks)
 
     def test_a_different_top_pick_sends_the_spec_to_claude_even_if_the_old_item_is_still_listed(self):
         docs = documents()
-        docs['spec-265.json']['recommendations']['consumables']['food'] = 'item:255846'
+        docs['spec-265.json']['recommendations']['consumables']['food'] = 'item:241308'
         found = diff_spec(docs['spec-265.json'], {GUIDE: live()})
-        self.assertEqual(found['top_pick_differs'], {'consumables.food': {'live': 242275, 'spec': 255846}})
+        self.assertEqual(found['top_pick_differs'], {'consumables.food': {'live': [242275, 255846], 'spec': 241308}})
         self.assertNotIn('items_no_longer_listed', found)
 
     def test_slots_the_spec_does_not_track_are_not_compared(self):

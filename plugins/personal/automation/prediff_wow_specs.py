@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic comparison of each spec file with the live guide it cites; decides what needs Claude."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -15,11 +16,13 @@ PRIMARY = ('intellect', 'agility', 'strength', 'stamina')
 STATW = '|'.join(sorted([*STAT_WORDS, *PRIMARY], key=len, reverse=True))
 STAT_RUN = re.compile(rf'\b(?:{STATW})(?:[\s>=,/]+(?:{STATW}))+\b', re.I)
 ITEM_ID = re.compile(r'\[item:(\d+)\]')
+EQUAL_WORDS = re.compile(r'\s*(?:≈|~|\bapproximately\b|\bapprox\b\.?|\broughly\b|\bequal(?:s| to)?\b)\s*', re.I)
+ALTERNATIVE = re.compile(r'(?:\s/|/\s|\bor)\s*$', re.I)
 
 
 def stat_lines(text):
     lines = []
-    for run in STAT_RUN.finditer(text or ''):
+    for run in STAT_RUN.finditer(EQUAL_WORDS.sub(' = ', text or '')):
         tiers, joined = [], False
         for word, equals in re.findall(rf'({STATW})|(=)', run.group(0), re.I):
             if equals:
@@ -55,6 +58,19 @@ SLOT_LABELS = [('health potions?', None), ('weapon oils?', None), ('heads?', ('e
 LABEL = re.compile(r'(?<![\w-])(?:' + '|'.join(f'(?P<l{i}>{p})' for i, (p, _) in enumerate(SLOT_LABELS)) + r'):', re.I)
 
 
+def lead_ids(text):
+    """The first listed item plus any item joined to it by "/" or "or", all equally valid top picks."""
+    marks = list(ITEM_ID.finditer(text))
+    if not marks:
+        return None
+    ids = {int(marks[0].group(1))}
+    for before, after in zip(marks, marks[1:]):
+        if not ALTERNATIVE.search(text[before.end():after.start()].rstrip()):
+            break
+        ids.add(int(after.group(1)))
+    return ids
+
+
 def top_picks(extract):
     picks = {}
     for section in ('enchants', 'consumables'):
@@ -63,12 +79,12 @@ def top_picks(extract):
         for number, mark in enumerate(marks):
             slot = SLOT_LABELS[int(mark.lastgroup[1:])][1]
             end = marks[number + 1].start() if number + 1 < len(marks) else len(text)
-            first = ITEM_ID.search(text[mark.end():end])
+            first = lead_ids(text[mark.end():end])
             if slot and first and slot[0] == section:
-                picks.setdefault(slot, int(first.group(1)))
-    gem = ITEM_ID.search(extract.get('gems', ''))
+                picks.setdefault(slot, first)
+    gem = lead_ids(extract.get('gems', ''))
     if gem:
-        picks[('gems', 'unique')] = int(gem.group(1))
+        picks[('gems', 'unique')] = gem
     return picks
 
 
@@ -106,10 +122,10 @@ def diff_spec(setup, guides):
     picks = {}
     for guide in guides.values():
         picks.update(top_picks(guide['extract']))
-    for (section, key), live_id in picks.items():
+    for (section, key), live_ids in picks.items():
         ours = setup.get('recommendations', {}).get(section, {}).get(key)
-        if isinstance(ours, str) and ours.startswith('item:') and int(ours[5:]) != live_id:
-            differences.setdefault('top_pick_differs', {})[f'{section}.{key}'] = {'live': live_id, 'spec': int(ours[5:])}
+        if isinstance(ours, str) and ours.startswith('item:') and int(ours[5:]) not in live_ids:
+            differences.setdefault('top_pick_differs', {})[f'{section}.{key}'] = {'live': sorted(live_ids), 'spec': int(ours[5:])}
     if section_items(setup, 'enchants') and not any(section == 'enchants' for section, _ in picks):
         differences['top_picks_unparsed'] = True
     removed = {s: sorted(section_items(setup, s) - live[s]) for s in ITEM_SECTIONS}
@@ -121,6 +137,15 @@ def diff_spec(setup, guides):
         if missing:
             differences['stat_priority'] = {'live': missing, 'spec': sorted(spec_stats)}
     return differences
+
+
+def digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def acknowledgement(differences, guides):
+    sections = {u: {s: g['extract'].get(s) for s in (*ITEM_SECTIONS, 'stats')} for u, g in sorted(guides.items())}
+    return {'differences': digest(differences), 'sections': digest(sections)}
 
 
 def classify(documents, sources):
@@ -138,17 +163,18 @@ def classify(documents, sources):
                                         {**info, 'status': 'unavailable', 'differences': {}, 'reason': 'No readable guide'})
             continue
         differences = diff_spec(setup, guides)
+        acknowledged = bool(differences) and setup.get('acknowledged_differences') == acknowledgement(differences, guides)
         lacking = {u: missing_parts(g['extract']) for u, g in live_guides(setup, sources, complete=False).items() if u not in guides}
         if setup.get('recheck'):
             result[entry['spec_id']] = {**info, 'status': 'incomplete', 'differences': differences,
                                         'reason': 'Marked for recheck: ' + str(setup['recheck'])}
-        elif differences:
+        elif differences and not acknowledged:
             result[entry['spec_id']] = {**info, 'status': 'changed', 'differences': differences}
         elif lacking:
             result[entry['spec_id']] = {**info, 'status': 'incomplete', 'differences': {},
                                         'reason': 'Guide layout incomplete: ' + json.dumps(lacking)}
         else:
-            result[entry['spec_id']] = {**info, 'status': 'unchanged', 'differences': {}}
+            result[entry['spec_id']] = {**info, 'status': 'unchanged', 'differences': {}, **({'acknowledged': True} if acknowledged else {})}
     return result
 
 
