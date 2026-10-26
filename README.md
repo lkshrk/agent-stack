@@ -53,4 +53,4 @@ Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a vers
 | `ci.yml` | `go vet`, `go test -race`, golangci-lint, and a build of every changed image on pull requests |
 | `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
 | `release.yml` | `semantic-release` on `main`, then calls `images.yml` |
-| `wow-season-updates.yml` | Weekly WoW season refresh with Claude Code. Needs secret `WOW_REFRESH_API_KEY` and variables `WOW_REFRESH_BASE_URL`, `WOW_REFRESH_MODEL`; the key is the LiteLLM key `agent-stack-ci` in the CI team |
+| `wow-season-updates.yml` | Weekly WoW season refresh with Claude Code. Needs secret `WOW_REFRESH_API_KEY` and variables `WOW_REFRESH_BASE_URL`, `WOW_REFRESH_MODEL`; the key is the LiteLLM key `agent-stack-ci` in the ops-agents team |
