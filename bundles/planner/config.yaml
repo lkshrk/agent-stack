@@ -27,12 +27,14 @@ prompt: |
 
   Sources you read:
   - The repository, with the `sys_os_*` read tools and read-only shell (`rg`,
-    `git log`, `git show`, `gh issue view`, `gh pr view`).
+    `cat`, `head`, `sed -n <from>,<to>p`, `jq`, `git log`, `git show`,
+    `gh issue view`, `gh pr view`). Other commands, `VAR=` assignments and
+    output redirection are denied.
   - The code graph (`code_graph` tools) for definitions, callers and impact,
     before grepping whole files.
-  - The knowledge vault, read-only. Run
+  - The knowledge vault, read-only. Run exactly
     `git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge`,
-    or `git -C ~/knowledge pull --ff-only` when it exists, then read `~/knowledge/projects/<repo>/<repo>.md`, the
+    or exactly `git -C ~/knowledge pull --ff-only` when it exists, then read `~/knowledge/projects/<repo>/<repo>.md`, the
     pages it links whose `paths` overlap the files you plan to touch, the
     matching `pitfalls/`, and search `~/knowledge/index.md`. Never run
     `scripts/sync.sh` and never write to the vault.
@@ -40,8 +42,8 @@ prompt: |
   Shell: one plain command or pipeline per call. The policies deny `$(…)`,
   backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line
   continuations, and `git`, `gh` or `.git` inside `find` or `xargs`; use plain
-  pipes, `python3 -c` and separate calls instead, and rephrase a denied read
-  rather than retrying it.
+  pipes into `jq`, `rg`, `sort` or `head` and separate calls instead, and
+  rephrase a denied read rather than retrying it.
 
   You never ask questions inline and never wait for a human answer. Every
   open question becomes a `BLOCKED` result with `blocked.class: decision` and one
@@ -66,7 +68,10 @@ prompt: |
      children just to pass without saying so in the design.
   5. `plan-contract` — a sprint contract per child, after the critic passes.
   6. The final result block, with `critic.rounds` the rounds used and
-     `critic.coverage` the map the critic confirmed.
+     `critic.coverage` the map the critic confirmed. A `DONE` or
+     `DONE_WITH_CONCERNS` result is denied unless every critic round was
+     collected and `critic.rounds` equals the number of drafts sent. Only
+     this final turn carries a result block; earlier turns are interim.
 
   Set `risk.force_gate_plan: true` when the plan includes any of: a schema
   migration, auth or security, infra or deploy changes, a public API change,
@@ -109,6 +114,15 @@ guardrails:
       function:
         path: omnigent.policies.builtins.orchestration.read_only_os
         arguments: {}
+    read_only_shell:
+      type: function
+      function:
+        path: agent_stack_policies.readonly.read_only_shell
+        arguments:
+          extra_commands: [gh]
+          exact_commands:
+            - "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"
+            - "git -C ~/knowledge pull --ff-only"
     blast_radius:
       type: function
       function:
@@ -154,13 +168,6 @@ guardrails:
         arguments:
           max_dispatches_per_turn: 1
           dispatch_tools: [sys_session_send]
-    max_dispatches_per_session:
-      type: function
-      function:
-        path: agent_stack_policies.spawn.max_dispatches_per_session
-        arguments:
-          limit: 3
-          collect_tools: [sys_read_inbox]
     max_tool_calls_per_session:
       type: function
       function:
@@ -172,6 +179,14 @@ guardrails:
       function:
         path: agent_stack_policies.loop.detect_loop
         arguments: {}
+    # Last before result_contract: the engine keeps earlier policies' state on a later DENY.
+    max_dispatches_per_session:
+      type: function
+      function:
+        path: agent_stack_policies.spawn.max_dispatches_per_session
+        arguments:
+          limit: 3
+          collect_tools: [sys_read_inbox]
     result_contract:
       type: function
       function:

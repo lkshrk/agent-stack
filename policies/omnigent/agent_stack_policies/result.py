@@ -5,7 +5,7 @@ import sys
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, is_response, response_text, session_state, turn_final
-from .spawn import awaiting
+from .spawn import COLLECT_STATE_KEY, DISPATCH_STATE_KEY, awaiting
 
 KINDS = ("planner", "security", "documenter")
 STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED")
@@ -303,9 +303,25 @@ def result_contract(*, kind: str, await_dispatches: bool = False) -> Callable[[E
         errors = validate_result(kind, result)
         if errors:
             return deny(f"invalid {kind} result: " + "; ".join(errors[:MAX_ERRORS_SHOWN]))
+        if await_dispatches and result.get("status") != "BLOCKED":
+            reason = _critic_gap(result, session_state(event))
+            if reason:
+                return deny(f"{kind} result without the critic: {reason}")
         return allow()
 
     return policy
+
+
+def _critic_gap(result: dict, state: dict) -> str | None:
+    dispatched, collected = state.get(DISPATCH_STATE_KEY, 0), state.get(COLLECT_STATE_KEY, 0)
+    if not isinstance(collected, int) or collected < 1:
+        return "no critic findings were collected; send the draft to the critic first"
+    if awaiting(state):
+        return "a critic round is still uncollected; collect it with sys_read_inbox"
+    rounds = result.get("critic", {}).get("rounds") if isinstance(result.get("critic"), dict) else None
+    if rounds != dispatched:
+        return f"critic.rounds is {rounds} but the critic was sent {dispatched} drafts"
+    return None
 
 
 def main(argv: list[str] | None = None) -> int:

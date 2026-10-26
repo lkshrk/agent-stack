@@ -288,6 +288,27 @@ class ContractTest(unittest.TestCase):
         invalid = {**response(fenced({"status": "DONE"}), True), "session_state": {"agent_stack_dispatches": 1}}
         self.assertEqual(policy(invalid)["result"], "DENY")
 
+    def test_contract_requires_the_critic_for_a_plan(self):
+        policy = result.result_contract(kind="planner", await_dispatches=True)
+        plan = fenced(load("planner-valid.json"))
+
+        def final(state, text=plan):
+            return {**response(text, True), "session_state": state}
+
+        consulted = {"agent_stack_dispatches": 2, "agent_stack_collections": 2}
+        self.assertEqual(policy(final(consulted))["result"], "ALLOW")
+        self.assertEqual(policy(final({}))["result"], "DENY")
+        self.assertEqual(policy(final({"agent_stack_dispatches": 2, "agent_stack_collections": 1}))["result"], "DENY")
+        self.assertEqual(policy(final({"agent_stack_dispatches": 1, "agent_stack_collections": 1}))["result"], "DENY")
+        self.assertEqual(policy(final({"agent_stack_dispatches": 3, "agent_stack_collections": 3}))["result"], "DENY")
+        self.assertIn("critic", policy(final({}))["reason"])
+        concerns = load("planner-valid.json") | {"status": "DONE_WITH_CONCERNS"}
+        self.assertEqual(policy(final({}, fenced(concerns)))["result"], "DENY")
+        blocked = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "A or B?"}}
+        self.assertEqual(policy(final({}, fenced(blocked)))["result"], "ALLOW")
+        self.assertEqual(policy({**response(plan), "session_state": {}})["result"], "DENY")
+        self.assertEqual(result.result_contract(kind="planner")(final({}))["result"], "ALLOW")
+
     def test_contract_rejects_unknown_kind(self):
         with self.assertRaises(ValueError):
             result.result_contract(kind="coder")
