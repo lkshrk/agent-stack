@@ -16,3 +16,5 @@ Policies for other workloads: PR-Agent fetches its files from this repository at
 The gates read tokens, not a running shell. A command named through a variable (`$G push`), an alias, a copied binary or a launcher outside the list above (`ssh`, `chroot`, `docker exec`) is not resolved, and neither are writes such as `dd of=` or a relative path after `cd`. Branch protection and the GitHub token scopes are the backstop.
 
 The shell gates also don't see code that is decoded at runtime (`printf '%b' … | bash`, `$'\x67it'`, `source <(…)`) or put in a script file and run (`bash s.sh`, `make push`). For those, GitHub-side protection and Plan 3's post-run ref check are the boundary.
+
+`no_secret_reads` (security-review) denies shell words naming `/agent-secrets`, other than the `GH_TOKEN_FILE=… gh` form, and the gh commands that print the token. It does not see paths built inside an interpreter (`python3 -c`, `node -e`, `awk`) or reached by filesystem search (`find / … -exec cat`, `grep -r . /`), so the read-only scope of the review token is the boundary.
