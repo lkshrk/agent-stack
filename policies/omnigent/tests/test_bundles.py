@@ -271,6 +271,35 @@ CASES: list[Case] = [
     ],
     Case("polly/agents/claude_code", "tool_call", "Write", {"file_path": "/home/omnigent/work/repo/src/a.py", "content": "x"}, "ALLOW"),
     *[
+        Case(agent, "tool_call", tool, {"command": form}, expected)
+        for agent, tool in (("polly", "sys_os_shell"), ("polly/agents/claude_code", "Bash"), ("documenter", "Bash"))
+        for command, expected in (
+            ("tee -a ~/.bash{rc,_profile}", "DENY"),
+            ("tee -a ~/.{bashrc,x}", "DENY"),
+            ("tee -a ~/{.bashrc,x}", "DENY"),
+            ("tee -a ~/.bashr{c..c}", "DENY"),
+            ("tee -a /home/omnigen{s..u}/.bashrc", "DENY"),
+            ("tee -a ~/.bash[^x]c", "DENY"),
+            ("ls *", "ALLOW"),
+            ("du -sh *", "ALLOW"),
+            ("cp -r src/* /tmp/out/", "ALLOW"),
+            ("git branch --list 'feat/*'", "ALLOW"),
+            ("pytest tests/*", "ALLOW"),
+            ("rg -g '*' x", "ALLOW"),
+            ("rg -n '.*' README.md", "ALLOW"),
+            ("zsh5 -c 'gh pr merge 5'", "DENY"),
+            ("rbash -c 'git push --force origin HEAD:main'", "DENY"),
+            ("./scripts/test.sh", "ALLOW"),
+            ("ssh -c aes128-ctr host true", "ALLOW"),
+            ("printf -- '-o\n/home/omnigent/.bashrc\n/tmp/p\n' | xargs sort", "DENY"),
+            ("printf '/tmp/p\n/home/omnigent/.bashrc\n' | xargs uniq", "DENY"),
+            ("echo x | xargs yq", "DENY"),
+            ("parallel -I cat cat pr merge 5 ::: gh", "DENY"),
+            ("xargs -I XX XX pr merge 5", "DENY"),
+        )
+        for form in (command, ["bash", "-lc", command])
+    ],
+    *[
         Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, expected)
         for command, expected in (
             ("git push", "DENY"),

@@ -335,6 +335,28 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_round14b_shell_and_stdin_regressions(self):
+        for command in (
+            'printf -- "-o\\n/home/omnigent/.bashrc\\n/tmp/p\\n" | xargs sort',
+            'printf "/tmp/p\\n/home/omnigent/.bashrc\\n" | xargs uniq',
+            'echo x | xargs yq',
+            'parallel -I cat cat pr merge 5 ::: gh',
+            'xargs -I XX XX pr merge 5',
+            'zsh5 -c "git push --force origin HEAD:main"',
+            'zsh5 -c "gh pr merge 5"',
+            '/usr/bin/zsh5 -c "git push --force origin HEAD:main"',
+            'bash5.2 -c "gh pr merge 5"',
+            'rbash -c "git push --force origin HEAD:main"',
+            'fish -c "gh pr merge 5"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ('./scripts/test.sh', './scripts/lint.sh --fix', 'ssh -c aes128-ctr host true', 'push'):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

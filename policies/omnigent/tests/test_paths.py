@@ -647,6 +647,14 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
+        for path in ("~/.bash{rc,_profile}", "~/.{bashrc,x}", "~/{.bashrc,x}", "~/.bashr{c..c}", "/home/omnigen{s..u}/.bashrc", "~/.bash[^x]c", "~/.bash[[:lower:]]c"):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
+                self.assertEqual(guard(tool_call_event("bash", {"command": f"tee -a {path}"}))["result"], "DENY")
+        for command in ("ls *", "du -sh *", "rm -rf build/*", "cp -r src/* /tmp/out/", "git branch --list 'feat/*'", "pytest tests/*", "rg -g '*' x", "rg -n '.*' README.md"):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "ALLOW")
+
         for command in ("sort -o ~/.bashrc /tmp/rc", "curl -so ~/.bashrc https://x", "wget -qO ~/.bashrc https://x", "perl -i -pe 's/a/b/' ~/.bashrc", "gawk -i inplace '{print}' ~/.bashrc", "git diff --output=/home/omnigent/.bashrc", "patch ~/.bashrc /tmp/p", "cat ~/.bashrc", "grep x ~/.bashrc", "cp ~/.bashrc /tmp/x"):
             with self.subTest(command=command):
                 self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "DENY")

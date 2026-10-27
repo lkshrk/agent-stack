@@ -224,11 +224,13 @@ def path_guard(
         if normal in {f"{home}/{name}" for name in startup}:
             return True
         braces = re.search(r"\{[^{}]+\}", path) is not None
-        if any(ch in path for ch in "*?[") or braces:
+        explicit_home = path.startswith(("/", "~", "$HOME", "${HOME}", "{~", "{/") )
+        if explicit_home and (any(ch in path for ch in "*?[") or braces):
             pattern = path.replace("~", home)
             while re.search(r"\{[^{}]*\}", pattern):
                 pattern = re.sub(r"\{[^{}]*\}", "*", pattern)
-            pattern = re.sub(r"\[[^]]*\]", "*", pattern)
+            if "[" in pattern and "]" in pattern:
+                pattern = re.sub(r"\[.*\]", "*", pattern)
             normal = posixpath.normpath(pattern)
             return any(fnmatchcase(f"{home}/{name}", normal) for name in startup)
         return False
