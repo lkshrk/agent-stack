@@ -142,6 +142,7 @@ guardrails:
         path: agent_stack_policies.unattended.deny_on_ask
         arguments:
           handler: omnigent.policies.builtins.github.github_policy
+          join_list_commands: true
           arguments:
             read_all: true
             write_repos: []

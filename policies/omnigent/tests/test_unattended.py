@@ -66,3 +66,18 @@ class UnattendedTest(unittest.TestCase):
     def test_wrapper_output_is_never_ask(self):
         for name in ("asker", "enum_asker", "allower", "denier", "abstainer", "async_asker"):
             assert_not_ask(self, run(unattended.deny_on_ask(handler=f"tests.fake_policies.{name}")))
+
+    def test_join_list_commands(self):
+        policy = unattended.deny_on_ask(handler="tests.fake_policies.command_echo", join_list_commands=True)
+        event = tool_call_event("shell", {"command": ["bash", "-lc", "gh api graphql -f query=x"]})
+        self.assertEqual(run(policy, event)["reason"], repr("bash -lc 'gh api graphql -f query=x'"))
+        self.assertEqual(event["data"]["arguments"]["command"], ["bash", "-lc", "gh api graphql -f query=x"])
+        self.assertEqual(run(policy, tool_call_event("shell", {"command": "gh pr view 3"}))["reason"], repr("gh pr view 3"))
+        encoded = {"type": "tool_call", "target": "shell", "data": {"name": "shell", "arguments": '{"command": ["gh", "gist", "create", "x"]}'}}
+        self.assertEqual(run(policy, encoded)["reason"], repr("gh gist create x"))
+
+    def test_list_commands_unchanged_by_default(self):
+        policy = unattended.deny_on_ask(handler="tests.fake_policies.command_echo")
+        event = tool_call_event("shell", {"command": ["gh", "pr", "view"]})
+        self.assertEqual(run(policy, event)["reason"], repr(["gh", "pr", "view"]))
+

@@ -320,6 +320,22 @@ CASES: list[Case] = [
         )
         for form in (command, ["bash", "-lc", command])
     ],
+    *[
+        Case("security-review", "tool_call", tool, {"command": form}, expected)
+        for tool in ("Bash", "shell")
+        for command, expected in (
+            (f"{REVIEW_TOKEN} gh api graphql -f query='{{viewer{{login}}}}'", "DENY"),
+            (f"{REVIEW_TOKEN} gh gist create /tmp/x", "DENY"),
+            ("cat \"$(printf '/agent-%s/github/review' secrets)\"", "DENY"),
+            ("base64 -d <<< abc | xargs cat", "DENY"),
+            (f"{REVIEW_TOKEN} gh pr review 3 --approve", "DENY"),
+            (f"{REVIEW_TOKEN} gh pr comment 3 --body x", "DENY"),
+            (f"{REVIEW_TOKEN} gh api -X POST repos/o/r/issues -f title=x", "DENY"),
+            (f"{REVIEW_TOKEN} gh pr view 3 --repo o/r --json files", "ALLOW"),
+            ("git log --oneline -5", "ALLOW"),
+        )
+        for form in (command, ["bash", "-lc", command])
+    ],
     Case("security-review", "tool_call", "mcp__codebase-memory-mcp__delete_project", {"project": "x"}, "DENY"),
     Case("security-review", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
     Case("security-review", "tool_call", "result_check__validate_result", {"kind": "security", "text": "x"}, "ALLOW"),

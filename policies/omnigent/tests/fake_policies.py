@@ -50,3 +50,11 @@ def name_enum():
         name = "ASK"
 
     return lambda event: {"result": V(), "reason": "by name"}
+
+
+def command_echo():
+    def evaluate(event):
+        arguments = event["data"]["arguments"]
+        return {"result": "DENY", "reason": repr(arguments.get("command") if isinstance(arguments, dict) else arguments)}
+
+    return evaluate

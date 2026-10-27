@@ -93,12 +93,16 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.unattended.deny_on_ask",
         "kind": "factory",
         "name": "deny_on_ask",
-        "description": "Wrap another policy and turn its ASK verdicts into DENY.",
+        "description": (
+            "Wrap another policy and turn its ASK verdicts into DENY; join_list_commands hands it list-form "
+            "shell commands as one string."
+        ),
         "params_schema": {
             "type": "object",
             "properties": {
                 "handler": {"type": "string"},
                 "arguments": {"type": "object"},
+                "join_list_commands": {"type": "boolean"},
             },
             "required": ["handler"],
             "additionalProperties": False,
