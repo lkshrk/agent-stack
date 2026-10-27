@@ -435,7 +435,7 @@ class ShellWriteScopeTest(unittest.TestCase):
                 with self.subTest(form=form):
                     guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
                     self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
-        for command in ("rg -n '<' src > /tmp/x", "cp /tmp/x '<' .polly/diffs/", "echo '>' > /tmp/x"):
+        for command in ("rg -n '<' src > /tmp/x", "cp /tmp/x '<' .polly/diffs/"):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command), "ALLOW")
 
@@ -490,6 +490,28 @@ class ShellWriteScopeTest(unittest.TestCase):
                 with self.subTest(form=form):
                     guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
                     self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "ALLOW")
+
+    def test_joined_arguments_keep_quoted_operators(self):
+        for command in (
+            "eval '>' src/a.py",
+            "eval echo x '>' src/a.py",
+            'eval "echo x" ">" src/a.py',
+            "eval echo x '>>' src/a.py",
+            "eval echo x \\> src/a.py",
+            "eval cat /tmp/a '|' tee src/a.py",
+            "sudo eval echo x '>' src/a.py",
+            "command eval echo x '>' src/a.py",
+            "timeout 5 eval echo x '>' src/a.py",
+            "bash -c 'eval echo x \">\" src/a.py'",
+            "watch -n1 echo x '>' src/a.py",
+            "parallel echo x '>' {} ::: src/a.py",
+            "eval cp /tmp/x '<' src/",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertEqual(self.verdict("eval echo x '>' ../x.md", DOCS_SCOPE), "DENY")
 
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])

@@ -214,8 +214,9 @@ def path_guard(
     def check_scope(command: str, scope: list[str]) -> Decision | None:
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
-        for tokens in walk(command, literal_operators=True):
-            targets += shell_write_targets(tokens)
+        for literal in (False, True):
+            for tokens in walk(command, literal_operators=literal):
+                targets += shell_write_targets(tokens)
         for raw in targets:
             target = posixpath.normpath(raw)
             if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):

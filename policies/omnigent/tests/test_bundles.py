@@ -526,6 +526,8 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "make test"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp /tmp/x '<' src/"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "eval echo x '>' src/a.py"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": ["bash", "-lc", "eval cat /tmp/a '|' tee src/a.py"]}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": ["bash", "-lc", "mv /tmp/x '<' src/"]}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "mv a src/x >/dev/null"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "mkdir -p .polly/diffs 2>/dev/null"}, "ALLOW"),
