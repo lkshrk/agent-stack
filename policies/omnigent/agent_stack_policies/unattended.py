@@ -43,14 +43,15 @@ def _takes_config(evaluator: Callable) -> bool:
     )
 
 
-def _with_string_command(event: Event) -> Event:
-    """The event with a list-form shell `command` joined into one string, for handlers that only read strings."""
+def _normalised(event: Event, join_list_commands: bool) -> Event:
+    """The event with JSON-string tool arguments decoded and, with `join_list_commands`, a list-form `command` joined into one string."""
     data = event.get("data")
     if event.get("type") != TOOL_CALL or not isinstance(data, dict):
         return event
     key = next((k for k in ("arguments", "input", "args") if k in data), None)
     arguments = data.get(key)
-    if isinstance(arguments, str):
+    decoded = isinstance(arguments, str)
+    if decoded:
         try:
             arguments = json.loads(arguments)
         except ValueError:
@@ -58,9 +59,13 @@ def _with_string_command(event: Event) -> Event:
     if not isinstance(arguments, dict):
         return event
     command = arguments.get("command")
-    if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
+    joined = False
+    if join_list_commands and isinstance(command, list) and all(isinstance(part, str) for part in command):
+        arguments = {**arguments, "command": shlex.join(command)}
+        joined = True
+    if not (decoded or joined):
         return event
-    return {**event, "data": {**data, key: {**arguments, "command": shlex.join(command)}}}
+    return {**event, "data": {**data, key: arguments}}
 
 
 def deny_on_ask(
@@ -77,8 +82,7 @@ def deny_on_ask(
     config = dict(arguments or {})
 
     async def policy(event: Event, _config: dict | None = None) -> Decision | None:
-        if join_list_commands:
-            event = _with_string_command(event)
+        event = _normalised(event, join_list_commands)
         decision = inner(event, config) if wants_config else inner(event)
         if inspect.isawaitable(decision):
             decision = await decision

@@ -81,3 +81,14 @@ class UnattendedTest(unittest.TestCase):
         event = tool_call_event("shell", {"command": ["gh", "pr", "view"]})
         self.assertEqual(run(policy, event)["reason"], repr(["gh", "pr", "view"]))
 
+    def test_json_string_arguments_decoded(self):
+        for join in (True, False):
+            policy = unattended.deny_on_ask(handler="tests.fake_policies.command_echo", join_list_commands=join)
+            encoded = {"type": "tool_call", "target": "shell", "data": {"name": "shell", "arguments": '{"command": "gh pr review 1 --approve"}'}}
+            with self.subTest(join=join):
+                self.assertEqual(run(policy, encoded)["reason"], repr("gh pr review 1 --approve"))
+                self.assertIsInstance(encoded["data"]["arguments"], str)
+        bad = {"type": "tool_call", "target": "shell", "data": {"name": "shell", "arguments": "{bad"}}
+        policy = unattended.deny_on_ask(handler="tests.fake_policies.command_echo")
+        self.assertEqual(run(policy, bad)["reason"], repr("{bad"))
+

@@ -71,6 +71,22 @@ class InImageTest(unittest.TestCase):
                 self.assertTrue(function_policy_handler_allowed(ref.path, ref.arguments))
                 self.assertIsNone(validate_factory_params(ref.path, ref.arguments))
 
+    def test_github_readonly_reads_json_string_arguments(self):
+        import json
+
+        from agent_stack_policies.unattended import deny_on_ask
+
+        policy = deny_on_ask(
+            handler="omnigent.policies.builtins.github.github_policy",
+            arguments={"read_all": True, "write_repos": []},
+            join_list_commands=True,
+        )
+        for command in ("gh pr review 1 --approve", ["gh", "pr", "review", "1", "--approve"]):
+            event = {"type": "tool_call", "data": {"name": "shell", "arguments": json.dumps({"command": command})}}
+            with self.subTest(command=command):
+                decision = asyncio.run(policy(event, {}))
+                self.assertEqual(decision["result"], "DENY")
+
     def test_phase_names_reach_policies(self):
         from omnigent.policies.function import resolve_function_policy
         from omnigent.policies.types import EvaluationContext

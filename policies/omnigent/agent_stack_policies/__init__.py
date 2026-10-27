@@ -94,8 +94,8 @@ POLICY_REGISTRY: list[dict] = [
         "kind": "factory",
         "name": "deny_on_ask",
         "description": (
-            "Wrap another policy and turn its ASK verdicts into DENY; join_list_commands hands it list-form "
-            "shell commands as one string."
+            "Wrap another policy and turn its ASK verdicts into DENY, decoding JSON-string tool arguments; "
+            "join_list_commands hands it list-form shell commands as one string."
         ),
         "params_schema": {
             "type": "object",
