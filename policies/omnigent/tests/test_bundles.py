@@ -506,6 +506,7 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "POST", "repos/o/r/MERGES", "-f", "base=main"]}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > ../other/x.md"}, "DENY"),
 
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]

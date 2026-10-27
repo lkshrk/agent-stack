@@ -439,6 +439,15 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command), "ALLOW")
 
+    def test_escaping_targets_denied(self):
+        for command in ("echo x > ../other/x.md", "cp x docs/../../other/x.md", "sed -i s/a/b/ ../x.md", "mv docs/a.md ..", "tee ../README.md"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command, DOCS_SCOPE), "DENY")
+        for command in ("echo x > docs/../README.md", "cp docs/a/../b.md docs/c.md"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
+        self.assertEqual(self.verdict("echo x > ../.polly/registry.json"), "DENY")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")

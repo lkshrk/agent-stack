@@ -217,6 +217,8 @@ def path_guard(
         for tokens in walk(command, literal_operators=True):
             targets += shell_write_targets(tokens)
         for target in (posixpath.normpath(t) for t in targets):
+            if escapes(target):
+                return _deny(f"shell write to {target} leaves the checkout")
             if not scratch(target) and not _matches_any(target, allowed_only + exempted):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None
