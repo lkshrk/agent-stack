@@ -1,0 +1,18 @@
+{
+  "status": "BLOCKED",
+  "gate": "gate:plan",
+  "blocked": {
+    "class": "decision",
+    "question": "gap-1: keep cancelled orders in the queue or drop them? Options: keep (replay on resume), drop (current worker behaviour)."
+  },
+  "gaps": [
+    {
+      "id": "gap-1",
+      "class": "behaviour",
+      "question": "Keep cancelled orders in the queue or drop them?",
+      "stub": null,
+      "location": null
+    }
+  ],
+  "assumptions": []
+}

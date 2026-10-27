@@ -1,0 +1,21 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "mode": "delta",
+  "changed_files": [
+    "docs/orders.md"
+  ],
+  "stale": [],
+  "gaps": [
+    {
+      "id": "gap-1",
+      "class": "cosmetic",
+      "question": "Should the runbook say 'queue worker' or 'consumer'?",
+      "stub": "Used 'queue worker', the term in backend/src/orders/worker.ts.",
+      "location": "docs/orders.md:12"
+    }
+  ],
+  "assumptions": [
+    "gap-1: the runbook uses the code's term 'queue worker'"
+  ],
+  "pr": "https://example.test/pr/1"
+}
