@@ -9,3 +9,9 @@
 	defaultBranch = main
 [pull]
 	rebase = true
+[safe]
+	bareRepository = explicit
+[core]
+	fsmonitor = false
+[protocol "file"]
+	allow = user
