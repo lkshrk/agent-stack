@@ -36,24 +36,47 @@ _VALUE_FLAGS = {
     "mkdir": frozenset({"-m", "--mode"}),
     "tee": frozenset(),
 }
+_OPTIONAL_VALUE_LETTERS = {"sed": "i"}
+
+
+def _short_cluster(arg: str, values: frozenset[str], optional: str, following: str | None) -> tuple[dict[str, str], bool]:
+    """getopt-style `-abc` / `-tDIR`: the flags it sets and whether it took `following` as a value."""
+    found: dict[str, str] = {}
+    for k in range(1, len(arg)):
+        flag, rest = "-" + arg[k], arg[k + 1 :]
+        if flag in values:
+            found[flag] = rest if rest else following or ""
+            return found, not rest and following is not None
+        found[flag] = ""
+        if arg[k] in optional:
+            found[flag] = rest
+            break
+    return found, False
 
 
 def _operands(name: str, args: list[str]) -> tuple[list[str], dict[str, str]]:
     """Non-flag operands and the values of value-taking flags."""
     values = _VALUE_FLAGS.get(name, frozenset())
+    optional = _OPTIONAL_VALUE_LETTERS.get(name, "")
     operands, found, i = [], {}, 0
     while i < len(args):
         arg = args[i]
+        following = args[i + 1] if i + 1 < len(args) else None
         if arg == "--":
             operands.extend(args[i + 1 :])
             break
-        if arg.startswith("-") and arg != "-":
+        if arg.startswith("--"):
             flag, eq, value = arg.partition("=")
             if flag in values and not eq:
-                found[flag] = args[i + 1] if i + 1 < len(args) else ""
+                found[flag] = following or ""
                 i += 2
                 continue
             found[flag] = value
+        elif arg.startswith("-") and arg != "-":
+            flags, consumed = _short_cluster(arg, values, optional, following)
+            found.update(flags)
+            i += 1 + consumed
+            continue
         else:
             operands.append(arg)
         i += 1

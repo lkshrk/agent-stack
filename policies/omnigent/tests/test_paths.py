@@ -538,6 +538,29 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command), "ALLOW")
 
+    def test_attached_and_bundled_target_directory(self):
+        cases = (
+            (POLLY_SCOPE, "cp -tsrc /tmp/a.py"),
+            (POLLY_SCOPE, "cp -t.polly/../src /tmp/a.py"),
+            (POLLY_SCOPE, "cp -rt src /tmp/a.py"),
+            (POLLY_SCOPE, "cp -vt src /tmp/a.py"),
+            (POLLY_SCOPE, "install -Dt src /tmp/a.py"),
+            (POLLY_SCOPE, "mv -t../x /tmp/a"),
+            (POLLY_SCOPE, "cp --target-directory=src /tmp/a.py"),
+            (POLLY_SCOPE, "cp -r --target-directory src /tmp/a.py"),
+            (DOCS_SCOPE, "cp -t../other /tmp/a.md"),
+            (DOCS_SCOPE, "cp -rt ../other /tmp/a.md"),
+        )
+        for scope, command in cases:
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=scope)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("cp -rt .polly/diffs /tmp/a", "cp -t.polly/diffs /tmp/a", "install -Dm644 /tmp/r.json .polly/registry.json", "mkdir -pm 755 .polly/diffs"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+        self.assertEqual(self.verdict("sed -i.bak -e s/a/b/ docs/a.md", DOCS_SCOPE), "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
