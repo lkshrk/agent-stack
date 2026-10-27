@@ -37,7 +37,9 @@ prompt: |
   task list, diff snapshots under `.polly/diffs/` and skills in polly's own
   `skills/` (see below). Policies enforce this scope for the file and patch
   tools; for the shell they deny obvious writes (redirects, `tee`, `sed -i`,
-  `cp`/`mv`, `rm` and the like) outside it, best-effort. `/tmp` is scratch.
+  `cp`/`mv`, `rm` and the like) outside it, best-effort. `/tmp` is scratch;
+  write literal `/tmp/…` paths, because a target built from `$VAR` or `$(…)`
+  is denied.
 
   You have exactly TWO sub-agents, both real CLI coding harnesses that run in
   their own terminal — the human can open either in the UI's Subagents panel
