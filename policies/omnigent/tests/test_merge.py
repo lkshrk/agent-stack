@@ -204,11 +204,8 @@ class NoMergeTest(unittest.TestCase):
             "echo graphql | xargs -I{} gh api {} -f query='mutation { mergePullRequest(input:{}) { x } }'",
             "cat /tmp/q | xargs -0 -I{} sh -c 'gh api graphql -f query=\"{}\"'",
             "cat /tmp/q | xargs -0 -I{} bash -c 'gh api graphql -f query={}'",
-            "cat /tmp/q | parallel sh -c \"'gh api graphql -f query={}'\"",
             "ls | xargs git status",
             "echo feat/x | xargs git push origin",
-            "ls | parallel git -C {} status",
-            "parallel ::: 'gh pr merge 5'",
             "timeout 5 xargs gh pr view < ids",
         ):
             for form in (command, ["bash", "-lc", command]):
@@ -216,7 +213,7 @@ class NoMergeTest(unittest.TestCase):
                     decision = no_merge()(tool_call_event("bash", {"command": form}))
                     self.assertEqual(decision["result"], "DENY")
                     self.assertIn("run gh/git directly, not through xargs/parallel", decision["reason"])
-        for command in ("ls | xargs -I{} rg -n x {}", "ls | xargs wc -l", "echo a | parallel echo {}"):
+        for command in ("ls | xargs -I{} rg -n x {}", "ls | xargs wc -l"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
@@ -280,19 +277,11 @@ class NoMergeTest(unittest.TestCase):
             "echo merge | xargs -I{} eval \"g\"\"h pr {} 5\"",
             "echo merge | xargs -I{} env sh -c 'gh pr {} 5'",
             "echo merge | xargs -I{} python3 -c 'import os'",
-            "echo merge | parallel 'g\"\"h pr {} 5'",
-            "parallel 'g\"\"h pr {} 5' ::: merge",
-            "parallel {1} {2} {3} {4} ::: gh ::: pr ::: merge ::: 5",
             "echo 'gh pr merge 5' | xargs -I{} sh -c '{}'",
             "printf 'gh pr merge 5\\0' | xargs -0 sh -c",
-            "parallel {} ::: 'gh pr merge 5'",
-            "parallel :::: /tmp/cmds",
             "xargs",
-            "parallel",
             "xargs gh pr view",
             "xargs git status",
-            "parallel gh pr view ::: 5",
-            "parallel git status ::: .",
             "timeout 5 xargs gh pr view < ids",
         ):
             for form in (command, ["bash", "-lc", command]):
@@ -303,8 +292,6 @@ class NoMergeTest(unittest.TestCase):
         for command in (
             "ls | xargs wc -l",
             "ls | xargs -I{} rg -n x {}",
-            "echo a | parallel echo {}",
-            "parallel rg -n x {} ::: src/a.py",
         ):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
@@ -331,7 +318,7 @@ class NoMergeTest(unittest.TestCase):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
-        for command in ("xargs wc -l", "xargs -I{} rg -n x {}", "parallel echo {} ::: a", "parallel rg -n x {} ::: src/a"):
+        for command in ("xargs wc -l", "xargs -I{} rg -n x {}"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
@@ -356,6 +343,77 @@ class NoMergeTest(unittest.TestCase):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(run(form)["result"], "ALLOW")
+
+    def test_no_merge_xargs_replacements_come_from_xargs_options_only(self):
+        for command in (
+            "find . -name '*.py' | xargs grep -ir todo",
+            "git ls-files | xargs grep -ie foo",
+            "git ls-files | xargs ls -il",
+            "echo x | xargs -i rg foo {}",
+            "echo x | xargs --replace rg foo {}",
+            "echo x | xargs -n 1 grep -I x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+        for command in (
+            "echo gh | xargs -I cat cat pr merge 5",
+            "echo gh | xargs -Icat cat pr merge 5",
+            "echo gh | xargs -0I cat cat pr merge 5",
+            "echo gh | xargs -n 1 -I cat cat pr merge 5",
+            "echo gh | xargs -icat cat pr merge 5",
+            "echo gh | xargs -0icat cat pr merge 5",
+            "echo gh | xargs --replace=cat cat pr merge 5",
+            "echo gh | xargs --rep=cat cat pr merge 5",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("not through xargs", decision["reason"])
+
+    def test_no_merge_parallel_denied(self):
+        for command in (
+            "parallel",
+            "parallel --version",
+            "echo a | parallel echo {}",
+            "parallel echo {} ::: a",
+            "parallel rg -n x {} ::: src/a.py",
+            "/usr/bin/parallel rg -n x {} ::: src/a.py",
+            "parallel --rpl='cat s/.*/gh/' cat pr merge 5 ::: x",
+            "parallel --rpl=cat\\ s/.*/gh/ cat pr merge 5 ::: x",
+            "parallel -I cat cat pr merge 5 ::: gh",
+            "parallel ::: 'gh pr merge 5'",
+            "parallel {} ::: 'gh pr merge 5'",
+            "parallel {1} {2} {3} {4} ::: gh ::: pr ::: merge ::: 5",
+            "parallel 'g\"\"h pr {} 5' ::: merge",
+            "parallel :::: /tmp/cmds",
+            "ls | parallel git -C {} status",
+            "cat /tmp/q | parallel sh -c \"'gh api graphql -f query={}'\"",
+            "xargs parallel echo",
+            "bash -c 'parallel echo ::: a'",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("parallel is not available; run commands directly", decision["reason"])
+
+    def test_no_merge_shells_are_named_stems(self):
+        for command in ("push", "./push", "hash -r", "hash git", "ssh -c aes128-ctr host true", "busybox ls"):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+        for command in (
+            'zsh-5.9 -c "gh pr merge 5"',
+            'bash-5.2 -c "git push --force origin HEAD:main"',
+            'ksh93 -c "gh pr merge 5"',
+            'busybox sh -c "gh pr merge 5"',
+            'busybox ash -c "gh pr merge 5"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "DENY")
 
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")

@@ -1,6 +1,6 @@
 import unittest
 
-from agent_stack_policies._shell import parse, resolve, shell_command, walk
+from agent_stack_policies._shell import parse, resolve, shell_command, shell_name, walk
 
 
 def argv(command):
@@ -274,3 +274,18 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
     def test_hash_after_subshell_is_a_comment(self):
         self.assertEqual(parse("(true)# c; git push origin main"), [["(", "true", ")"]])
         self.assertEqual(parse("(true)# c\ngit push origin main")[-1], ["git", "push", "origin", "main"])
+
+
+class ShellNameTest(unittest.TestCase):
+    def test_shell_stems_and_versions(self):
+        for name in ("sh", "bash", "rbash", "dash", "ash", "zsh", "ksh", "mksh", "csh", "tcsh", "yash", "posh", "fish", "zsh5", "bash5.2", "ksh93", "zsh-5.9", "bash-5.2"):
+            with self.subTest(name=name):
+                self.assertTrue(shell_name(name))
+        for name in ("push", "hash", "ssh", "busybox", "capsh", "chsh", "fsh", "bash-", "zsh-x", "test.sh", "flash"):
+            with self.subTest(name=name):
+                self.assertFalse(shell_name(name))
+
+    def test_busybox_needs_a_shell_applet(self):
+        self.assertEqual(resolve(["busybox", "sh", "-c", "gh pr merge 5"]).nested, ["gh pr merge 5"])
+        self.assertEqual(resolve(["busybox", "ls", "-l"]).argv, ["busybox", "ls", "-l"])
+        self.assertFalse(resolve(["busybox", "ls"]).stdin_exec)

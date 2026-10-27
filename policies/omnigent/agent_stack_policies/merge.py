@@ -39,8 +39,16 @@ _PUSH_LONG = frozenset({
 _PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "exec", "push-option"})
 _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
-_STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
-_STDIN_TEMPLATE = re.compile(r"\{\d*\}")
+_STDIN_ARGUMENTS = frozenset({"xargs"})
+# GNU xargs getopt: options with a required value, and those with an optional attached value.
+_XARGS_REQUIRED = frozenset("aEILnsPd")
+_XARGS_OPTIONAL = frozenset("eil")
+_XARGS_LONG = {
+    "null": None, "arg-file": True, "delimiter": True, "eof": False, "replace": False, "max-lines": False,
+    "max-args": True, "open-tty": None, "interactive": None, "no-run-if-empty": None, "max-chars": True,
+    "show-limits": None, "verbose": None, "exit": None, "max-procs": True, "process-slot-var": True,
+    "version": None, "help": None,
+}
 _GIT_SENSITIVE = frozenset({"push", "merge", "config"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
 _GLOB = re.compile(r"[*?\[{]")
@@ -340,7 +348,7 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
 
 
 def _runs_vcs(command: Command) -> bool:
-    """The resolved command is git or gh, or a shell or parallel body that mentions either."""
+    """The resolved command is git or gh, or a shell body that mentions either."""
     name = command.name
     if name in _VCS:
         return True
@@ -353,30 +361,53 @@ def _runs_vcs(command: Command) -> bool:
 _STDIN_ALLOWED = frozenset({"rg", "grep", "egrep", "fgrep", "wc", "cat", "head", "tail", "ls", "stat", "file", "echo", "printf", "basename", "dirname", "realpath", "readlink", "cut", "tr", "jq", "sha256sum", "md5sum", "du", "test", "true"})
 
 
+def _xargs_replacements(args: list[str]) -> set[str]:
+    """Replacement strings that xargs's own options, before the command word, set."""
+    values = set()
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] not in ("-", "--"):
+        arg = args[i]
+        following = args[i + 1] if i + 1 < len(args) else ""
+        i += 1
+        if arg.startswith("--"):
+            name, eq, value = arg[2:].partition("=")
+            matches = [option for option in _XARGS_LONG if option.startswith(name)] if name else []
+            option = name if name in _XARGS_LONG else (matches[0] if len(matches) == 1 else None)
+            if option == "replace":
+                values.add(value if eq else "{}")
+            elif option is not None and _XARGS_LONG[option] and not eq:
+                i += 1
+            continue
+        for k, letter in enumerate(arg[1:], start=2):
+            rest = arg[k:]
+            if letter in _XARGS_REQUIRED:
+                if letter == "I":
+                    values.add(rest or following)
+                i += 0 if rest else 1
+                break
+            if letter in _XARGS_OPTIONAL:
+                if letter == "i":
+                    values.add(rest or "{}")
+                break
+    return values
+
+
 def _stdin_replacements(tokens: list[str]) -> set[str]:
-    """Custom xargs/parallel replacement strings, including attached short and = forms."""
     values = set()
     for i, token in enumerate(tokens):
-        if os.path.basename(token) not in _STDIN_ARGUMENTS:
-            continue
-        for j, option in enumerate(tokens[i + 1 :], start=i + 1):
-            if option in ("-I", "-i", "--replace"):
-                values.add(tokens[j + 1] if j + 1 < len(tokens) else "")
-            elif option.startswith("--replace="):
-                values.add(option.split("=", 1)[1])
-            elif option.startswith("-I") or option.startswith("-i"):
-                values.add(option[2:])
+        if os.path.basename(token) in _STDIN_ARGUMENTS:
+            values |= _xargs_replacements(tokens[i + 1 :])
     return values
 
 
 def _unsafe_stdin_launcher(command: Command, tokens: list[str]) -> bool:
-    """xargs/parallel may start only a literal allowlisted read or format program."""
+    """xargs may start only a literal allowlisted read or format program."""
     if not (_STDIN_ARGUMENTS & set(command.wrappers)):
         return False
     if not command.argv:
         return True
     name, raw = command.name, command.argv[0]
-    if name not in _STDIN_ALLOWED or raw.startswith(":::") or _STDIN_TEMPLATE.search(raw):
+    if name not in _STDIN_ALLOWED or "{}" in raw:
         return True
     if any(ch in raw for ch in "'\\\"$`"):
         return True
@@ -430,6 +461,8 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             if "merge" in command or "push" in command or ansi_quoted(command):
                 return deny("unparseable merge or push command; simplify the command")
             return allow()
+        if any("parallel" in resolve(tokens).wrappers for tokens in statements):
+            return deny("parallel is not available; run commands directly")
         reason = hidden_command(command, statements, _VCS_TEXT) or _quoted_vcs(command, statements)
         if not reason and _VCS_TEXT.search(command):
             reason = _config_environment(statements)

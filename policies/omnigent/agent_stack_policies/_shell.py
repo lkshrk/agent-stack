@@ -10,7 +10,7 @@ SHELLS = frozenset({"sh", "bash", "rbash", "zsh", "dash", "ash", "ksh", "mksh", 
 
 
 def shell_name(name: str) -> bool:
-    return re.fullmatch(r"(?:sh|bash|rbash|dash|ash|zsh|ksh|mksh|csh|tcsh|yash|posh|fish|busybox)(?:[0-9.]*|-[0-9.]+)?", name) is not None
+    return re.fullmatch(r"(?:sh|bash|rbash|dash|ash|zsh|ksh|mksh|csh|tcsh|yash|posh|fish)(?:[0-9.]*|-[0-9.]+)?", name) is not None
 DEFAULT_PROTECTED = ("main", "master")
 _KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until", "(", "{"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
