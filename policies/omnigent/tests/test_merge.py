@@ -102,7 +102,35 @@ class NoMergeTest(unittest.TestCase):
     def test_no_merge_feature_push_allowed(self):
         self.assertEqual(run("git push -u origin feat/x")["result"], "ALLOW")
         self.assertEqual(run("git push origin HEAD:feat/x")["result"], "ALLOW")
-        self.assertEqual(run("git push")["result"], "ALLOW")
+
+    def test_no_merge_implicit_push_destination_denied(self):
+        for command in (
+            "git push",
+            "git push origin",
+            "git push -u origin",
+            "git push origin HEAD",
+            "git push -u origin HEAD",
+            "git push --set-upstream origin HEAD",
+            "git push origin @",
+            "git push origin HEAD feat/x",
+            "git -C .worktrees/t1 push",
+            "git push -o ci.skip origin",
+            "git push --push-option=ci.skip origin",
+            "git push --push-option ci.skip origin HEAD",
+            "bash -lc 'git push origin HEAD'",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, "git push origin HEAD:<branch>")
+        for command in (
+            "git push origin HEAD:feat/x",
+            "git push -u origin HEAD:feat/x",
+            "git push -o ci.skip origin HEAD:feat/x",
+            "git push --push-option=ci.skip origin feat/x",
+            "git -C .worktrees/t1 push -u origin HEAD:polly/t1",
+            "git push origin feat/x HEAD:feat/y",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
 
     def test_no_merge_force_push_denied(self):
         for command in (

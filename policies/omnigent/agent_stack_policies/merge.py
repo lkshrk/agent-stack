@@ -18,6 +18,9 @@ _REF_FLAGS = ("--tags", "--follow-tags", "--mirror", "--all")
 _HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
 _VCS = frozenset({"git", "gh"})
 _PR_HINT = "open or update a pull request instead"
+_PUSH_HINT = "name the destination: git push origin HEAD:<branch>"
+_PUSH_VALUE_FLAGS = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
+_IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
 _GLOB = re.compile(r"[*?\[{]")
@@ -151,9 +154,22 @@ def _quoted_vcs(text: str, statements: list[list[str]]) -> str | None:
     return None
 
 
+def _push_parts(args: list[str]) -> tuple[list[str], list[str]]:
+    """(flags, positional arguments) of a git push argv, skipping the values of `-o`, `--push-option`, `--repo`, `--receive-pack` and `--exec`."""
+    flags, positional, i = [], [], 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("-"):
+            flags.append(arg)
+            i += 2 if arg in _PUSH_VALUE_FLAGS else 1
+            continue
+        positional.append(arg)
+        i += 1
+    return flags, positional
+
+
 def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
-    flags = [a for a in args if a.startswith("-")]
-    positional = [a for a in args if not a.startswith("-")]
+    flags, positional = _push_parts(args)
     if any(_GLOB.search(a) for a in positional):
         return f"glob or brace characters in a push are not allowed, since the shell expands them; {_PR_HINT}"
     refspecs = positional[1:]
@@ -167,6 +183,8 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
             return f"push to protected branch {resolved} is not allowed; {_PR_HINT}"
         if push_branch(refspec) is None:
             return f"push to tag or non-branch ref {refspec} is not allowed; {_PR_HINT}"
+    if not refspecs or any(":" not in r and r in _IMPLICIT_SOURCES for r in refspecs):
+        return f"git push without an explicit destination can push to {'/'.join(sorted(protected))}; {_PUSH_HINT}"
     return None
 
 

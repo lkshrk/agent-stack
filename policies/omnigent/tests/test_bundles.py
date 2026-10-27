@@ -257,6 +257,17 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 800}),
     Case("polly", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
+    *[
+        Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, expected)
+        for command, expected in (
+            ("git push", "DENY"),
+            ("git push origin", "DENY"),
+            ("git push origin HEAD", "DENY"),
+            ("git push -u origin HEAD", "DENY"),
+            ("git push -u origin HEAD:feat/x", "ALLOW"),
+        )
+        for form in (command, ["bash", "-lc", command])
+    ],
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\""}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\n- it's \"done\"\nEOF\n)\""}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cat <<E\nit's\nE\ngit push origin main #'"}, "DENY"),

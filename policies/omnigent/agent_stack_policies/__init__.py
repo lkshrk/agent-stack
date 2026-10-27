@@ -50,7 +50,10 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.merge.no_merge",
         "kind": "factory",
         "name": "no_merge",
-        "description": "Deny PR merges, pushes to protected branches, tag and ref pushes and force-pushes.",
+        "description": (
+            "Deny PR merges, pushes to protected branches, tag and ref pushes, force-pushes and pushes "
+            "without an explicit destination."
+        ),
         "params_schema": {
             "type": "object",
             "properties": {"protected_branches": {"type": "array", "items": {"type": "string"}}},
