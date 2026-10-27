@@ -283,7 +283,6 @@ CASES: list[Case] = [
             ("ls *", "ALLOW"),
             ("du -sh *", "ALLOW"),
             ("cp -r src/* /tmp/out/", "ALLOW"),
-            ("git branch --list 'feat/*'", "ALLOW"),
             ("pytest tests/*", "ALLOW"),
             ("rg -g '*' x", "ALLOW"),
             ("rg -n '.*' README.md", "ALLOW"),
@@ -297,6 +296,11 @@ CASES: list[Case] = [
             ("parallel -I cat cat pr merge 5 ::: gh", "DENY"),
             ("xargs -I XX XX pr merge 5", "DENY"),
         )
+        for form in (command, ["bash", "-lc", command])
+    ],
+    *[
+        Case(agent, "tool_call", "Bash", {"command": form}, "ALLOW")
+        for agent, command in (("polly/agents/claude_code", "git branch --list 'feat/*'"), ("documenter", "git add docs/*"))
         for form in (command, ["bash", "-lc", command])
     ],
     *[
