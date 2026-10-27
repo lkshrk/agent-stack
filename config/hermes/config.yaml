@@ -1,20 +1,26 @@
 model:
-  provider: custom
-  base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
-  default: claude-sonnet
-  key_env: LITELLM_API_KEY
+  provider: custom:litellm
+  default: auto
+
+# The legacy list form, because hermes-webui reads named providers only from custom_providers.
+custom_providers:
+  - name: litellm
+    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+    api_mode: chat_completions
+    key_env: LITELLM_API_KEY
+    session_affinity_header: x-litellm-session-id
 
 auxiliary:
   compression:
-    model: claude-haiku
-    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+    provider: custom:litellm
+    model: anthropic/claude-haiku
   background_review:
     enabled: true
-    model: claude-haiku
-    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+    provider: custom:litellm
+    model: anthropic/claude-haiku
   title_generation:
-    model: claude-haiku
-    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+    provider: custom:litellm
+    model: anthropic/claude-haiku
 
 agent:
   max_turns: 150
