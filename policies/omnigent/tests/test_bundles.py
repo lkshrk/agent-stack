@@ -265,6 +265,11 @@ CASES: list[Case] = [
             ("git push origin HEAD", "DENY"),
             ("git push -u origin HEAD", "DENY"),
             ("git push -u origin HEAD:feat/x", "ALLOW"),
+            ("git push -uo ci.skip origin", "DENY"),
+            ("git --work-tree push push origin", "DENY"),
+            ("git push --force-w origin HEAD:feat/x", "DENY"),
+            ("git push --tag origin HEAD:feat/x", "DENY"),
+            ("git push -uo ci.skip origin HEAD:feat/x", "ALLOW"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

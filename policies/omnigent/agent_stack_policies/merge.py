@@ -13,13 +13,20 @@ _MERGE_PATH = re.compile(
 )
 _GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
 _MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
-_FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")
-_REF_FLAGS = ("--tags", "--follow-tags", "--mirror", "--all")
+_FORCE_LONG = frozenset({"force", "force-with-lease", "force-if-includes"})
+_REF_FLAGS = frozenset({"tags", "follow-tags", "mirror", "all", "branches"})
 _HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
 _VCS = frozenset({"git", "gh"})
 _PR_HINT = "open or update a pull request instead"
 _PUSH_HINT = "name the destination: git push origin HEAD:<branch>"
-_PUSH_VALUE_FLAGS = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
+# git push -h (git 2.56): long options, which of them take a separate value, and the short letters.
+_PUSH_LONG = frozenset({
+    "verbose", "quiet", "repo", "all", "branches", "mirror", "delete", "tags", "dry-run", "porcelain", "force",
+    "force-with-lease", "force-if-includes", "recurse-submodules", "thin", "receive-pack", "exec", "set-upstream",
+    "progress", "prune", "verify", "follow-tags", "signed", "atomic", "push-option", "ipv4", "ipv6",
+})
+_PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "exec", "push-option"})
+_PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
@@ -37,12 +44,6 @@ _CONFIG_FILE_ENV = re.compile(r"^GIT_CONFIG(?:_GLOBAL|_SYSTEM)?=")
 _CONFIG_ENV = re.compile(r"^GIT_CONFIG_(?:KEY_\d+|PARAMETERS)=(.*)$", re.DOTALL)
 _GIT_VALUE_OPTIONS = frozenset({"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"})
 _CONFIG_HINT = "git config that redirects a push or merge (alias, remote, branch, push or url keys) is not allowed"
-
-
-def _is_force_flag(token: str) -> bool:
-    if token.startswith("--"):
-        return token.split("=", 1)[0] in _FORCE_LONG
-    return token.startswith("-") and "f" in token[1:]
 
 
 def _has_substitution(tokens: list[str]) -> bool:
@@ -154,28 +155,60 @@ def _quoted_vcs(text: str, statements: list[list[str]]) -> str | None:
     return None
 
 
-def _push_parts(args: list[str]) -> tuple[list[str], list[str]]:
-    """(flags, positional arguments) of a git push argv, skipping the values of `-o`, `--push-option`, `--repo`, `--receive-pack` and `--exec`."""
-    flags, positional, i = [], [], 0
+def _push_long(name: str) -> tuple[str | None, bool]:
+    """(option, negated) for a long push option as git resolves it, unique prefixes included; option is None when unknown and "" when ambiguous."""
+    candidates = set()
+    for option in _PUSH_LONG:
+        for negated, full in ((False, option), (True, f"no-{option}")):
+            if full == name:
+                return option, negated
+            if full.startswith(name):
+                candidates.add((option, negated))
+    if len(candidates) == 1:
+        return next(iter(candidates))
+    return ("" if candidates else None), False
+
+
+def _push_parts(args: list[str]) -> tuple[set[str], list[str], str | None]:
+    """(options set, positional arguments, problem) of a git push argv, with values of `-o`, `--repo`, `--recurse-submodules` and the like skipped."""
+    options, positional, i = set(), [], 0
     while i < len(args):
         arg = args[i]
-        if arg.startswith("-"):
-            flags.append(arg)
-            i += 2 if arg in _PUSH_VALUE_FLAGS else 1
-            continue
-        positional.append(arg)
         i += 1
-    return flags, positional
+        if arg == "--":
+            positional.extend(args[i:])
+            break
+        if arg.startswith("--"):
+            name, eq, _ = arg[2:].partition("=")
+            option, negated = _push_long(name)
+            if option == "":
+                return options, positional, f"ambiguous git push option {arg}"
+            if option is not None and not negated:
+                options.add(option)
+            if option in _PUSH_LONG_VALUES and not negated and not eq:
+                i += 1
+        elif arg.startswith("-") and arg != "-":
+            for k, letter in enumerate(arg[1:], start=1):
+                if letter == "o":
+                    i += 0 if arg[k + 1 :] else 1
+                    break
+                if letter in _PUSH_SHORT:
+                    options.add(_PUSH_SHORT[letter])
+        else:
+            positional.append(arg)
+    return options, positional, None
 
 
 def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
-    flags, positional = _push_parts(args)
+    options, positional, problem = _push_parts(args)
+    if problem:
+        return f"{problem}; {_PUSH_HINT}"
     if any(_GLOB.search(a) for a in positional):
         return f"glob or brace characters in a push are not allowed, since the shell expands them; {_PR_HINT}"
     refspecs = positional[1:]
-    if any(_is_force_flag(f) for f in flags) or any(r.startswith("+") for r in refspecs):
+    if options & _FORCE_LONG or any(r.startswith("+") for r in refspecs):
         return f"force-push is not allowed; {_PR_HINT}"
-    if any(f.split("=", 1)[0] in _REF_FLAGS for f in flags):
+    if options & _REF_FLAGS:
         return f"pushing tags or all refs is not allowed; {_PR_HINT}"
     for refspec in refspecs:
         resolved = _HEADS_PREFIX.sub("", push_destination(refspec))
@@ -202,9 +235,8 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
         if os.path.basename(run[0]) == "gh":
             reason = _check_gh(rest)
         else:
-            reason = _check_config(rest) or (
-                _check_push(rest[rest.index("push") + 1 :], protected) if "push" in rest else None
-            )
+            _, sub, sub_rest = _git_parts(rest)
+            reason = _check_config(rest) or (_check_push(sub_rest, protected) if sub == "push" else None)
         if reason:
             return reason
     return None

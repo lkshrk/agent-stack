@@ -132,6 +132,70 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_push_option_values_are_not_refspecs(self):
+        for command in (
+            "git push -uo ci.skip origin",
+            "git push -qo ci.skip origin",
+            "git push --push-opt ci.skip origin",
+            "git push --recurse-submodules no origin",
+            "git -C push push origin",
+            "git --work-tree push push origin",
+            "git push --rec no origin",
+            "git push --rep origin",
+            "git push --receive-pack x origin",
+            "git push --exe x origin",
+        ):
+            for form in (command, f"bash -lc '{command}'"):
+                with self.subTest(form=form):
+                    self.assertDenied(form, "git push origin HEAD:<branch>")
+                listed = no_merge()(tool_call_event("bash", {"command": ["bash", "-lc", command]}))
+                self.assertEqual(listed["result"], "DENY")
+        for command in (
+            "git push -uo ci.skip origin HEAD:feat/x",
+            "git push -o ci.skip -u origin HEAD:feat/x",
+            "git push -oci.skip origin HEAD:feat/x",
+            "git push -of origin HEAD:feat/x",
+            "git push --recurse-submodules no origin HEAD:feat/x",
+            "git push --recurse-submodules=check origin HEAD:feat/x",
+            "git push --push-opt=ci.skip origin feat/x",
+            "git -C push push origin HEAD:feat/x",
+            "git push --no-force origin feat/x",
+            "git push --no-tags origin HEAD:feat/x",
+            "git push --no-verify origin HEAD:feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_abbreviated_force_and_tag_flags_denied(self):
+        for command in (
+            "git push --force-w origin HEAD:feat/x",
+            "git push --force-with origin HEAD:feat/x",
+            "git push --force-w=feat/x origin HEAD:feat/x",
+            "git push --force-i origin HEAD:feat/x",
+            "git push -uf origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("force", decision["reason"])
+        for command in (
+            "git push --tag origin HEAD:feat/x",
+            "git push --follow origin HEAD:feat/x",
+            "git push --mirr origin",
+            "git push --al origin",
+            "git push --branches origin",
+            "git push --bran origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("tags or all refs", decision["reason"])
+        for command in ("git push --f origin HEAD:feat/x", "git push --forc origin HEAD:feat/x", "git push --no-forc origin HEAD:feat/x"):
+            with self.subTest(command=command):
+                self.assertDenied(command, "ambiguous")
+
     def test_no_merge_force_push_denied(self):
         for command in (
             "git push --force origin feat/x",
