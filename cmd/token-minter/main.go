@@ -14,12 +14,49 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
 const saDir = "/var/run/secrets/kubernetes.io/serviceaccount"
+
+var (
+	secretKeyRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+	ownerRe     = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+	identityRe  = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+)
+
+// tokenSpec is one TOKENS entry: the Secret key, the GitHub owner whose trust
+// policy applies, and the octo-sts identity (trust policy name) to request.
+type tokenSpec struct {
+	key, owner, identity string
+}
+
+// parseTokens reads TOKENS="key=owner[@identity],…"; an entry without @identity
+// uses defaultIdentity. Any malformed or duplicate entry is an error.
+func parseTokens(raw, defaultIdentity string) ([]tokenSpec, error) {
+	var specs []tokenSpec
+	seen := map[string]bool{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		key, target, ok := strings.Cut(entry, "=")
+		owner, identity, hasIdentity := strings.Cut(target, "@")
+		if !hasIdentity {
+			identity = defaultIdentity
+		}
+		if !ok || !secretKeyRe.MatchString(key) || !ownerRe.MatchString(owner) || !identityRe.MatchString(identity) {
+			return nil, fmt.Errorf("TOKENS entry %q is not key=owner or key=owner@identity", entry)
+		}
+		if seen[key] {
+			return nil, fmt.Errorf("TOKENS names key %q twice", key)
+		}
+		seen[key] = true
+		specs = append(specs, tokenSpec{key: key, owner: owner, identity: identity})
+	}
+	return specs, nil
+}
 
 func main() {
 	if err := run(context.Background(), envFunc(os.Getenv), saDir); err != nil {
@@ -50,6 +87,11 @@ func run(ctx context.Context, env envFunc, sa string) error {
 		cfg[name] = v
 	}
 
+	specs, err := parseTokens(cfg["TOKENS"], cfg["OCTO_STS_IDENTITY"])
+	if err != nil {
+		return err
+	}
+
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	bearer, err := authentikToken(ctx, client, cfg)
@@ -57,21 +99,13 @@ func run(ctx context.Context, env envFunc, sa string) error {
 		return err
 	}
 
-	// TOKENS="code=routivo,knowledge=lkshrk": Secret key -> GitHub owner whose trust policy applies.
 	tokens := map[string]string{}
-	for _, pair := range strings.Split(cfg["TOKENS"], ",") {
-		key, owner, ok := strings.Cut(strings.TrimSpace(pair), "=")
-		if !ok || key == "" || owner == "" {
-			continue
-		}
-		tok, err := octoSTSToken(ctx, client, cfg, bearer, strings.TrimSpace(owner))
+	for _, spec := range specs {
+		tok, err := octoSTSToken(ctx, client, cfg, bearer, spec.owner, spec.identity)
 		if err != nil {
 			return err
 		}
-		tokens[strings.TrimSpace(key)] = tok
-	}
-	if len(tokens) == 0 {
-		return fmt.Errorf("TOKENS contains no key=owner pairs")
+		tokens[spec.key] = tok
 	}
 
 	kube, err := kubeClient(sa)
@@ -174,8 +208,8 @@ func authentikToken(ctx context.Context, c *http.Client, cfg map[string]string) 
 	return body.AccessToken, nil
 }
 
-func octoSTSToken(ctx context.Context, c *http.Client, cfg map[string]string, bearer, owner string) (string, error) {
-	q := url.Values{"scope": {owner}, "identity": {cfg["OCTO_STS_IDENTITY"]}}
+func octoSTSToken(ctx context.Context, c *http.Client, cfg map[string]string, bearer, owner, identity string) (string, error) {
+	q := url.Values{"scope": {owner}, "identity": {identity}}
 	u := strings.TrimRight(cfg["OCTO_STS_URL"], "/") + "/sts/exchange?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -186,7 +220,7 @@ func octoSTSToken(ctx context.Context, c *http.Client, cfg map[string]string, be
 		Token string `json:"token"`
 	}
 	if err := doJSON(c, req, &body); err != nil {
-		return "", fmt.Errorf("octo-sts %s: %w", owner, err)
+		return "", fmt.Errorf("octo-sts %s@%s: %w", owner, identity, err)
 	}
 	if body.Token == "" {
 		return "", fmt.Errorf("octo-sts returned no token for %s", owner)

@@ -18,8 +18,8 @@ Exchanges an Authentik machine identity for short-lived GitHub tokens through oc
 | Variable | Meaning |
 | --- | --- |
 | `AUTHENTIK_TOKEN_URL`, `AUTHENTIK_CLIENT_ID`, `AUTHENTIK_APP_PASSWORD` | Authentik client credentials |
-| `OCTO_STS_URL`, `OCTO_STS_IDENTITY` | octo-sts endpoint and trust-policy identity |
-| `TOKENS` | `key=owner,...`: Secret key and the GitHub owner whose trust policy applies |
+| `OCTO_STS_URL`, `OCTO_STS_IDENTITY` | octo-sts endpoint and the default trust-policy identity |
+| `TOKENS` | `key=owner[@identity],...`: Secret key, the GitHub owner whose trust policy applies, and optionally the trust-policy identity for that token (default `OCTO_STS_IDENTITY`), e.g. `review=routivo@security-review` for a read-only token. A malformed or duplicate entry fails the run |
 | `SECRET_NAME`, `SECRET_NAMESPACES` | Secret to write and the comma-separated namespaces |
 | `ENV_SECRETS` | Optional `ns/name:ENV_KEY=token_key;...`: also write chosen tokens into other Secrets, owning only those keys |
 
