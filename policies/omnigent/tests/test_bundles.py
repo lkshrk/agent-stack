@@ -259,7 +259,7 @@ CASES: list[Case] = [
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
     *[
         Case("polly/agents/claude_code", "tool_call", tool, data, "DENY")
-        for rc in (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zshenv")
+        for rc in (".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".inputrc")
         for tool, data in (
             ("Write", {"file_path": f"/home/omnigent/{rc}", "content": "x"}),
             ("Edit", {"file_path": f"/home/omnigent/{rc}", "old_string": "a", "new_string": "b"}),
