@@ -289,6 +289,10 @@ CASES: list[Case] = [
             ("gh api graphql -f quer{y,}=\"$(cat /tmp/q)\"", "DENY"),
             ("cat /tmp/q | xargs -0 -I{} gh api graphql -f query={}", "DENY"),
             ("cat /tmp/q | parallel gh api graphql -f query={}", "DENY"),
+            ("cat /tmp/q | xargs -0 -I{} sh -c 'gh api graphql -f query=\"{}\"'", "DENY"),
+            ("echo graphql | xargs -I{} gh api {} -f query='mutation { mergePullRequest(input:{}) { x } }'", "DENY"),
+            ("echo merge 5 | xargs gh pr", "DENY"),
+            ("ls | xargs -I{} gh pr view {}", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, OpaqueCommand, _nested_command, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, SHELLS, Command, OpaqueCommand, _nested_command, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])", re.IGNORECASE)
@@ -285,15 +285,23 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
     return None
 
 
+def _runs_vcs(command: Command) -> bool:
+    """The resolved command is git or gh, or a shell or parallel body that mentions either."""
+    name = command.name
+    if name in _VCS:
+        return True
+    texts = list(command.nested)
+    if name in SHELLS:
+        texts += command.argv[1:]
+    return any(_VCS_TEXT.search(t) for t in texts)
+
+
 def _check_statement(tokens: list[str], protected: frozenset[str], expanding_query: bool = False) -> str | None:
     if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
     command = resolve(tokens)
-    if _STDIN_ARGUMENTS & set(command.wrappers) and command.argv and os.path.basename(command.argv[0]) in _VCS:
-        if os.path.basename(command.argv[0]) == "gh" and _graphql_request(command.argv[1:]):
-            return f"{command.wrappers[0]} into gh api graphql is not allowed, since stdin can supply the query; {_PR_HINT}"
-        if _mentions_merge_or_push(command.argv):
-            return f"{command.wrappers[0]} into a merge or push is not allowed, since stdin can supply the branch; {_PR_HINT}"
+    if _STDIN_ARGUMENTS & set(command.wrappers) and _runs_vcs(command):
+        return f"run gh/git directly, not through xargs/parallel, since stdin can supply their arguments; {_PR_HINT}"
     for run, resolved in _vcs_runs(tokens):
         rest = run[1:]
         if _mentions_merge_or_push(run) and any("$" in t for t in rest):

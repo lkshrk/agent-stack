@@ -189,9 +189,34 @@ class NoMergeTest(unittest.TestCase):
         for command in (
             "gh api graphql -f 'query'='{ viewer { login } }'",
             "gh api graphql -f \"query\"='query($o: String!) { repository(owner: $o, name: \"r\") { id } }' -F o=x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_no_gh_or_git_through_xargs_or_parallel(self):
+        for command in (
             "ls | xargs -I{} gh pr view {}",
             "cat ids | xargs -I{} gh api repos/o/r/issues/{}",
+            "gh pr list --json number -q '.[].number' | xargs -n1 gh pr checks",
+            "echo merge 5 | xargs gh pr",
+            "echo 'pr merge 5' | xargs gh",
+            "printf 'api\\0graphql\\0-f\\0query=x' | xargs -0 gh",
+            "echo graphql | xargs -I{} gh api {} -f query='mutation { mergePullRequest(input:{}) { x } }'",
+            "cat /tmp/q | xargs -0 -I{} sh -c 'gh api graphql -f query=\"{}\"'",
+            "cat /tmp/q | xargs -0 -I{} bash -c 'gh api graphql -f query={}'",
+            "cat /tmp/q | parallel sh -c \"'gh api graphql -f query={}'\"",
+            "ls | xargs git status",
+            "echo feat/x | xargs git push origin",
+            "ls | parallel git -C {} status",
+            "parallel ::: 'gh pr merge 5'",
+            "timeout 5 xargs gh pr view < ids",
         ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("run gh/git directly, not through xargs/parallel", decision["reason"])
+        for command in ("ls | xargs -I{} rg -n x {}", "ls | xargs wc -l", "echo a | parallel echo {}"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
@@ -520,9 +545,10 @@ class StdinArgumentsTest(unittest.TestCase):
                 self.assertEqual(run(command)["result"], "DENY")
 
     def test_xargs_elsewhere_allowed(self):
-        for command in ("ls | xargs wc -l", "echo a | xargs git log -1", "cat <(git log -1)"):
+        for command in ("ls | xargs wc -l", "cat <(git log -1)"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+        self.assertEqual(run("echo a | xargs git log -1")["result"], "DENY")
 
 
 class VariableTargetTest(unittest.TestCase):
