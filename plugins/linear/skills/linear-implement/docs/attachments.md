@@ -17,8 +17,8 @@ Written findings belong in the issue description or a Linear Document (`save_doc
 Do these steps for one file at a time.
 
 1. Call `prepare_attachment_upload(issue, filename, contentType, size)` with the exact byte size. It returns
-   `uploadRequest.url`, `uploadRequest.headers` and `assetUrl`. Save the returned JSON object to
-   `prepare.json`.
+   `uploadRequest.url`, `uploadRequest.headers` and `assetUrl`. The result only lands in your context: write
+   it verbatim to `prepare.json` with your file-write tool.
 2. Upload the raw bytes within 60 seconds, building the headers from that file, never by hand
    (`Content-Type` is one of them):
 
@@ -27,7 +27,6 @@ Do these steps for one file at a time.
    curl -sS --fail-with-body -X PUT --data-binary @shot.png "${H[@]}" "$(jq -r .uploadRequest.url prepare.json)"
    ```
 
-   If `uploadRequest.headers` is a list of `{key, value}` objects instead of a map, adapt the `jq` filter.
    Any non-2xx status makes `curl` exit non-zero; stop and report it.
 3. Call `create_attachment_from_upload(issue, assetUrl, title?, subtitle?)`.
 
