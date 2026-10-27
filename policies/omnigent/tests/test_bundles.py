@@ -258,6 +258,19 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
     *[
+        Case("polly/agents/claude_code", "tool_call", tool, data, "DENY")
+        for rc in (".bashrc", ".bash_profile", ".profile", ".zshrc", ".zshenv")
+        for tool, data in (
+            ("Write", {"file_path": f"/home/omnigent/{rc}", "content": "x"}),
+            ("Edit", {"file_path": f"/home/omnigent/{rc}", "old_string": "a", "new_string": "b"}),
+            ("Bash", {"command": f"echo x >> ~/{rc}"}),
+            ("Bash", {"command": ["bash", "-lc", f"cp /tmp/rc ~/{rc}"]}),
+            ("Bash", {"command": f"echo x >> /home/omnigent/{rc}"}),
+            ("Bash", {"command": f'echo x >> "$HOME/{rc}"'}),
+        )
+    ],
+    Case("polly/agents/claude_code", "tool_call", "Write", {"file_path": "/home/omnigent/work/repo/src/a.py", "content": "x"}, "ALLOW"),
+    *[
         Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, expected)
         for command, expected in (
             ("git push", "DENY"),

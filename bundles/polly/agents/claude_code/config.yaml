@@ -83,6 +83,22 @@ guardrails:
             - CLAUDE.md
             - "lefthook.y*ml"
             - CODEOWNERS
+            # Shell startup files a later harness process in the same pod reads.
+            - "/home/omnigent/.bashrc"
+            - "~/.bashrc"
+            - "$HOME/.bashrc"
+            - "/home/omnigent/.bash_profile"
+            - "~/.bash_profile"
+            - "$HOME/.bash_profile"
+            - "/home/omnigent/.profile"
+            - "~/.profile"
+            - "$HOME/.profile"
+            - "/home/omnigent/.zshrc"
+            - "~/.zshrc"
+            - "$HOME/.zshrc"
+            - "/home/omnigent/.zshenv"
+            - "~/.zshenv"
+            - "$HOME/.zshenv"
           exempt: ["**/.env.example"]
     blast_radius:
       type: function
