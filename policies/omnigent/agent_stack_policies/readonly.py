@@ -245,9 +245,7 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
         try:
             statements = walk(command)
         except ValueError:
-            if re.search(r"\bgit\b", command):
-                return deny("unparseable command naming git; simplify it")
-            return allow()
+            return deny("unparseable shell command; simplify it")
         if opaque(command):
             return deny("substring, subscript, transformation and indirect expansions are not allowed; write the command literally")
         shape = shell_shape_problem(statements)
@@ -259,6 +257,8 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
             return deny("setting variables in a command that runs git is not allowed; hand repository changes to the implementer")
         for resolved in resolved_all:
             argv = resolved.argv
+            if argv and "$" in argv[0]:
+                return deny(f"the command name {argv[0]} is hidden in a variable or $'…' quoting; write it literally")
             if argv and os.path.basename(argv[0]) == "git":
                 if {"xargs", "parallel"} & set(resolved.wrappers):
                     return deny("git through xargs or parallel is not allowed, since stdin can add arguments")

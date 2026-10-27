@@ -62,6 +62,7 @@ _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
 _FD = re.compile(r"^\d+$")
+_QUOTED_DOLLAR = re.compile(r"\$['\"]")
 
 
 @dataclass
@@ -372,6 +373,15 @@ def _nested_command(tokens: list[str]) -> str | None:
 def opaque(text: str) -> bool:
     """A `${…}` with `:`, `[`, `@` or `!` after the name: substrings, subscripts, transformations and indirection evaluate or decode values no gate can read."""
     return OPAQUE_EXPANSION.search(text) is not None
+
+
+def ansi_quoted(text: str) -> bool:
+    """`$'…'` or `$"…"` somewhere: `parse` turns `$'\x67it'` into a `$…` token, so a `$`-led name may hide any command."""
+    return _QUOTED_DOLLAR.search(text) is not None
+
+
+def opaque_name(text: str, token: str) -> bool:
+    return token.startswith("$") and ansi_quoted(text)
 
 
 def decoding(text: str) -> bool:

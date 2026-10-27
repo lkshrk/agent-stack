@@ -292,3 +292,24 @@ class PushRedirectTest(unittest.TestCase):
         for command in EVERYDAY:
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW", run(command).get("reason"))
+
+
+class QuotedNameTest(unittest.TestCase):
+    def test_ansi_c_quoted_names_denied(self):
+        for command in (
+            "$'git' push origin main",
+            "$'\\x67it' push origin main",
+            '$"git" push origin main',
+            "git $'push' origin main",
+            "git $'\\x70ush' origin main",
+            "gh pr $'merge' 5",
+            "$'gh' pr merge 5",
+            "git $'\\x70ush' origin main $'it\\'s'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_ansi_c_quoting_elsewhere_allowed(self):
+        for command in ("echo $'a\\tb' && git push -u origin feat/x", "printf $'x\\n'", "git commit -m $'line\\nmore'"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

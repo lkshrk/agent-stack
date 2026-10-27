@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, hidden_command, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
@@ -116,6 +116,22 @@ def _config_environment(statements: list[list[str]]) -> str | None:
     return None
 
 
+def _quoted_vcs(text: str, statements: list[list[str]]) -> str | None:
+    """A git/gh name or subcommand hidden in `$'…'`, `$"…"` or a variable."""
+    for tokens in statements:
+        argv = resolve(tokens).argv
+        if not argv:
+            continue
+        if opaque_name(text, argv[0]):
+            return f"a command name in $'…' or $\"…\" quoting is not allowed; {_PR_HINT}"
+        name = os.path.basename(argv[0])
+        if name == "git" and _git_parts(argv[1:])[1].startswith("$"):
+            return f"a git subcommand in a variable or $'…' quoting is not allowed; {_PR_HINT}"
+        if name == "gh" and any(a.startswith("$") for a in argv[1:3]):
+            return f"a gh subcommand in a variable or $'…' quoting is not allowed; {_PR_HINT}"
+    return None
+
+
 def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
     flags = [a for a in args if a.startswith("-")]
     positional = [a for a in args if not a.startswith("-")]
@@ -175,10 +191,10 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
         try:
             statements = walk(command)
         except ValueError:
-            if "merge" in command or "push" in command:
+            if "merge" in command or "push" in command or ansi_quoted(command):
                 return deny("unparseable merge or push command; simplify the command")
             return allow()
-        reason = hidden_command(command, statements, _VCS_TEXT)
+        reason = hidden_command(command, statements, _VCS_TEXT) or _quoted_vcs(command, statements)
         if not reason and _VCS_TEXT.search(command):
             reason = _config_environment(statements)
         if reason:

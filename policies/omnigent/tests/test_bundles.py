@@ -218,6 +218,7 @@ N6_PROBES = [
     "bash -c 'rg x' _ a",
     ["bash", "-lc", "bash -c 'echo ${0@P}' '\\044(touch /tmp/p)'"],
 ]
+QUOTED_NAME_PROBES = ["$'rg' x", "$'\\x72g' x src"]
 N4_PROBES = [
     "printf -v y '%s%s' 'a[$' '(touch /tmp/p)]'; echo ${x:y}",
     "printf -v PATH '%s' ./bin; rg x",
@@ -496,7 +497,7 @@ CASES += [
     Case(agent, "tool_call", tool, {"command": command}, "DENY")
     for agent, tools in READ_ONLY_AGENTS.items()
     for tool in tools
-    for command in I1_PROBES + N1_PROBES + N2_PROBES + N4_PROBES + N6_PROBES
+    for command in I1_PROBES + N1_PROBES + N2_PROBES + N4_PROBES + N6_PROBES + QUOTED_NAME_PROBES
 ]
 CASES += [
     Case("polly", "tool_call", tool, {"command": command}, "DENY")
@@ -512,6 +513,9 @@ CASES += [
         "bash -c 'echo ${0@P}' '\\044(git push origin feat/x)'",
         "cat '\\044(git -C ../wt commit -am x)'; echo ${_@P}",
         "cd pr-dir && git status && echo \"${PWD@P}\"",
+        "$'git' push origin feat/x",
+        "$'\\x67it' commit -am x",
+        "$'\\x67it' commit -m $'it\\'s'",
     )
 ]
 CASES += [
@@ -530,6 +534,9 @@ CASES += [
         "git config alias.ship 'push origin HEAD:main'; git ship",
         "git -c alias.ship='push origin HEAD:main' ship",
         "git config remote.origin.push HEAD:refs/heads/main && git push",
+        "$'git' push origin main",
+        "$'\\x63laude' -p hi",
+        "$'claude' -p hi",
     )
 ]
 CASES += [
