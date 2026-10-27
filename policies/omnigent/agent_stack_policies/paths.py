@@ -1,10 +1,11 @@
+import os
 import re
 from collections.abc import Callable
 from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
-from ._shell import OpaqueCommand, shell_command, shell_shape_problem, walk
+from ._shell import OpaqueCommand, resolve, shell_command, shell_shape_problem, walk
 
 PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
@@ -17,6 +18,73 @@ PATCH_KEYS = ("command", "input", "patch")
 _FLAG_PREFIX = re.compile(r"^--[^=\s]+=")
 _PATCH_PATH = re.compile(r"^[ \t]*\*\*\* (?:Add File|Update File|Delete File|Move to): *(.*?)\s*$", re.MULTILINE)
 _PATCH_BEGIN = "*** Begin Patch"
+_FUSED_REDIRECT_TARGET = re.compile(r"(?:&>>?|>\||>&)[ \t]*([^\s;&|<>()]+)")
+_COPY = frozenset({"cp", "mv", "install", "ln", "rsync"})
+_TOUCH = frozenset({"touch", "rm", "rmdir", "truncate", "mkdir"})
+_OWNER = frozenset({"chmod", "chown", "chgrp"})
+_VALUE_FLAGS = {
+    "sed": frozenset({"-e", "-f", "-l", "--expression", "--file", "--line-length"}),
+    "cp": frozenset({"-S", "--suffix", "-t", "--target-directory"}),
+    "mv": frozenset({"-S", "--suffix", "-t", "--target-directory"}),
+    "install": frozenset({"-m", "--mode", "-o", "--owner", "-g", "--group", "-S", "--suffix", "-t", "--target-directory"}),
+    "ln": frozenset({"-S", "--suffix", "-t", "--target-directory"}),
+    "rsync": frozenset({"-e", "--rsh", "--exclude", "--include", "--filter", "-f", "--chmod"}),
+    "touch": frozenset({"-d", "--date", "-t", "-r", "--reference"}),
+    "truncate": frozenset({"-s", "--size", "-r", "--reference"}),
+    "mkdir": frozenset({"-m", "--mode"}),
+    "tee": frozenset(),
+}
+
+
+def _operands(name: str, args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Non-flag operands and the values of value-taking flags."""
+    values = _VALUE_FLAGS.get(name, frozenset())
+    operands, found, i = [], {}, 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            operands.extend(args[i + 1 :])
+            break
+        if arg.startswith("-") and arg != "-":
+            flag, eq, value = arg.partition("=")
+            if flag in values and not eq:
+                found[flag] = args[i + 1] if i + 1 < len(args) else ""
+                i += 2
+                continue
+            found[flag] = value
+        else:
+            operands.append(arg)
+        i += 1
+    return operands, found
+
+
+def _in_place(arg: str) -> bool:
+    return arg.startswith("--in-place") or (arg.startswith("-") and not arg.startswith("--") and "i" in arg[1:].split("=")[0])
+
+
+def shell_write_targets(tokens: list[str]) -> list[str]:
+    """Files a statement plainly writes: redirect targets and the targets of tee, sed -i, cp/mv/install/ln/rsync, touch/rm/rmdir/truncate/mkdir, chmod/chown and dd of=."""
+    targets = [tokens[i + 1] for i, t in enumerate(tokens[:-1]) if t in (">", ">>", "<>")]
+    argv = resolve(tokens).argv
+    if not argv:
+        return targets
+    name, args = os.path.basename(argv[0]), argv[1:]
+    operands, flags = _operands(name, args)
+    if name == "tee":
+        targets += [o for o in operands if o != "-"]
+    elif name == "sed" and any(_in_place(a) for a in args if a.startswith("-")):
+        scripted = any(f in flags for f in ("-e", "-f", "--expression", "--file"))
+        targets += operands if scripted else operands[1:]
+    elif name in _COPY:
+        directory = flags.get("-t") or flags.get("--target-directory")
+        targets += [directory] if directory else operands[-1:] if len(operands) > 1 else []
+    elif name in _TOUCH:
+        targets += operands
+    elif name in _OWNER:
+        targets += operands if "--reference" in flags else operands[1:]
+    elif name == "dd":
+        targets += [a[3:] for a in args if a.startswith("of=")]
+    return targets
 
 
 def _normalise(path: str) -> str:
@@ -105,6 +173,7 @@ def path_guard(
     exempt: list[str] | None = None,
 ) -> Callable[[Event], Decision | None]:
     forbidden = forbidden_matcher(deny, exempt)
+    exempted = list(exempt or [])
     has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
 
@@ -136,6 +205,19 @@ def path_guard(
                 return decision
         return allow()
 
+    def scratch(path: str) -> bool:
+        return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
+
+    def check_scope(command: str, statements: list[list[str]]) -> Decision | None:
+        targets = _FUSED_REDIRECT_TARGET.findall(command)
+        targets = [t for t in targets if not t.isdigit() and t != "-"]
+        for tokens in statements:
+            targets += shell_write_targets(tokens)
+        for target in targets:
+            if not scratch(target) and not _matches_any(target, allowed_only + exempted):
+                return _deny(f"shell write to {target} is outside allowed paths")
+        return None
+
     def check_shell(arguments: dict) -> Decision:
         command = shell_command(arguments)
         if command is None:
@@ -151,6 +233,10 @@ def path_guard(
         reason = shell_shape_problem(statements)
         if reason:
             return _deny(reason)
+        if allowed_only is not None:
+            decision = check_scope(command, statements)
+            if decision:
+                return decision
         for tokens in statements:
             for token in tokens:
                 candidate = _FLAG_PREFIX.sub("", token)

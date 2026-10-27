@@ -279,3 +279,76 @@ class HeredocTest(unittest.TestCase):
     def test_forbidden_path_after_heredoc_seen(self):
         command = "cat <<E\nit's\nE\nrm .github/workflows/ci.yml #'"
         self.assertEqual(path_guard(deny=[WORKFLOWS])(tool_call_event("bash", {"command": command}))["result"], "DENY")
+
+
+POLLY_SCOPE = [".polly/registry.json", ".polly/diffs/**", "polly/skills/**"]
+DOCS_SCOPE = ["**/*.md", "docs/**", "**/README*", "CHANGELOG*", "**/adr/**"]
+
+
+class ShellWriteScopeTest(unittest.TestCase):
+    def verdict(self, command, scope=POLLY_SCOPE):
+        return path_guard(deny=[WORKFLOWS], allow_only=scope)(tool_call_event("bash", {"command": command}))["result"]
+
+    def test_polly_writes_outside_scope_denied(self):
+        for command in (
+            "sed -i x src/app.py",
+            "sed -i.bak -e s/a/b/ src/app.py",
+            "sed --in-place s/a/b/ src/app.py",
+            "echo x > src/app.py",
+            "echo x >> src/app.py",
+            "echo x &> src/app.py",
+            "tee src/app.py",
+            "echo x | tee -a src/app.py",
+            "cp a src/b",
+            "cp -t src a",
+            "mv a src/b",
+            "install -m 644 a src/b",
+            "ln -s a src/b",
+            "rsync -a a/ src/",
+            "touch src/a",
+            "rm src/a",
+            "rm -f /tmp/x src/a",
+            "rmdir src",
+            "truncate -s 0 src/a",
+            "mkdir src/x",
+            "chmod +x src/a",
+            "chown u src/a",
+            "dd if=a of=src/a",
+            "bash -c 'echo > src/a'",
+            "timeout 5 tee src/a",
+            "echo x > $OUT",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "DENY")
+
+    def test_polly_everyday_allowed(self):
+        for command in (
+            "make test",
+            "pnpm test 2>&1 | tail -20",
+            "echo x > /tmp/y",
+            "echo x > .polly/registry.json",
+            "gh pr diff 3 > .polly/diffs/t1-abc.diff",
+            "git -C .worktrees/t1 diff a...b > /repo/.polly/diffs/t1-b.diff",
+            "rm /tmp/x",
+            "tee /dev/null",
+            "cp a /tmp/b",
+            "mkdir -p .polly/diffs",
+            "sed -n 1p src/app.py",
+            "cat src/app.py > /dev/null",
+            "rg x 2>/dev/null",
+            "git worktree add .worktrees/t1 -b polly/t1",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+
+    def test_documenter_scope(self):
+        for command in ("sed -i s/a/b/ backend/app/main.py", "echo x > backend/x.py", "cp README.md backend/", "mv docs/a.md src/a.py"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command, DOCS_SCOPE), "DENY")
+        for command in ("sed -i s/a/b/ docs/setup.md", "echo x > docs/a.md", "make fmt", "cp docs/a.md docs/b.md", "rm docs/old.md"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
+
+    def test_without_allow_only_unchanged(self):
+        guard = path_guard(deny=[WORKFLOWS])
+        self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
