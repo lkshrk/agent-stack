@@ -349,6 +349,67 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
 
+    def test_redirects_do_not_hide_destinations(self):
+        for command in (
+            "cp a src/x >/dev/null",
+            "cp a src/x 2>/dev/null",
+            "mv a src/x 2>/dev/null",
+            "ln -sf /tmp/x src/x >/dev/null",
+            "rsync -a a/ src/ >/dev/null",
+            "install -D a src/a > /dev/null",
+            "cp a src/x 2>&1",
+            "cp a src/x < /dev/null",
+            "cp a src/x 2>>/tmp/err",
+        ):
+            for scope in (POLLY_SCOPE, DOCS_SCOPE):
+                with self.subTest(command=command, scope=scope):
+                    self.assertEqual(self.verdict(command, scope), "DENY")
+
+    def test_redirects_are_not_write_operands(self):
+        for command in (
+            "mkdir -p .polly/diffs 2>/dev/null",
+            "rm -f .polly/diffs/x.diff 2>/dev/null",
+            "rm -f .polly/diffs/x.diff 2>&1",
+            "mkdir -p .polly/diffs &>/dev/null",
+            "xargs rm < /tmp/list",
+            "cp /tmp/r.json .polly/registry.json 2>/dev/null",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+        self.assertEqual(self.verdict("sed -i s/a/b/ docs/a.md 2>/dev/null", DOCS_SCOPE), "ALLOW")
+
+    def test_redirect_target_still_checked(self):
+        for command in ("rm -f .polly/diffs/x 2>src/a", "mkdir -p .polly/diffs 2>>src/a"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "DENY")
+
+    def test_dotdot_targets_normalised(self):
+        for command in (
+            "echo x > /tmp/../src/a",
+            "cp src/a.py /tmp/../src/b.py",
+            "echo x > .polly/diffs/../../src/a.py",
+            "cp a .polly/diffs/../../src/a.py",
+            "echo x &>/tmp/../src/a",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "DENY")
+        self.assertEqual(self.verdict("echo x > /tmp/a/../b"), "ALLOW")
+
+    def test_list_form_fused_redirects(self):
+        guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
+        for body, expected in (
+            ("pnpm test > /tmp/log 2>&1", "ALLOW"),
+            ("make test 2>&1", "ALLOW"),
+            ("make test >&2", "ALLOW"),
+            ("make test &>/dev/null", "ALLOW"),
+            ("make test &>src/a", "DENY"),
+            ("make test >&src/a", "DENY"),
+        ):
+            with self.subTest(body=body):
+                decision = guard(tool_call_event("bash", {"command": ["bash", "-lc", body]}))
+                self.assertEqual(decision["result"], expected)
+        self.assertEqual(self.verdict('echo x &>"src/a"'), "DENY")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")

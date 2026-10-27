@@ -438,8 +438,8 @@ def _mise_exec(args: list[str], nested: list[str]) -> list[str]:
     return [] if commands else args[split + 1 :]
 
 
-def _positional(args: list[str]) -> list[str]:
-    """Arguments after a `-c` body, without redirections (`2>&1` leaves a bare fd when `parse` splits at `>&`)."""
+def strip_redirects(args: list[str]) -> list[str]:
+    """Words without redirections and their targets (`2>&1` leaves a bare fd when `parse` splits at `>&`)."""
     out, i = [], 0
     while i < len(args):
         if args[i] and set(args[i]) <= set("<>"):
@@ -478,7 +478,7 @@ def _shell_inputs(args: list[str], nested: list[str], body_arguments: list[str] 
                 if following is not None:
                     nested.append(following)
                     if body_arguments is not None:
-                        body_arguments.extend(_positional(args[i + 2 :]))
+                        body_arguments.extend(strip_redirects(args[i + 2 :]))
                 return False
             if arg.startswith("-") and "s" in arg[1:]:
                 return True

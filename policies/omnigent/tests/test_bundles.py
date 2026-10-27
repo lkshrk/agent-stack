@@ -477,6 +477,16 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh pr diff 3 > .polly/diffs/t1-abc.diff"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "git -C .worktrees/t1 diff abc...def > .polly/diffs/t1-def.diff"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "make test"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "mv a src/x >/dev/null"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "mkdir -p .polly/diffs 2>/dev/null"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "rm -f .polly/diffs/x.diff 2>/dev/null"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": ["bash", "-lc", "pnpm test > /tmp/log 2>&1"]}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "echo x > .polly/diffs/../../src/a.py"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "gh api -X PUT repos/o/r/pulls/5/merge#x"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "PUT", "/repos/o/r/pulls/5/merge/"]}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
 
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]

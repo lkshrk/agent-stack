@@ -1,11 +1,12 @@
 import os
+import posixpath
 import re
 from collections.abc import Callable
 from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
-from ._shell import OpaqueCommand, resolve, shell_command, shell_shape_problem, walk
+from ._shell import OpaqueCommand, resolve, shell_command, shell_shape_problem, strip_redirects, walk
 
 PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
@@ -65,7 +66,7 @@ def _in_place(arg: str) -> bool:
 def shell_write_targets(tokens: list[str]) -> list[str]:
     """Files a statement plainly writes: redirect targets and the targets of tee, sed -i, cp/mv/install/ln/rsync, touch/rm/rmdir/truncate/mkdir, chmod/chown and dd of=."""
     targets = [tokens[i + 1] for i, t in enumerate(tokens[:-1]) if t in (">", ">>", "<>")]
-    argv = resolve(tokens).argv
+    argv = resolve(strip_redirects(tokens)).argv
     if not argv:
         return targets
     name, args = os.path.basename(argv[0]), argv[1:]
@@ -209,11 +210,11 @@ def path_guard(
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
     def check_scope(command: str, statements: list[list[str]]) -> Decision | None:
-        targets = _FUSED_REDIRECT_TARGET.findall(command)
-        targets = [t for t in targets if not t.isdigit() and t != "-"]
+        fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
+        targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for tokens in statements:
             targets += shell_write_targets(tokens)
-        for target in targets:
+        for target in (posixpath.normpath(t) for t in targets):
             if not scratch(target) and not _matches_any(target, allowed_only + exempted):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None
