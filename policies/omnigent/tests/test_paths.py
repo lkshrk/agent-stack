@@ -132,8 +132,8 @@ class ShellTest(unittest.TestCase):
         decision = policy(tool_call_event("bash", {"command": 'echo "unterminated'}))
         self.assertEqual(decision["result"], "DENY")
 
-    def test_shell_unparseable_allowed_without_deny(self):
-        decision = path_guard(allow_only=["docs/**"])(tool_call_event("bash", {"command": 'echo "u'}))
+    def test_shell_unparseable_allowed_without_deny_or_allow_only(self):
+        decision = path_guard(exempt=["**/.env.example"])(tool_call_event("bash", {"command": 'echo "u'}))
         self.assertEqual(decision["result"], "ALLOW")
 
     def test_shell_arguments_unparseable_denied(self):
@@ -560,6 +560,24 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command), "ALLOW")
         self.assertEqual(self.verdict("sed -i.bak -e s/a/b/ docs/a.md", DOCS_SCOPE), "ALLOW")
+
+    def test_exempt_does_not_widen_shell_scope(self):
+        guard = path_guard(allow_only=["docs/**"], deny=["**/.env*"], exempt=["**/.env.example"])
+        for command in ("echo x > backend/.env.example", "cp /tmp/a backend/.env.example", "tee .env.example"):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        write = guard(tool_call_event("Write", {"file_path": "backend/.env.example", "content": "x"}))
+        self.assertEqual(write["result"], "DENY")
+        self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > docs/.env.example"}))["result"], "ALLOW")
+        self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > docs/.env"}))["result"], "DENY")
+
+    def test_unparseable_denied_with_allow_only(self):
+        guard = path_guard(allow_only=["docs/**"])
+        for command in ("echo 'x > src/a.py", 'echo "x > src/a.py'):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "DENY")
+        self.assertEqual(path_guard()(tool_call_event("bash", {"command": "echo 'x"}))["result"], "ALLOW")
 
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])

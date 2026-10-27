@@ -547,6 +547,8 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > ../other/x.md"}, "DENY"),
+    Case("documenter", "tool_call", "Bash", {"command": "echo x > backend/.env.example"}, "DENY"),
+    Case("documenter", "tool_call", "Bash", {"command": ["bash", "-lc", "cp /tmp/a backend/.env.example"]}, "DENY"),
     *[
         Case("documenter", "tool_call", "Bash", {"command": form}, "DENY")
         for command in (

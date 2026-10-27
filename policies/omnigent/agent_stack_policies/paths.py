@@ -200,7 +200,6 @@ def path_guard(
     exempt: list[str] | None = None,
 ) -> Callable[[Event], Decision | None]:
     forbidden = forbidden_matcher(deny, exempt)
-    exempted = list(exempt or [])
     has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
 
@@ -260,14 +259,14 @@ def path_guard(
         except OpaqueCommand:
             return _deny("a heredoc without its delimiter line hides what runs after it; close it")
         except ValueError:
-            if has_denied:
-                return _deny("unparseable shell command while forbidden paths are set")
+            if has_denied or allowed_only is not None:
+                return _deny("unparseable shell command while forbidden or allowed paths are set")
             return allow()
         reason = shell_shape_problem(statements)
         if reason:
             return _deny(reason)
         if allowed_only is not None:
-            decision = check_scope(command, [*allowed_only, *exempted])
+            decision = check_scope(command, list(allowed_only))
             if decision:
                 return decision
         for tokens in statements:
