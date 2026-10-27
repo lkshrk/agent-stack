@@ -101,6 +101,12 @@ class DoubleQuoteEscapeTest(unittest.TestCase):
         self.assertEqual(parse('echo "x\\$y" \\$z'), [["echo", "x$y", "$z"]])
 
 class WalkTest(unittest.TestCase):
+    def test_shell_families_and_busybox_bodies_walked(self):
+        for shell in ("rbash", "ash", "mksh", "fish", "tcsh", "yash", "posh"):
+            with self.subTest(shell=shell):
+                self.assertEqual(walk(f"{shell} -c 'echo x > out'"), [[shell, "-c", "echo x > out"], ["echo", "x", ">", "out"]])
+        self.assertEqual(walk("busybox sh -c 'echo x > out'"), [["busybox", "sh", "-c", "echo x > out"], ["echo", "x", ">", "out"]])
+
     def test_wrapper_bodies_walked(self):
         statements = walk("script -qc 'claude -p x' /dev/null")
         self.assertIn(["claude", "-p", "x"], statements)

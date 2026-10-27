@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 _OPERATOR_CHARS = frozenset(";&|")
 _PUNCTUATION = frozenset(";&|()<>")
 _GROUPING = frozenset({"(", ")", "$"})
-SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+SHELLS = frozenset({"sh", "bash", "rbash", "zsh", "dash", "ash", "ksh", "mksh", "fish", "csh", "tcsh", "yash", "posh"})
+
+
+def shell_name(name: str) -> bool:
+    return name in SHELLS or name.endswith("sh")
 DEFAULT_PROTECTED = ("main", "master")
 _KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until", "(", "{"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -580,7 +584,11 @@ def resolve(tokens: list[str]) -> Command:
         if not argv:
             break
         name = os.path.basename(argv[0])
-        if name in SHELLS:
+        if name == "busybox" and len(argv) > 1 and shell_name(os.path.basename(argv[1])):
+            command.wrappers.append(name)
+            argv = argv[1:]
+            continue
+        if shell_name(name):
             command.stdin_exec = _shell_inputs(argv[1:], command.nested, command.body_arguments)
             break
         if name == "eval":
@@ -603,7 +611,9 @@ def _nested_command(tokens: list[str]) -> str | None:
         name = os.path.basename(token)
         if name == "eval" and i + 1 < len(tokens):
             return " ".join(tokens[i + 1 :])
-        if name not in SHELLS:
+        if name == "busybox" and i + 1 < len(tokens) and shell_name(os.path.basename(tokens[i + 1])):
+            name, i = os.path.basename(tokens[i + 1]), i + 1
+        if not shell_name(name):
             continue
         for j in range(i + 1, len(tokens) - 1):
             flag = tokens[j]

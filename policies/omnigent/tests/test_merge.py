@@ -309,6 +309,32 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_stdin_allowlist_and_shell_families(self):
+        for command in (
+            "xargs find",
+            "xargs uv",
+            "xargs npm",
+            "xargs ruff check",
+            "xargs rm -f",
+            "xargs sort -o /tmp/x",
+            "xargs -I XX timeout 5 XX pr merge 5",
+            "xargs -I% nice % pr merge 5",
+            "parallel {.} pr merge 5 ::: gh.x",
+            "parallel --arg-sep ,,, ,,, gh",
+            "xargs -I{} rbash -c 'gh pr merge 5'",
+            "xargs -I{} busybox sh -c 'gh pr merge 5'",
+            "xargs -I{} python3.12 -c 'pass'",
+            "xargs -I{} gawk 'BEGIN{}'",
+            'rbash -c "git push --force origin HEAD:main"',
+            'rbash -c "gh pr merge 5"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("xargs wc -l", "xargs -I{} rg -n x {}", "parallel echo {} ::: a", "parallel rg -n x {} ::: src/a"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

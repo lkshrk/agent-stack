@@ -223,10 +223,11 @@ def path_guard(
         normal = posixpath.normpath(expanded)
         if normal in {f"{home}/{name}" for name in startup}:
             return True
-        if posixpath.dirname(normal) != home:
-            return False
-        if any(ch in path for ch in "*?[") or "{" in path:
-            pattern = re.sub(r"\{[^}]*\}", "*", posixpath.basename(expanded))
+        if any(ch in path for ch in "*?[") or ("{" in path and "," in path):
+            basename = posixpath.basename(expanded)
+            if basename in startup:
+                return True
+            pattern = re.sub(r"[{},]", "*", basename)
             return any(fnmatchcase(name, pattern) for name in startup)
         return False
 
@@ -307,6 +308,8 @@ def path_guard(
         for tokens in statements:
             for token in tokens:
                 candidate = _FLAG_PREFIX.sub("", token)
+                if candidate and startup_path(candidate):
+                    return _deny(f"startup file {candidate} is not readable or writable")
                 if candidate and forbidden(candidate):
                     return _deny(
                         f"forbidden path {candidate} in shell command; use the Read tool for reads"

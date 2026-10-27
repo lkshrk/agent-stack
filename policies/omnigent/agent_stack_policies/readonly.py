@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import SHELLS, Command, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
+from ._shell import SHELLS, Command, shell_name, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
 from .vcs import _BRANCH_LIST_FLAGS, _GIT_UNSAFE_FLAGS
 
@@ -173,7 +173,7 @@ def _check(tokens: list[str], allowed: frozenset[str], exact: list[list[str]]) -
     name = os.path.basename(program)
     if assigns(command):
         return f"{name} assigns shell variables, which is not allowed"
-    if name in SHELLS:
+    if shell_name(name):
         if "find" in command.wrappers:
             return "a shell through find -exec is not allowed"
         system = "/" not in program or (program.startswith(_SYSTEM_SHELL_DIRS) and program.count("/") <= 3)

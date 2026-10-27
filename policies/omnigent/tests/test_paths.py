@@ -638,10 +638,18 @@ class ShellWriteScopeTest(unittest.TestCase):
             "~/.bash{rc,}",
             "/home/omnigent/.bash{rc,}",
             "~/.bash?c",
+            "/home/omnigen?/.bashrc",
+            "/home/*/.bashrc",
+            "{~,/tmp/x}/.bashrc",
+            "/{home,x}/omnigent/.bashrc",
+            "~/.bash{r{c,},}",
         ):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
+        for command in ("sort -o ~/.bashrc /tmp/rc", "curl -so ~/.bashrc https://x", "wget -qO ~/.bashrc https://x", "perl -i -pe 's/a/b/' ~/.bashrc", "gawk -i inplace '{print}' ~/.bashrc", "git diff --output=/home/omnigent/.bashrc", "patch ~/.bashrc /tmp/p", "cat ~/.bashrc", "grep x ~/.bashrc", "cp ~/.bashrc /tmp/x"):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "DENY")
         for path in (".bashrc", "./.bashrc", "./.profile", "x/../.bashrc", "zsh/.zshrc", "dotfiles/.profile", "dotfiles/.bashrc", "/home/omnigent/work/dotfiles/zsh/.zshrc", "config/.profile", "~other/.bashrc", "/tmp/.bashrc"):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")

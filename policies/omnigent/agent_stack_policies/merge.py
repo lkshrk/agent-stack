@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, SHELLS, Command, OpaqueCommand, _nested_command, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, SHELLS, Command, shell_name, OpaqueCommand, _nested_command, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])", re.IGNORECASE)
@@ -347,24 +347,27 @@ def _runs_vcs(command: Command) -> bool:
     if name in _VCS:
         return True
     texts = list(command.nested)
-    if name in SHELLS:
+    if shell_name(name):
         texts += command.argv[1:]
     return any(_VCS_TEXT.search(t) for t in texts)
 
 
+_STDIN_ALLOWED = frozenset({"rg", "grep", "egrep", "fgrep", "wc", "cat", "head", "tail", "ls", "stat", "file", "echo", "printf", "basename", "dirname", "realpath", "readlink", "sort", "uniq", "cut", "tr", "jq", "yq", "sha256sum", "md5sum", "du", "test", "true"})
+
+
 def _unsafe_stdin_launcher(command: Command) -> bool:
-    """xargs/parallel may start only a literal, non-shell, non-gh/git program."""
+    """xargs/parallel may start only a literal allowlisted read or format program."""
     if not (_STDIN_ARGUMENTS & set(command.wrappers)):
         return False
     if not command.argv:
         return True
-    name = command.name
-    raw = command.argv[0]
-    if name in _VCS or name in _STDIN_SHELLS or name in _STDIN_INTERPRETERS:
+    name, raw = command.name, command.argv[0]
+    if name not in _STDIN_ALLOWED or raw.startswith(":::") or _STDIN_TEMPLATE.search(raw):
         return True
-    if raw.startswith(":::") or _STDIN_TEMPLATE.search(raw):
+    if any(ch in raw for ch in "'\\\"$`"):
         return True
-    return any(ch in raw for ch in "'\"\\$`")
+    args = command.argv[1:]
+    return name == "sort" and any(a == "-o" or a == "--output" or a.startswith("--output=") or (a.startswith("-o") and len(a) > 2) for a in args)
 
 
 def _check_statement(tokens: list[str], protected: frozenset[str], expanding_query: bool = False) -> str | None:
