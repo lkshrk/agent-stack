@@ -152,6 +152,24 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.secret_files.no_secret_reads",
+        "kind": "factory",
+        "name": "no_secret_reads",
+        "description": (
+            "Best-effort: deny shell commands that mention secret_dir other than as `GH_TOKEN_FILE=<token_file>` "
+            "right before gh, and gh auth, config, alias, extension and --web."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {
+                "secret_dir": {"type": "string"},
+                "token_file": {"type": "string"},
+            },
+            "required": ["secret_dir", "token_file"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.result.result_contract",
         "kind": "factory",
         "name": "result_contract",

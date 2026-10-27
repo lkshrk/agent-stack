@@ -33,7 +33,9 @@ prompt: |
   `git diff`, `git show`, `git log`, `gh pr view`, `gh pr diff`). Every `gh`
   command names the read-only review token as
   `GH_TOKEN_FILE=/agent-secrets/github/review gh …`; the sandbox strips other
-  GitHub credentials. Never print, copy, write or quote the token.
+  GitHub credentials. Never print, copy, write or quote the token. A policy
+  denies any other mention of `/agent-secrets` and `gh auth`, `gh config`,
+  `gh alias`, `gh extension` and `--web`.
 
   Shell: one plain command or pipeline per call. The policies deny `$(…)`,
   backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line
@@ -99,6 +101,14 @@ guardrails:
           arguments:
             read_all: true
             write_repos: []
+    no_secret_reads:
+      type: function
+      function:
+        # Best-effort; the review token's read-only scope is the real boundary.
+        path: agent_stack_policies.secret_files.no_secret_reads
+        arguments:
+          secret_dir: /agent-secrets
+          token_file: /agent-secrets/github/review
     no_write_tools:
       type: function
       function:

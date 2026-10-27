@@ -5,7 +5,7 @@ import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_agents, test_loop, test_merge, test_paths, test_readonly, test_result, test_spawn, test_tools, test_vcs
+from . import assert_not_ask, test_agents, test_loop, test_merge, test_paths, test_readonly, test_result, test_secret_files, test_spawn, test_tools, test_vcs
 
 EVENTS_BY_MODULE = {
     "agent_stack_policies.agents": test_agents.EVENTS,
@@ -18,6 +18,7 @@ EVENTS_BY_MODULE = {
     "agent_stack_policies.result": test_result.EVENTS,
     "agent_stack_policies.vcs": test_vcs.EVENTS,
     "agent_stack_policies.readonly": test_readonly.EVENTS,
+    "agent_stack_policies.secret_files": test_secret_files.EVENTS,
 }
 DEFAULT_PARAMS = {
     "agent_stack_policies.agents": {},
@@ -33,6 +34,7 @@ DEFAULT_PARAMS = {
     "agent_stack_policies.loop": {},
     "agent_stack_policies.vcs": {"allow_paths": ["docs/**"], "deny": ["AGENTS.md"]},
     "agent_stack_policies.readonly": {},
+    "agent_stack_policies.secret_files": {"secret_dir": "/agent-secrets", "token_file": "/agent-secrets/github/review"},
 }
 
 
