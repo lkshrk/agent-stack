@@ -393,7 +393,8 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_write", {"path": ".pilot/notes.md", "content": "x"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_write", {"path": ".github/workflows/README.md", "content": "x"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_write", {"path": "src/notes.md", "content": "x"}, "ALLOW"),
-    Case("documenter", "tool_call", "sys_os_write", {"path": "src/docs/x.py", "content": "x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "src/docs/x.py", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "docs/x.py", "content": "x"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ backend/app/main.py"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > backend/app/x.py"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/setup.md"}, "ALLOW"),
@@ -585,6 +586,12 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > ../other/x.md"}, "DENY"),
     Case("documenter", "tool_call", "Bash", {"command": "echo x > backend/.env.example"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_write", {"path": "backend/app/docs/gen.py", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "Write", {"file_path": "backend/app/docs/gen.py", "content": "x"}, "DENY"),
+    Case("documenter", "tool_call", "Bash", {"command": "echo x > backend/app/docs/gen.py"}, "DENY"),
+    Case("documenter", "tool_call", "Bash", {"command": ["bash", "-lc", "echo x > backend/app/docs/gen.py"]}, "DENY"),
+    Case("documenter", "tool_call", "Write", {"file_path": "/workspace/repo/docs/a.md", "content": "x"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "echo x > src/.polly/diffs/a.diff"}, "DENY"),
     Case("documenter", "tool_call", "Bash", {"command": ["bash", "-lc", "cp /tmp/a backend/.env.example"]}, "DENY"),
     *[
         Case("documenter", "tool_call", "Bash", {"command": form}, "DENY")

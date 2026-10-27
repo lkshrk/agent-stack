@@ -579,6 +579,51 @@ class ShellWriteScopeTest(unittest.TestCase):
                 self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "DENY")
         self.assertEqual(path_guard()(tool_call_event("bash", {"command": "echo 'x"}))["result"], "ALLOW")
 
+    def test_relative_targets_anchored_at_root(self):
+        docs = path_guard(deny=[WORKFLOWS], allow_only=DOCS_SCOPE, exempt=["**/.env.example"])
+        polly = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
+        for guard, path in (
+            (docs, "backend/app/docs/gen.py"),
+            (docs, "src/CHANGELOG.py"),
+            (docs, "x/docs/a.py"),
+            (polly, "x/.polly/registry.json"),
+            (polly, "src/.polly/diffs/a.diff"),
+            (polly, "bundles/x/polly/skills/a/SKILL.md"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
+                for form in (f"echo x > {path}", ["bash", "-lc", f"echo x > {path}"]):
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for guard, path in (
+            (docs, "docs/a.md"),
+            (docs, "docs/x/gen.py"),
+            (docs, "backend/README.md"),
+            (docs, "a/b/notes.md"),
+            (docs, "CHANGELOG.md"),
+            (docs, "backend/adr/0001.md"),
+            (docs, "./docs/a.py"),
+            (polly, ".polly/registry.json"),
+            (polly, ".polly/diffs/t1-abc.diff"),
+            (polly, "polly/skills/x/SKILL.md"),
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
+                self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "ALLOW")
+
+    def test_absolute_write_paths_match_at_any_depth(self):
+        docs = path_guard(deny=[WORKFLOWS], allow_only=DOCS_SCOPE)
+        for path in ("/workspace/repo/docs/a.md", "/workspace/repo/backend/app/docs/gen.py", "/agents/polly/x.md"):
+            with self.subTest(path=path):
+                self.assertEqual(docs(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
+                self.assertEqual(docs(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
+        self.assertEqual(docs(tool_call_event("Write", {"file_path": "/workspace/repo/src/a.py", "content": "x"}))["result"], "DENY")
+
+    def test_deny_still_matches_at_any_depth(self):
+        guard = path_guard(deny=[WORKFLOWS, "**/.env"], allow_only=["**"])
+        for path in ("sub/.github/workflows/ci.yml", ".github/workflows/ci.yml", "a/b/.env"):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")

@@ -158,6 +158,14 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(glob_match(path, p) for p in patterns)
 
 
+def _matches_allowed(path: str, patterns: list[str]) -> bool:
+    """A relative path matches from the checkout root; an absolute one at any depth, since the event carries no session cwd."""
+    if path.startswith("/"):
+        return _matches_any(path, patterns)
+    path = _normalise(path)
+    return any(_compile(_normalise(p)).fullmatch(path) for p in patterns)
+
+
 def forbidden_matcher(deny: list[str] | None, exempt: list[str] | None) -> Callable[[str], bool]:
     denied = list(deny or [])
     exempted = list(exempt or [])
@@ -208,7 +216,7 @@ def path_guard(
             return _deny(f"path {path} tries to escape with '..'")
         if forbidden(path):
             return _deny(f"forbidden path {path}")
-        if allowed_only is not None and not _matches_any(path, allowed_only):
+        if allowed_only is not None and not _matches_allowed(path, allowed_only):
             return _deny(f"path {path} is outside allowed paths")
         return None
 
@@ -246,7 +254,7 @@ def path_guard(
                 return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
             if "$" in raw or _EXPANDING_TARGET.search(raw):
                 return _deny(f"shell write to {raw} needs variable, brace or backtick expansion; write the path literally")
-            if not scratch(target) and not _matches_any(target, scope):
+            if not scratch(target) and not _matches_allowed(target, scope):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None
 
