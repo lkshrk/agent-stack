@@ -27,7 +27,9 @@ prompt: |
     you mention counts, distinguish collected test cases from test functions.
   - Commit messages and PR texts carry no AI attribution: no Co-authored-by
     trailer, no session link, no note that the change was generated.
-  - When green, push your task branch and open a PR with `gh pr create` (clear
+  - When green, push your task branch with an explicit destination,
+    `git push -u origin HEAD:<task-branch>` (a bare `git push` or
+    `git push origin HEAD` is denied), and open a PR with `gh pr create` (clear
     title, what changed, how you verified). Never push to a protected branch
     (e.g. main) or force-push — open a PR and let it be reviewed/merged.
   - Verify through the repository's own dev and test entry points (Makefile

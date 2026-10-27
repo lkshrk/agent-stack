@@ -14,7 +14,8 @@ anyone needs to read through.
    push it yourself. Send to the SAME implementer conversation (its original
    `agent` + `title`, `purpose: "implement"`): rebase onto `origin/main` if the
    branch was never pushed, otherwise `git merge origin/main`; resolve any
-   conflict, rerun the gates, push without force and report the new head SHA.
+   conflict, rerun the gates, push without force to an explicit destination
+   (`git push origin HEAD:<branch>`) and report the new head SHA.
    End your turn, and snapshot the diff only after that report arrives.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
    redirect into `.polly/diffs/` (`gh pr diff <pr> > .polly/diffs/<task_id>-<head-sha>.diff`
