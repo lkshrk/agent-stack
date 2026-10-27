@@ -410,6 +410,16 @@ class ShellWriteScopeTest(unittest.TestCase):
                 self.assertEqual(decision["result"], expected)
         self.assertEqual(self.verdict('echo x &>"src/a"'), "DENY")
 
+    def test_mv_sources_are_writes(self):
+        for command in ("mv src/a.py /tmp/x", "mv src/a.py .polly/diffs/x", "mv -t /tmp src/a.py", "mv src/a.py /tmp/x 2>/dev/null"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "DENY")
+        for command in ("mv /tmp/r.json .polly/registry.json", "mv .polly/diffs/a .polly/diffs/b", "mv -t .polly/diffs /tmp/a"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+        self.assertEqual(self.verdict("mv docs/a.md /tmp/a", DOCS_SCOPE), "ALLOW")
+        self.assertEqual(self.verdict("cp src/a.py /tmp/x"), "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")

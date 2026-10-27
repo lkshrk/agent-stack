@@ -79,6 +79,8 @@ def shell_write_targets(tokens: list[str]) -> list[str]:
     elif name in _COPY:
         directory = flags.get("-t") or flags.get("--target-directory")
         targets += [directory] if directory else operands[-1:] if len(operands) > 1 else []
+        if name == "mv":
+            targets += operands
     elif name in _TOUCH:
         targets += operands
     elif name in _OWNER:
