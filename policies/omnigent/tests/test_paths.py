@@ -470,6 +470,27 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
 
+    def test_dollar_targets_denied(self):
+        for command in (
+            "echo x > $HOME/x.md",
+            "echo x > ${HOME}/x.md",
+            "echo x > docs/$NAME.md",
+            'echo x > "$(pwd)/docs/a.md"',
+            "tee $OUT",
+            "cp /tmp/a.md $DEST",
+            "echo x &>$HOME/a.md",
+        ):
+            for scope in (DOCS_SCOPE, POLLY_SCOPE):
+                for form in (command, ["bash", "-lc", command]):
+                    with self.subTest(form=form, scope=scope):
+                        guard = path_guard(deny=[WORKFLOWS], allow_only=scope)
+                        self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("make test 2>&1", "make test >&2", "pnpm test > /tmp/log 2>&1", "echo $HOME > /tmp/x", "cp $SRC .polly/diffs/x"):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")

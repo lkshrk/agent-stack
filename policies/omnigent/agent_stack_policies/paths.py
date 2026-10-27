@@ -220,6 +220,8 @@ def path_guard(
             target = posixpath.normpath(raw)
             if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
                 return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
+            if "$" in raw:
+                return _deny(f"shell write to {raw} names an unexpanded variable or substitution; write the path literally")
             if not scratch(target) and not _matches_any(target, scope):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None

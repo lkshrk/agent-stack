@@ -511,6 +511,18 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh pr diff 3 > .polly/diffs/t1-abc.diff"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "git -C .worktrees/t1 diff abc...def > .polly/diffs/t1-def.diff"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "git -C .worktrees/t1 diff abc...def > /repo/.polly/diffs/t1-def.diff"}, "DENY"),
+    *[
+        Case(agent, "tool_call", tool, {"command": form}, expected)
+        for agent, tool in (("polly", "sys_os_shell"), ("documenter", "Bash"))
+        for command, expected in (
+            ("echo x > $HOME/x.md", "DENY"),
+            ("echo x > ${HOME}/.polly/registry.json", "DENY"),
+            ('echo x > "$(pwd)/docs/a.md"', "DENY"),
+            ("make test >/tmp/log 2>&1", "ALLOW"),
+            ("make test >&2", "ALLOW"),
+        )
+        for form in (command, ["bash", "-lc", command])
+    ],
     Case("polly", "tool_call", "sys_os_shell", {"command": "make test"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp /tmp/x '<' src/"}, "DENY"),
