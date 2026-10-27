@@ -165,6 +165,36 @@ class NoMergeTest(unittest.TestCase):
         listed = no_merge()(tool_call_event("bash", {"command": ["gh", "api", "graphql", "-f", "query=$Q"]}))
         self.assertEqual(listed["result"], "ALLOW")
 
+    def test_no_merge_graphql_quoted_keys_and_stdin_wrappers(self):
+        for command in (
+            "gh api graphql -f 'query'=\"$(cat /tmp/q)\"",
+            "gh api graphql -f \"query\"=\"$Q\"",
+            "gh api graphql -f quer\\y=\"$(cat /tmp/q)\"",
+            "gh api graphql -f quer{y,}=\"$(cat /tmp/q)\"",
+            "gh api graphql -f quer{y,}='{ viewer { login } }'",
+            "gh api graphql -f query\"=\"$(cat /tmp/q)",
+            "gh api graphql -f 'query'='mutation { merge'\"$X\"'(input:{}) { x } }'",
+            "cat /tmp/q | xargs -0 -I{} gh api graphql -f query={}",
+            "xargs -a /tmp/q -0 -I{} gh api graphql -f query={}",
+            "cat /tmp/q | parallel gh api graphql -f query={}",
+            "cat /tmp/q | xargs -I{} gh api /graphql -f query={}",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+            if "xargs" not in command and "parallel" not in command:
+                with self.subTest(wrapped=command):
+                    quoted = command.replace("'", "'\"'\"'")
+                    self.assertEqual(run(f"bash -c '{quoted}'")["result"], "DENY")
+        for command in (
+            "gh api graphql -f 'query'='{ viewer { login } }'",
+            "gh api graphql -f \"query\"='query($o: String!) { repository(owner: $o, name: \"r\") { id } }' -F o=x",
+            "ls | xargs -I{} gh pr view {}",
+            "cat ids | xargs -I{} gh api repos/o/r/issues/{}",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

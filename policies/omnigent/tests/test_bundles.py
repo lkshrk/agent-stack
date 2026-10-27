@@ -285,6 +285,10 @@ CASES: list[Case] = [
             ('gh api graphql -f query="$(cat q.graphql)"', "DENY"),
             ("GH_CONFIG_DIR=/tmp/g gh m 5", "DENY"),
             ("gh api graphql -f query='{ viewer { login } }'", "ALLOW"),
+            ("gh api graphql -f 'query'=\"$(cat /tmp/q)\"", "DENY"),
+            ("gh api graphql -f quer{y,}=\"$(cat /tmp/q)\"", "DENY"),
+            ("cat /tmp/q | xargs -0 -I{} gh api graphql -f query={}", "DENY"),
+            ("cat /tmp/q | parallel gh api graphql -f query={}", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

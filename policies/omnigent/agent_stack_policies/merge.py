@@ -98,32 +98,42 @@ def _graphql_request(rest: list[str]) -> bool:
 
 
 def _expanding_query(text: str) -> bool:
-    """A word containing `query=` with a `$` or backtick the shell expands (outside single quotes)."""
-    word, quote, expands, i = [], None, False, 0
+    """A word whose shell-dequoted form contains `query=` and has a `$` or backtick the shell expands, or whose key is built by an unquoted `{…}` before its `=`."""
+    plain, quote, expands, braced, i = [], None, False, False, 0
+
+    def flagged() -> bool:
+        word = "".join(plain)
+        return ("=" in word and braced) or (expands and "query=" in word)
+
     while i < len(text):
         ch = text[i]
         if quote == "'":
-            quote = None if ch == "'" else quote
+            if ch == "'":
+                quote = None
+            else:
+                plain.append(ch)
         elif ch == "\\":
-            word.append(text[i : i + 2])
+            plain.append(text[i + 1 : i + 2])
             i += 2
             continue
         elif quote == '"':
-            quote = None if ch == '"' else quote
-            expands = expands or ch in "$`"
+            if ch == '"':
+                quote = None
+            else:
+                expands = expands or ch in "$`"
+                plain.append(ch)
         elif ch in "'\"":
             quote = ch
-        elif ch in "$`":
-            expands = True
         elif ch.isspace() or ch in ";&|()":
-            if expands and "query=" in "".join(word):
+            if flagged():
                 return True
-            word, expands = [], False
-            i += 1
-            continue
-        word.append(ch)
+            plain, expands, braced = [], False, False
+        else:
+            expands = expands or ch in "$`"
+            braced = braced or (ch == "{" and "=" not in plain)
+            plain.append(ch)
         i += 1
-    return expands and "query=" in "".join(word)
+    return flagged()
 
 
 def _check_gh(rest: list[str], expanding_query: bool = False) -> str | None:
@@ -280,6 +290,8 @@ def _check_statement(tokens: list[str], protected: frozenset[str], expanding_que
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
     command = resolve(tokens)
     if _STDIN_ARGUMENTS & set(command.wrappers) and command.argv and os.path.basename(command.argv[0]) in _VCS:
+        if os.path.basename(command.argv[0]) == "gh" and _graphql_request(command.argv[1:]):
+            return f"{command.wrappers[0]} into gh api graphql is not allowed, since stdin can supply the query; {_PR_HINT}"
         if _mentions_merge_or_push(command.argv):
             return f"{command.wrappers[0]} into a merge or push is not allowed, since stdin can supply the branch; {_PR_HINT}"
     for run, resolved in _vcs_runs(tokens):
