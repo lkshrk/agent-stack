@@ -24,12 +24,14 @@ Do these steps for one file at a time.
 
    ```sh
    bash <<'SH'
-   mapfile -t H < <(jq -r '.uploadRequest.headers | to_entries[] | "-H\n\(.key): \(.value)"' prepare.json)
+   set -euo pipefail
+   H=(); while IFS= read -r l; do H+=("$l"); done < <(jq -r '.uploadRequest.headers | to_entries[] | "-H\n\(.key): \(.value)"' prepare.json)
+   [ "${#H[@]}" -gt 0 ] || { echo "no upload headers" >&2; exit 1; }
    curl -sS --fail-with-body -X PUT --data-binary @shot.png "${H[@]}" "$(jq -r .uploadRequest.url prepare.json)"
    SH
    ```
 
-   Needs `bash`, `jq` and `curl`; the explicit `bash` keeps it working from zsh.
+   Needs `bash`, `jq` and `curl`; the explicit `bash` keeps it working from zsh, and it runs on bash 3.2.
 
    Any non-2xx status makes `curl` exit non-zero; stop and report it.
 3. Call `create_attachment_from_upload(issue, assetUrl, title?, subtitle?)`.
