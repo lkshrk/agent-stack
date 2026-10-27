@@ -518,6 +518,9 @@ CASES: list[Case] = [
             ("echo x > $HOME/x.md", "DENY"),
             ("echo x > ${HOME}/.polly/registry.json", "DENY"),
             ('echo x > "$(pwd)/docs/a.md"', "DENY"),
+            ("echo x | tee docs/{a,../../other/x}.md", "DENY"),
+            ("echo x | tee .polly/diffs/{x,../../src/a.py}", "DENY"),
+            ("echo x > `{echo,..}`/x.md", "DENY"),
             ("make test >/tmp/log 2>&1", "ALLOW"),
             ("make test >&2", "ALLOW"),
         )

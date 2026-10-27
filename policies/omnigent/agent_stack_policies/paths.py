@@ -19,6 +19,7 @@ PATCH_KEYS = ("command", "input", "patch")
 _FLAG_PREFIX = re.compile(r"^--[^=\s]+=")
 _PATCH_PATH = re.compile(r"^[ \t]*\*\*\* (?:Add File|Update File|Delete File|Move to): *(.*?)\s*$", re.MULTILINE)
 _PATCH_BEGIN = "*** Begin Patch"
+_EXPANDING_TARGET = re.compile(r"`|\{[^{}]*(?:,|\.\.)[^{}]*\}")
 _FUSED_REDIRECT_TARGET = re.compile(r"(?:&>>?|>\||>&)[ \t]*([^\s;&|<>()]+)")
 _COPY = frozenset({"cp", "mv", "install", "ln", "rsync"})
 _TOUCH = frozenset({"touch", "rm", "rmdir", "truncate", "mkdir"})
@@ -221,8 +222,8 @@ def path_guard(
             target = posixpath.normpath(raw)
             if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
                 return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
-            if "$" in raw:
-                return _deny(f"shell write to {raw} names an unexpanded variable or substitution; write the path literally")
+            if "$" in raw or _EXPANDING_TARGET.search(raw):
+                return _deny(f"shell write to {raw} needs variable, brace or backtick expansion; write the path literally")
             if not scratch(target) and not _matches_any(target, scope):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None

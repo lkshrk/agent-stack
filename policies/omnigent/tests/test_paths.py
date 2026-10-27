@@ -513,6 +513,31 @@ class ShellWriteScopeTest(unittest.TestCase):
                     self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
         self.assertEqual(self.verdict("eval echo x '>' ../x.md", DOCS_SCOPE), "DENY")
 
+    def test_brace_and_backtick_targets_denied(self):
+        cases = (
+            (POLLY_SCOPE, "echo x | tee .polly/diffs/{x,../../src/a.py}"),
+            (POLLY_SCOPE, "touch .polly/diffs/{x,../../src/a.py}"),
+            (POLLY_SCOPE, "cp /tmp/a.py .polly/diffs/{x,../../src/a.py}"),
+            (POLLY_SCOPE, "echo x > .polly/diffs/{x,../../src/a.py}"),
+            (POLLY_SCOPE, "echo x | tee .polly/{diffs,../src}/a.py"),
+            (POLLY_SCOPE, "echo x > .polly/diffs/`{echo,..}`/`{echo,..}`/src/a.py"),
+            (POLLY_SCOPE, "echo x | tee .polly/diffs/`{echo,..}`/`{echo,..}`/src/a.py"),
+            (POLLY_SCOPE, "touch .polly/diffs/x{1..3}"),
+            (DOCS_SCOPE, "echo x | tee {..,docs}/x.md"),
+            (DOCS_SCOPE, "tee {/etc/x,docs/y}.md < /tmp/a"),
+            (DOCS_SCOPE, "echo x | tee docs/{a,../../other/x}.md"),
+            (DOCS_SCOPE, "echo x > `{echo,..}`/x.md"),
+            (DOCS_SCOPE, "echo x | tee `{echo,..}`/x.md"),
+        )
+        for scope, command in cases:
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=scope)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("echo x > .polly/diffs/a{b}.diff", "find .polly/diffs -name '*.diff' -mtime +7 -delete", "echo '{a,b}' > /tmp/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
