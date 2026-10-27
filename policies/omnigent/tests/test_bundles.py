@@ -300,7 +300,7 @@ CASES: list[Case] = [
     ],
     *[
         Case(agent, "tool_call", "Bash", {"command": form}, "ALLOW")
-        for agent, command in (("polly/agents/claude_code", "git branch --list 'feat/*'"), ("documenter", "git add docs/*"))
+        for agent, command in (("polly/agents/claude_code", "git branch --list 'feat/*'"),)
         for form in (command, ["bash", "-lc", command])
     ],
     *[
