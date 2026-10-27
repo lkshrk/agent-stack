@@ -81,26 +81,96 @@ class Command:
         return os.path.basename(self.argv[0]) if self.argv else ""
 
 
+class OpaqueCommand(ValueError):
+    """Input whose statements can't be known, such as a heredoc without its delimiter line; every gate denies it."""
+
+
+_HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|\\?([^\s;&|<>()'\"]+))")
+
+
+def _heredocs(line: str) -> list[tuple[str, bool]]:
+    """(delimiter, strip leading tabs) for each unquoted `<<WORD`/`<<-WORD` in a line, in order; `<<<` is a here-string."""
+    docs, quote, i = [], None, 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if ch == "\\" and quote in ('"', "$'"):
+                i += 2
+                continue
+            quote = None if ch == quote[-1] else quote
+        elif ch == "$" and line[i + 1 : i + 2] == "'":
+            quote = "$'"
+            i += 2
+            continue
+        elif ch == "\\":
+            i += 2
+            continue
+        elif ch in "'\"":
+            quote = ch
+        elif line.startswith("<<", i) and not line.startswith("<<<", i) and line[i - 1 : i] != "<":
+            arithmetic = line.count("((", 0, i) > line.count("))", 0, i)
+            match = _HEREDOC.match(line, i)
+            if match and not arithmetic:
+                docs.append((next(g for g in match.groups()[1:] if g is not None), match.group(1) == "-"))
+                i = match.end()
+                continue
+        i += 1
+    return docs
+
+
+def _skip_heredocs(text: str, pos: int, docs: list[tuple[str, bool]]) -> int:
+    """Index after the bodies of `docs`, which start at `pos`; raises OpaqueCommand when a delimiter line is missing."""
+    for delimiter, strip in docs:
+        while True:
+            if pos >= len(text):
+                raise OpaqueCommand(f"heredoc without its {delimiter} line")
+            end = text.find("\n", pos)
+            end = len(text) if end < 0 else end
+            line = text[pos:end]
+            pos = end + 1
+            if (line.lstrip("\t") if strip else line) == delimiter:
+                break
+    return pos
+
+
 def _lines(command: str) -> list[str]:
-    lines, current, quote, escaped = [], [], None, False
-    for ch in command:
+    """Logical lines: newlines inside quotes and after a backslash join, `#` comments drop, and heredoc bodies are text, not commands."""
+    lines, current, quote, escaped, i = [], [], None, False, 0
+    while i < len(command):
+        ch = command[i]
         if escaped:
             escaped = False
             if ch == "\n":
                 current.pop()
+                i += 1
                 continue
         elif ch == "\\" and quote != "'":
             escaped = True
         elif quote:
-            quote = None if ch == quote else quote
+            quote = None if ch == quote[-1] else quote
+        elif ch == "$" and command[i + 1 : i + 2] == "'":
+            current.append("$'")
+            quote = "$'"
+            i += 2
+            continue
+        elif ch == "#" and (not current or current[-1] in " \t;&|()"):
+            end = command.find("\n", i)
+            i = len(command) if end < 0 else end
+            continue
         elif ch in "'\"":
             quote = ch
         elif ch == "\n":
-            lines.append("".join(current))
+            line = "".join(current)
+            lines.append(line)
             current = []
+            i = _skip_heredocs(command, i + 1, _heredocs(line))
             continue
         current.append(ch)
-    lines.append("".join(current))
+        i += 1
+    line = "".join(current)
+    lines.append(line)
+    if quote is None and _heredocs(line):
+        raise OpaqueCommand("heredoc without a body")
     return lines
 
 
@@ -214,7 +284,7 @@ def decode_ansi(command: str) -> str:
 
 def parse(command: str) -> list[list[str]]:
     statements: list[list[str]] = []
-    for line in _lines(decode_ansi(command)):
+    for line in [decode_ansi(raw) for raw in _lines(command)]:
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
@@ -541,6 +611,8 @@ def _rough(text: str) -> list[list[str]]:
 def _walk_quietly(command: str) -> list[list[str]]:
     try:
         return walk(command)
+    except OpaqueCommand:
+        raise
     except ValueError:
         return _rough(command)
 

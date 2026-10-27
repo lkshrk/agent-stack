@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
-from ._shell import shell_command, shell_shape_problem, walk
+from ._shell import OpaqueCommand, shell_command, shell_shape_problem, walk
 
 PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
@@ -142,6 +142,8 @@ def path_guard(
             return _deny("shell command is not a string")
         try:
             statements = walk(command)
+        except OpaqueCommand:
+            return _deny("a heredoc without its delimiter line hides what runs after it; close it")
         except ValueError:
             if has_denied:
                 return _deny("unparseable shell command while forbidden paths are set")

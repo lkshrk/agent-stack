@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import OPAQUE_WORD, Command, ansi_quoted, hidden_command, opaque_name, resolve, shell_command, walk
+from ._shell import OPAQUE_WORD, Command, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, resolve, shell_command, walk
 from .paths import SHELL_TOOLS
 
 _PRINT_AGENTS = frozenset({"claude", "omp"})
@@ -76,6 +76,8 @@ def no_nested_agents(*, extra_commands: list[str] | None = None) -> Callable[[Ev
             return deny("shell command is not a string")
         try:
             statements = walk(command)
+        except OpaqueCommand:
+            return deny("a heredoc without its delimiter line hides what runs after it; close it")
         except ValueError:
             if text_pattern.search(command) or ansi_quoted(command):
                 return deny("unparseable command naming an agent CLI, piping into a shell or using $'…' quoting; simplify it")

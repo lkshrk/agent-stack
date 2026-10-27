@@ -371,3 +371,10 @@ class AnsiCOpaqueWordTest(unittest.TestCase):
         for command in ("$'git\\0' push origin main", "git push origin $'HEAD:main\\0'", "git add $'docs/a.md\\0'"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "DENY")
+
+
+class HeredocTest(unittest.TestCase):
+    def test_statements_after_a_heredoc_are_seen(self):
+        for command in ("cat <<E\nit's\nE\ngit push origin main #'", "cat <<E\nunterminated"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")

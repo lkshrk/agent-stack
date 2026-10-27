@@ -98,8 +98,13 @@ class WalkTest(unittest.TestCase):
     def test_backticks_across_tokens(self):
         self.assertIn(["claude", "-p", "x"], walk("echo `claude -p x`"))
 
-    def test_unparseable_substitution_body_split_roughly(self):
+    def test_quoted_heredoc_body_in_substitution_is_text(self):
         statements = walk("git commit -m \"$(cat <<'EOF'\nclaude -p it's\nEOF\n)\"")
+        self.assertFalse(any(s[:2] == ["claude", "-p"] for s in statements), statements)
+        self.assertIn(["cat", "<<", "EOF"], statements)
+
+    def test_unparseable_substitution_body_split_roughly(self):
+        statements = walk("echo \"$(claude -p it's)\"")
         self.assertTrue(any(s[:2] == ["claude", "-p"] for s in statements), statements)
 
     def test_unparseable_top_level_raises(self):
@@ -193,3 +198,37 @@ class AnsiCOpaqueTest(unittest.TestCase):
     def test_c_before_the_closing_quote_closes_it(self):
         statements = parse("echo $'\\c'; git push origin main")
         self.assertEqual(statements[1], ["git", "push", "origin", "main"])
+
+
+class HeredocTest(unittest.TestCase):
+    def test_body_is_text(self):
+        cases = {
+            "cat <<E\nit's\nE\ngit push origin main #'": ["git", "push", "origin", "main"],
+            "cat <<E\n$'\nE\ngit push origin main\n#'": ["git", "push", "origin", "main"],
+            "cat <<'E'\n'\nE\ngit commit -am x #'": ["git", "commit", "-am", "x"],
+            'cat <<"E"\n"\nE\nclaude -p hi': ["claude", "-p", "hi"],
+            "cat <<-E\n\tit's\n\tE\ngit push origin main": ["git", "push", "origin", "main"],
+            "cat <<A <<'B'\nit's\nA\n\"\nB\ngit push origin main": ["git", "push", "origin", "main"],
+            "cat <<A; cat <<B\na'\nA\nb'\nB\ngit push origin main": ["git", "push", "origin", "main"],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(parse(command)[-1], expected)
+                self.assertNotIn(["it's"], parse(command))
+
+    def test_unterminated_heredoc_is_opaque(self):
+        from agent_stack_policies._shell import OpaqueCommand
+
+        for command in ("cat <<E\nit's", "cat <<E", "cat <<A <<B\na\nA\nb", "cat <<-E\nx\n E"):
+            with self.subTest(command=command):
+                with self.assertRaises(OpaqueCommand):
+                    walk(command)
+
+    def test_here_string_and_arithmetic_unchanged(self):
+        self.assertEqual(parse("cat <<< 'x'"), [["cat", "<<<", "x"]])
+        self.assertEqual(parse("echo $((1<<2))")[0][0], "echo")
+        self.assertEqual(parse("echo a#b 'c # d' # note"), [["echo", "a#b", "c # d"]])
+
+    def test_unquoted_heredoc_substitution_is_walked(self):
+        statements = walk("cat <<E\n$(claude -p x)\nE")
+        self.assertTrue(any(s[:2] == ["claude", "-p"] for s in statements), statements)

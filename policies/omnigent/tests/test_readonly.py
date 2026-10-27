@@ -359,6 +359,8 @@ GIT_DENIED = [
     "cat <(git -C ../wt commit -am x)",
     "echo --output=/tmp/x | xargs git log -1",
     "echo main | xargs git push origin",
+    "cat <<'E'\n'\nE\ngit commit -am x #'",
+    "cat <<E\nunterminated",
     "git log $'\\0'",
     "$'git\\0' commit -am x",
     "echo $'\\c'; git commit -am x",

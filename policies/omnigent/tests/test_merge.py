@@ -349,3 +349,25 @@ class AnsiCOpaqueWordTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "DENY")
+
+
+class HeredocTest(unittest.TestCase):
+    def test_statements_after_a_heredoc_are_seen(self):
+        for command in (
+            "cat <<E\nit's\nE\ngit push origin main #'",
+            "cat <<E\n$'\nE\ngit push origin main\n#'",
+            "cat <<-E\n\tit's\n\tE\ngit push origin main",
+            "cat <<A <<'B'\nit's\nA\n\"\nB\ngit push origin main",
+            "cat <<E\nno end",
+            "cat <<E\nit's",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_heredoc_commit_form_allowed(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore text.\nEOF\n)\"",
+            "cat <<'EOF' > notes.md\nIt's fine\nEOF\ngit push -u origin feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

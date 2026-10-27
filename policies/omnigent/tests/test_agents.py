@@ -240,3 +240,13 @@ class AnsiCOpaqueWordTest(unittest.TestCase):
 
     def test_opaque_words_elsewhere_allowed(self):
         self.assertEqual(run("printf $'a\\0b'")["result"], "ALLOW")
+
+
+class HeredocTest(unittest.TestCase):
+    def test_statements_after_a_heredoc_are_seen(self):
+        for command in ("cat <<E\nit's\nE\nclaude -p hi #'", "cat <<E\nunterminated", "sh <<E\nls\nE"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_heredoc_text_allowed(self):
+        self.assertEqual(run("cat <<'EOF' > a.md\nRun claude -p it's\nEOF")["result"], "ALLOW")

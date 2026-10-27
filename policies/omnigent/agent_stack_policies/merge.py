@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
@@ -190,6 +190,8 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             return deny("shell command is not a string")
         try:
             statements = walk(command)
+        except OpaqueCommand:
+            return deny("a heredoc without its delimiter line hides what runs after it; close it")
         except ValueError:
             if "merge" in command or "push" in command or ansi_quoted(command):
                 return deny("unparseable merge or push command; simplify the command")

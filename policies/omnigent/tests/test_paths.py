@@ -269,3 +269,13 @@ class NonStringCommandTest(unittest.TestCase):
         policy = path_guard(deny=[WORKFLOWS])
         for command in ({"a": 1}, ["bash", 1], 5):
             self.assertEqual(policy(tool_call_event("bash", {"command": command}))["result"], "DENY", command)
+
+
+class HeredocTest(unittest.TestCase):
+    def test_unterminated_heredoc_denied(self):
+        decision = path_guard(deny=[WORKFLOWS])(tool_call_event("bash", {"command": "cat <<E\nx"}))
+        self.assertEqual(decision["result"], "DENY")
+
+    def test_forbidden_path_after_heredoc_seen(self):
+        command = "cat <<E\nit's\nE\nrm .github/workflows/ci.yml #'"
+        self.assertEqual(path_guard(deny=[WORKFLOWS])(tool_call_event("bash", {"command": command}))["result"], "DENY")

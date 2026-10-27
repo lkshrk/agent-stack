@@ -256,6 +256,8 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 800}),
     Case("polly", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\""}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "cat <<E\nit's\nE\ngit push origin main #'"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env.example"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push --force origin feat/x"}, "DENY"),
@@ -516,6 +518,7 @@ CASES += [
         "$'git' push origin feat/x",
         "$'\\x67it' commit -am x",
         "$'\\x67it' commit -m $'it\\'s'",
+        "cat <<'E'\n'\nE\ngit commit -am x #'",
     )
 ]
 CASES += [
@@ -544,6 +547,9 @@ CASES += [
         "$'git\\0' push origin main",
         "git push origin $'main\\0x'",
         "echo $'\\c'; git push origin main #'",
+        "cat <<E\nit's\nE\ngit push origin main #'",
+        "cat <<E\n$'\nE\ngit push origin main\n#'",
+        "cat <<E\nit's\nE\nclaude -p hi #'",
     )
 ]
 CASES += [
