@@ -278,7 +278,7 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
 
 class ShellNameTest(unittest.TestCase):
     def test_shell_stems_and_versions(self):
-        for name in ("sh", "bash", "rbash", "dash", "ash", "zsh", "ksh", "mksh", "csh", "tcsh", "yash", "posh", "fish", "zsh5", "bash5.2", "ksh93", "zsh-5.9", "bash-5.2"):
+        for name in ("sh", "bash", "rbash", "dash", "ash", "zsh", "rzsh", "ksh", "mksh", "csh", "tcsh", "yash", "posh", "fish", "zsh5", "bash5.2", "ksh93", "zsh-5.9", "bash-5.2"):
             with self.subTest(name=name):
                 self.assertTrue(shell_name(name))
         for name in ("push", "hash", "ssh", "busybox", "capsh", "chsh", "fsh", "bash-", "zsh-x", "test.sh", "flash"):

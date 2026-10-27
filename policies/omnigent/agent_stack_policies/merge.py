@@ -40,6 +40,8 @@ _PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "ex
 _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs"})
+# These hand a command string to a shell in a form the resolver doesn't unwrap.
+_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg"})
 # GNU xargs getopt: options with a required value, and those with an optional attached value.
 _XARGS_REQUIRED = frozenset("aEILnsPd")
 _XARGS_OPTIONAL = frozenset("eil")
@@ -461,8 +463,12 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             if "merge" in command or "push" in command or ansi_quoted(command):
                 return deny("unparseable merge or push command; simplify the command")
             return allow()
-        if any("parallel" in resolve(tokens).wrappers for tokens in statements):
-            return deny("parallel is not available; run commands directly")
+        for tokens in statements:
+            resolved = resolve(tokens)
+            if "parallel" in resolved.wrappers:
+                return deny("parallel is not available; run commands directly")
+            if resolved.name in _SHELL_LAUNCHERS:
+                return deny(f"{resolved.name} is not allowed; run commands directly")
         reason = hidden_command(command, statements, _VCS_TEXT) or _quoted_vcs(command, statements)
         if not reason and _VCS_TEXT.search(command):
             reason = _config_environment(statements)

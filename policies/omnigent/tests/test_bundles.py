@@ -321,6 +321,12 @@ CASES: list[Case] = [
             ("push", "ALLOW"),
             ("hash -r", "ALLOW"),
             ("zsh-5.9 -c 'gh pr merge 5'", "DENY"),
+            ("rzsh -c 'gh pr merge 5'", "DENY"),
+            ("rzsh -c 'claude -p hi'", "DENY"),
+            ("echo 'gh pr merge 5' | rzsh", "DENY"),
+            ("capsh -- -c 'gh pr merge 5'", "DENY"),
+            ("runuser -l omnigent -c 'gh pr merge 5'", "DENY"),
+            ("sg omnigent -c 'gh pr merge 5'", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

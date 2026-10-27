@@ -410,10 +410,34 @@ class NoMergeTest(unittest.TestCase):
             'ksh93 -c "gh pr merge 5"',
             'busybox sh -c "gh pr merge 5"',
             'busybox ash -c "gh pr merge 5"',
+            'rzsh -c "gh pr merge 5"',
+            '/usr/bin/rzsh -c "git push --force origin HEAD:main"',
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(run(form)["result"], "DENY")
+
+    def test_no_merge_denies_unwrapped_shell_launchers(self):
+        for command in (
+            "capsh -- -c 'gh pr merge 5'",
+            "capsh --caps= -- -c 'gh pr merge 5'",
+            "/usr/sbin/capsh --print",
+            "sudo capsh -- -c 'gh pr merge 5'",
+            "runuser -l omnigent -c 'gh pr merge 5'",
+            "runuser -c 'gh pr merge 5' omnigent",
+            "runuser -u omnigent -- ls",
+            "sg omnigent -c 'gh pr merge 5'",
+            "sg omnigent 'gh pr merge 5'",
+        ):
+            name = command.split()[1 if command.startswith("sudo") else 0].rsplit("/", 1)[-1]
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn(f"{name} is not allowed; run commands directly", decision["reason"])
+        for command in ("which capsh", "grep -r runuser docs", "rg sg src"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
 
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
