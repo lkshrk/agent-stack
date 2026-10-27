@@ -216,23 +216,57 @@ def path_guard(
     startup = frozenset(startup_files or [])
     home = startup_home.rstrip("/") if startup_home else None
 
+    def brace_alternatives(path: str) -> list[str]:
+        alternatives = [path]
+        while True:
+            expanded = []
+            changed = False
+            for value in alternatives:
+                match = re.search(r"\{([^{}]*)\}", value)
+                if not match:
+                    expanded.append(value)
+                    continue
+                body = match.group(1)
+                parts = body.split(",") if "," in body else []
+                if not parts and re.fullmatch(r".\.\..", body):
+                    parts = [chr(code) for code in range(ord(body[0]), ord(body[-1]) + 1)]
+                if not parts:
+                    expanded.append(value)
+                    continue
+                changed = True
+                expanded.extend(value[:match.start()] + part + value[match.end():] for part in parts)
+            alternatives = expanded
+            if len(alternatives) > 256:
+                return alternatives[:256]
+            if not changed:
+                return alternatives
+
     def startup_path(path: str) -> bool:
         if not startup or not home:
             return False
-        expanded = re.sub(r"^(?:~|~omnigent|\$HOME|\$\{HOME\})(?=/|$)", home, path)
-        normal = posixpath.normpath(expanded)
-        if normal in {f"{home}/{name}" for name in startup}:
-            return True
-        braces = re.search(r"\{[^{}]+\}", path) is not None
-        explicit_home = path.startswith(("/", "~", "$HOME", "${HOME}", "{~", "{/") )
-        if explicit_home and (any(ch in path for ch in "*?[") or braces):
-            pattern = path.replace("~", home)
-            while re.search(r"\{[^{}]*\}", pattern):
-                pattern = re.sub(r"\{[^{}]*\}", "*", pattern)
-            if "[" in pattern and "]" in pattern:
-                pattern = re.sub(r"\[.*\]", "*", pattern)
-            normal = posixpath.normpath(pattern)
-            return any(fnmatchcase(f"{home}/{name}", normal) for name in startup)
+        has_pattern = any(ch in path for ch in "*?[") or re.search(r"\{[^{}]+\}", path) is not None
+        for alternative in brace_alternatives(path):
+            expanded = re.sub(r"^(?:~|~omnigent|\$HOME|\$\{HOME\})(?=/|$)", home, alternative)
+            normal = posixpath.normpath(expanded)
+            if normal in {f"{home}/{name}" for name in startup}:
+                return True
+            if not has_pattern:
+                continue
+            candidate = normal.split("/")
+            for name in startup:
+                target = f"{home}/{name}".split("/")
+                if len(candidate) != len(target):
+                    continue
+                matched = []
+                for expected, actual in zip(target, candidate):
+                    if expected.startswith(".") and actual[:1] in "*?[":
+                        matched.append(False)
+                    elif expected.startswith(".") and "[" in actual:
+                        matched.append(True)
+                    else:
+                        matched.append(fnmatchcase(expected, actual))
+                if all(matched):
+                    return True
         return False
 
     def relative_startup_template(path: str) -> bool:
