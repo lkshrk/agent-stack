@@ -10,7 +10,7 @@
       "id": "gap-1",
       "class": "cosmetic",
       "question": "Should the runbook say 'queue worker' or 'consumer'?",
-      "stub": "Used 'queue worker', the term in backend/src/orders/worker.ts.",
+      "stub": "Visible note in the doc: 'Open question (gap-1): this runbook may rename queue worker.'",
       "location": "docs/orders.md:12"
     }
   ],

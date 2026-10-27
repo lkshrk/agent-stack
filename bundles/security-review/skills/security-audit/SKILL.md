@@ -92,7 +92,7 @@ findings `S-1`, `S-2`, …
 otherwise `pass`. `status` is `DONE`, or `DONE_WITH_CONCERNS` when a part
 of the diff could not be judged (say which in the prose). An open question
 about intent is a gap under the prompt's no-assumptions rule, never a
-guessed severity.
+guessed severity, and any gap means `BLOCKED`.
 
 ## 5. Result
 

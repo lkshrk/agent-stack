@@ -526,7 +526,7 @@ CASES: list[Case] = [
     Case("security-review", "response", None, fenced("security-valid-blocked-gap.json"), "ALLOW", turn_final=True),
     Case("security-review", "response", None, fenced("security-invalid-waiting-gap.json"), "DENY", turn_final=True),
     Case("security-review", "response", None, fenced("security-invalid-done-assumptions.json"), "DENY", turn_final=True),
-    Case("security-review", "response", None, fenced("security-valid-stub-gap.json"), "ALLOW", turn_final=True),
+    Case("security-review", "response", None, fenced("security-invalid-stub-gap.json"), "DENY", turn_final=True),
     Case("security-review", "response", None, fenced("security-invalid-done-gap.json"), "DENY", turn_final=True),
     Case("documenter", "tool_call", "sys_os_edit", {"path": "docs/setup.md", "oldText": "a", "newText": "b"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_write", {"path": "docs/adr/0007-queue.md", "content": "x"}, "ALLOW"),

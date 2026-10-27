@@ -46,7 +46,8 @@ CLI definitions).
 - Open questions about scope or intent: `BLOCKED` with `blocked.class:
   decision` and one `blocked.question` batching all of them. Keep the
   `stale` and `doc_gaps` found so far in the result, and record each
-  question in `gaps` under the prompt's no-assumptions rule.
+  question in `gaps` under the prompt's no-assumptions rule; an audit never
+  stubs, so any gap means `BLOCKED`.
 
 ```json
 {

@@ -63,16 +63,22 @@ prompt: |
   `blocked.question` that batches all of them, each with the options you see.
 
   No assumptions. Resolve every unknown from the source of truth (the code,
-  the PR, the existing docs); never document by guessing at intent. Record
-  each open question in `gaps` as `{"id": "gap-<n>", "class", "question",
-  "stub", "location"}`, with class `cosmetic`, `internal`, `behaviour`,
-  `data`, `security`, `public_api` or `cost`. A `cosmetic` or `internal` gap
-  may carry the wording you chose in `stub` and its `path` or `path:line` in
-  `location`; every other class leaves both null and makes the result
-  `BLOCKED` with `blocked.class: decision`. Any gap rules out `DONE`; a
-  stubbed one allows at best `DONE_WITH_CONCERNS`. `assumptions` must be
-  empty for `DONE`; otherwise each entry starts with its gap id, e.g.
-  `gap-1: used the code's term 'queue worker'`. These gaps are not the audit's `doc_gaps`.
+  the PR, the existing docs); never document by guessing at intent. Your
+  result is your question to the agent that dispatched you. Record each open
+  question in `gaps` as `{"id": "gap-<n>", "class", "question", "stub",
+  "location"}`, with class `cosmetic`, `internal`, `behaviour`, `data`,
+  `security`, `public_api` or `cost`. Audit mode never stubs: any gap there
+  makes the result `BLOCKED`. In delta mode only a `cosmetic` or `internal`
+  gap may go on with a stub, and a stub is never a silent default or a TODO:
+  mark the spot in the doc with a visible text note naming the gap id (not
+  an HTML comment), put that note in `stub` and its `path:line` in
+  `location`, and list every gap (id, class, question, stub, location) in
+  the PR description under `## Gaps`. Every other class leaves `stub` and
+  `location` null and makes the result `BLOCKED` with `blocked.class:
+  decision`. Any gap rules out `DONE`; a stubbed one allows at best
+  `DONE_WITH_CONCERNS`. `assumptions` must be empty for `DONE`; otherwise
+  each entry starts with its gap id, e.g. `gap-1: used the code's term
+  'queue worker'`. These gaps are not the audit's `doc_gaps`.
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or

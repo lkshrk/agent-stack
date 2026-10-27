@@ -46,13 +46,14 @@ prompt: |
     turn with the question, never a guess. If polly can't answer, return
     `BLOCKED{decision}` with the question. Only a `cosmetic` or `internal`
     gap (naming, wording, internal structure, tooling defaults) may go on
-    with a stub, never one on `gate:plan` work or of class `behaviour`,
+    with a stub, never one on `gate:plan` work (a plan with
+    `risk.force_gate_plan: true` counts) or of class `behaviour`,
     `data`, `security`, `public_api` or `cost`. A stub fails loudly:
     `raise NotImplementedError("gap: gap-<n>")`, a flag that defaults off, or
     an expected-fail test naming the gap id; never a silent default or a
     TODO comment. Report each gap as `{id: gap-<n>, class, question, stub,
-    location: path or path:line}` in your result and the PR description; a
-    gap means the task is not plainly done.
+    location: path or path:line}` in your result and in the PR description
+    under `## Gaps`; a gap means the task is not plainly done.
 
   REVIEW — verify another agent's diff (you are given the diff + the acceptance
   contract):

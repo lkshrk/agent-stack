@@ -173,8 +173,8 @@ class NoAssumptionsTest(unittest.TestCase):
             "documenter-valid-stub-gap.json": ("documenter", None),
             "planner-invalid-done-assumptions.json": ("planner", "assumptions must be empty for DONE"),
             "security-invalid-done-assumptions.json": ("security", "assumptions must be empty for DONE"),
-            "planner-invalid-stub.json": ("planner", "in a plan"),
-            "security-valid-stub-gap.json": ("security", None),
+            "planner-invalid-stub.json": ("planner", "in a plan waits"),
+            "security-invalid-stub-gap.json": ("security", "in a security review waits"),
             "security-invalid-done-gap.json": ("security", "gaps must be empty for DONE"),
             "security-invalid-waiting-gap.json": ("security", "of class security"),
         }
@@ -208,7 +208,7 @@ class NoAssumptionsTest(unittest.TestCase):
             self.assertIn("assumptions must be a list of non-empty strings", errors, bad)
 
     def test_concerns_assumptions_name_a_gap(self):
-        for kind in ("security", "documenter"):
+        for kind in ("documenter",):
             data = self.results()[kind]
             data.update(status="DONE_WITH_CONCERNS", gaps=[stub_gap("gap-1"), stub_gap("gap-12")])
             for good in (["gap-1: assumed x"], ["gap-12 assumed y", "gap-1"], []):
@@ -224,20 +224,20 @@ class NoAssumptionsTest(unittest.TestCase):
         self.assertTrue(any("must start with a gap id" in e for e in errors), errors)
 
     def test_stub_gap_needs_stub_and_location(self):
-        data = {**load("security-valid.json"), "status": "DONE_WITH_CONCERNS"}
+        data = {**load("documenter-valid.json"), "status": "DONE_WITH_CONCERNS"}
         for location in ("src/a.py", "src/a.py:1", "docs/orders.md:120", "Makefile"):
             gap = stub_gap(location=location)
-            self.assertEqual(result.validate_result("security", {**data, "gaps": [gap]}), [], location)
+            self.assertEqual(result.validate_result("documenter", {**data, "gaps": [gap]}), [], location)
         for location in (None, "", "src/a.py:0", "src/a.py:x", "src/a.py:", "a b.py", ":12", 12, "a:1:2"):
-            errors = result.validate_result("security", {**data, "gaps": [stub_gap(location=location)]})
+            errors = result.validate_result("documenter", {**data, "gaps": [stub_gap(location=location)]})
             self.assertTrue(any("location must be path or path:line" in e for e in errors), (location, errors))
         for stub in (None, "", " ", 1):
             gap = {**stub_gap(), "stub": stub}
-            errors = result.validate_result("security", {**data, "gaps": [gap]})
+            errors = result.validate_result("documenter", {**data, "gaps": [gap]})
             self.assertTrue(any("stub must say what was stubbed" in e for e in errors), (stub, errors))
         for gap_class in result.STUB_CLASSES:
             gap = stub_gap(gap_class=gap_class)
-            self.assertEqual(result.validate_result("security", {**data, "gaps": [gap]}), [], gap_class)
+            self.assertEqual(result.validate_result("documenter", {**data, "gaps": [gap]}), [], gap_class)
 
     def test_waiting_classes_require_blocked_decision(self):
         waiting = [c for c in result.GAP_CLASSES if c not in result.STUB_CLASSES]
@@ -275,27 +275,41 @@ class NoAssumptionsTest(unittest.TestCase):
                 errors = result.validate_result("planner", {**asked, "gaps": [stub_gap(gap_class=gap_class)]})
                 self.assertTrue(any("in a plan waits for the owner" in e for e in errors), (gate, errors))
         self.assertTrue(result.validate_result("planner", {**blocked, "gate": "gate:merge"}))
-        self.assertEqual(result.validate_result("security", {**blocked, "gaps": [stub_gap(gap_class="cosmetic")]}), [])
+
+    def test_security_and_audit_never_stub(self):
+        security = {**load("security-valid.json"), "status": "DONE_WITH_CONCERNS"}
+        audit = {"status": "DONE_WITH_CONCERNS", "mode": "audit", "changed_files": [], "stale": [], "pr": None}
+        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION}
+        cases = [("security", security, blocked), ("documenter", audit, {**blocked, "mode": "audit"}), ("documenter", None, blocked)]
+        for kind, data, asked in cases:
+            for gap_class in result.STUB_CLASSES:
+                if data is not None:
+                    errors = result.validate_result(kind, {**data, "gaps": [stub_gap(gap_class=gap_class)]})
+                    self.assertTrue(any("stub must be null" in e for e in errors), (kind, errors))
+                    self.assertTrue(any("must be BLOCKED" in e for e in errors), (kind, errors))
+                errors = result.validate_result(kind, {**asked, "gaps": [stub_gap(gap_class=gap_class)]})
+                self.assertTrue(any("stub must be null" in e for e in errors), (kind, errors))
+                self.assertEqual(result.validate_result(kind, {**asked, "gaps": [waiting_gap(gap_class=gap_class)]}), [], kind)
 
     def test_gap_ids_unique_and_numbered(self):
-        data = {**load("security-valid.json"), "status": "DONE_WITH_CONCERNS"}
+        data = {**load("documenter-valid.json"), "status": "DONE_WITH_CONCERNS"}
         for bad in ("gap-0", "gap-x", "gap-01", "GAP-1", "G-1", "gap1", "gap-1 ", 1, None):
-            errors = result.validate_result("security", {**data, "gaps": [stub_gap(gid=bad)]})
+            errors = result.validate_result("documenter", {**data, "gaps": [stub_gap(gid=bad)]})
             self.assertTrue(any("id must be gap-<n>" in e for e in errors), (bad, errors))
-        errors = result.validate_result("security", {**data, "gaps": [stub_gap("gap-1"), stub_gap("gap-1")]})
+        errors = result.validate_result("documenter", {**data, "gaps": [stub_gap("gap-1"), stub_gap("gap-1")]})
         self.assertIn("gap id 'gap-1' is duplicated", errors)
-        self.assertEqual(result.validate_result("security", {**data, "gaps": [stub_gap("gap-1"), stub_gap("gap-2")]}), [])
+        self.assertEqual(result.validate_result("documenter", {**data, "gaps": [stub_gap("gap-1"), stub_gap("gap-2")]}), [])
 
     def test_gap_needs_class_and_question(self):
-        data = {**load("security-valid.json"), "status": "DONE_WITH_CONCERNS"}
+        data = {**load("documenter-valid.json"), "status": "DONE_WITH_CONCERNS"}
         for bad in (None, "style", "public API", "Behaviour", 1):
-            errors = result.validate_result("security", {**data, "gaps": [{**stub_gap(), "class": bad}]})
+            errors = result.validate_result("documenter", {**data, "gaps": [{**stub_gap(), "class": bad}]})
             self.assertTrue(any(".class must be one of" in e for e in errors), (bad, errors))
         for bad in (None, "", " "):
-            errors = result.validate_result("security", {**data, "gaps": [{**stub_gap(), "question": bad}]})
+            errors = result.validate_result("documenter", {**data, "gaps": [{**stub_gap(), "question": bad}]})
             self.assertTrue(any(".question must be" in e for e in errors), (bad, errors))
         for bad in ("x", {"a": 1}, ["x"], [None], [[]]):
-            self.assertTrue(result.validate_result("security", {**data, "gaps": bad}), bad)
+            self.assertTrue(result.validate_result("documenter", {**data, "gaps": bad}), bad)
 
     def test_contract_denies_assumptions_and_waiting_gaps(self):
         policy = result.result_contract(kind="security")

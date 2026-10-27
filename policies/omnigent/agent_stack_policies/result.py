@@ -15,6 +15,7 @@ SEVERITIES = ("critical", "high", "medium", "low")
 GATES = ("gate:plan", "gate:split", "gate:pr")
 STUB_CLASSES = ("cosmetic", "internal")
 GAP_CLASSES = (*STUB_CLASSES, "behaviour", "data", "security", "public_api", "cost")
+NO_STUB = {"planner": "a plan", "security": "a security review", "documenter": "a documenter result outside delta mode"}
 MAX_CHILDREN = 8
 MAX_ERRORS_SHOWN = 5
 MAX_DEPTH = 64
@@ -273,7 +274,7 @@ def _check_gate(result: dict, errors: list[str]) -> None:
         errors.append(f"gate must be one of {'|'.join(GATES)}, echoing the issue's gate label")
 
 
-def _check_gaps(result: dict, may_stub: bool, errors: list[str]) -> set[str]:
+def _check_gaps(result: dict, kind: str, may_stub: bool, errors: list[str]) -> set[str]:
     gaps = result.get("gaps", [])
     if not isinstance(gaps, list):
         errors.append("gaps must be a list")
@@ -308,7 +309,7 @@ def _check_gaps(result: dict, may_stub: bool, errors: list[str]) -> set[str]:
                 errors.append(f"{where}.location must be path or path:line")
         else:
             waiting.append(where)
-            reason = f"of class {gap_class}" if may_stub else "in a plan"
+            reason = f"of class {gap_class}" if may_stub or gap_class not in STUB_CLASSES else f"in {NO_STUB[kind]}"
             for field in ("stub", "location"):
                 if gap.get(field) is not None:
                     errors.append(f"{where}.{field} must be null: a gap {reason} waits for the owner and is never stubbed")
@@ -349,7 +350,8 @@ def validate_result(kind: str, result: dict) -> list[str]:
         return errors
     if kind == "planner":
         _check_gate(result, errors)
-    _check_assumptions(result, _check_gaps(result, kind != "planner", errors), errors)
+    may_stub = kind == "documenter" and result.get("mode") == "delta"
+    _check_assumptions(result, _check_gaps(result, kind, may_stub, errors), errors)
     if status == "BLOCKED":
         blocked = result.get("blocked")
         blocked = blocked if isinstance(blocked, dict) else {}

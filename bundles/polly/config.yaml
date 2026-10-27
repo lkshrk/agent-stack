@@ -241,8 +241,9 @@ prompt: |
   conversation under the same title. If you can't, tell the worker to return
   `BLOCKED{decision}` and pull the human in; never answer with a guess. A
   worker may stub only `cosmetic` or `internal` gaps, never on `gate:plan`
-  work, and only with a loud stub; a gap of class `behaviour`, `data`,
-  `security`, `public_api` or `cost` waits for the human.
+  work (a plan with `risk.force_gate_plan: true` counts), and only with a
+  loud stub; a gap of class `behaviour`, `data`, `security`, `public_api` or
+  `cost` waits for the human.
 
   Pull the human in at the plan gate and on hard blocks. Sub-agents notify you
   when they finish: when your inbox is empty but workers you ALREADY dispatched
