@@ -1,7 +1,6 @@
 import os
 import posixpath
 import re
-from fnmatch import fnmatchcase
 from collections.abc import Callable
 from functools import lru_cache
 
@@ -38,6 +37,15 @@ _VALUE_FLAGS = {
     "tee": frozenset(),
 }
 _OPTIONAL_VALUE_LETTERS = {"sed": "i"}
+_MAX_ALTERNATIVES = 256
+_BRACE_WILD = "\0"
+_INNER_BRACE = re.compile(r"\{[^{}]*\}")
+_HOME_VARIABLE = re.compile(r"\"?\$(?:HOME\b|\{HOME\})\"?")
+_POSIX_CLASSES = {
+    "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
+    "xdigit": "0-9A-Fa-f", "space": r" \t\n\r\f\v", "blank": r" \t", "word": "a-zA-Z0-9_",
+    "punct": re.escape("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"), "print": " -~", "graph": "!-~", "cntrl": r"\x00-\x1f\x7f",
+}
 
 
 def _short_cluster(arg: str, values: frozenset[str], optional: str, following: str | None) -> tuple[dict[str, str], bool]:
@@ -202,6 +210,117 @@ def patch_paths(arguments: dict) -> list[str] | None:
     return paths
 
 
+class _TooManyAlternatives(Exception):
+    pass
+
+
+def _sequence(body: str) -> list[str] | None:
+    numbers = re.fullmatch(r"([-+]?\d+)\.\.([-+]?\d+)(?:\.\.([-+]?\d+))?", body)
+    letters = re.fullmatch(r"([A-Za-z])\.\.([A-Za-z])(?:\.\.([-+]?\d+))?", body)
+    match = numbers or letters
+    if match is None:
+        return None
+    first, last, step = match.group(1), match.group(2), abs(int(match.group(3) or 1)) or 1
+    start, end = (int(first), int(last)) if numbers else (ord(first), ord(last))
+    if abs(end - start) // step + 1 > _MAX_ALTERNATIVES:
+        raise _TooManyAlternatives
+    values = range(start, end + (1 if end >= start else -1), step if end >= start else -step)
+    if letters:
+        return [chr(value) for value in values]
+    padded = re.match(r"[-+]?0\d", first) or re.match(r"[-+]?0\d", last)
+    width = max(len(first), len(last)) if padded else 0
+    return [f"{value:0{width}d}" for value in values]
+
+
+def _expand_braces(word: str) -> list[str]:
+    for start, char in enumerate(word):
+        if char != "{":
+            continue
+        depth, close, commas = 0, None, []
+        for i in range(start, len(word)):
+            if word[i] == "{":
+                depth += 1
+            elif word[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    close = i
+                    break
+            elif word[i] == "," and depth == 1:
+                commas.append(i)
+        if close is None:
+            continue
+        if commas:
+            bounds = [start, *commas, close]
+            parts = [word[a + 1 : b] for a, b in zip(bounds, bounds[1:])]
+        else:
+            parts = _sequence(word[start + 1 : close])
+            if parts is None:
+                continue
+        prefix, tails = word[:start], _expand_braces(word[close + 1 :])
+        results = []
+        for part in parts:
+            for head in _expand_braces(part):
+                for tail in tails:
+                    results.append(prefix + head + tail)
+                    if len(results) > _MAX_ALTERNATIVES:
+                        raise _TooManyAlternatives
+        return results
+    return [word]
+
+
+def brace_alternatives(word: str) -> list[str] | None:
+    """Bash brace expansion of `word`, or None above the alternative cap."""
+    try:
+        return _expand_braces(word)
+    except _TooManyAlternatives:
+        return None
+
+
+def _bracket(pattern: str, start: int) -> tuple[str, int] | None:
+    i = start + 1
+    negate = pattern[i : i + 1] in ("!", "^")
+    i += negate
+    body = []
+    if pattern[i : i + 1] == "]":
+        body.append(r"\]")
+        i += 1
+    while i < len(pattern) and pattern[i] != "]":
+        if pattern.startswith("[:", i):
+            end = pattern.find(":]", i + 2)
+            if end != -1 and pattern[i + 2 : end] in _POSIX_CLASSES:
+                body.append(_POSIX_CLASSES[pattern[i + 2 : end]])
+                i = end + 2
+                continue
+        char = pattern[i]
+        ranged = char == "-" and body and pattern[i + 1 : i + 2] not in ("", "]")
+        body.append("-" if ranged else re.escape(char))
+        i += 1
+    if i >= len(pattern):
+        return None
+    return "[" + ("^" if negate else "") + "".join(body) + "]", i + 1
+
+
+def segment_matches(pattern: str, name: str) -> bool:
+    """Bash glob match of one path segment, with dotglob off."""
+    if name.startswith(".") and pattern[:1] in ("*", "?", "["):
+        return False
+    regex, i = [], 0
+    while i < len(pattern):
+        char = pattern[i]
+        if char in ("*", _BRACE_WILD):
+            regex.append(".*")
+        elif char == "?":
+            regex.append(".")
+        elif char == "[" and (bracket := _bracket(pattern, i)) is not None:
+            regex.append(bracket[0])
+            i = bracket[1]
+            continue
+        else:
+            regex.append(re.escape(char))
+        i += 1
+    return re.fullmatch("".join(regex), name, re.DOTALL) is not None
+
+
 def path_guard(
     *,
     deny: list[str] | None = None,
@@ -216,56 +335,26 @@ def path_guard(
     startup = frozenset(startup_files or [])
     home = startup_home.rstrip("/") if startup_home else None
 
-    def brace_alternatives(path: str) -> list[str]:
-        alternatives = [path]
-        while True:
-            expanded = []
-            changed = False
-            for value in alternatives:
-                match = re.search(r"\{([^{}]*)\}", value)
-                if not match:
-                    expanded.append(value)
-                    continue
-                body = match.group(1)
-                parts = body.split(",") if "," in body else []
-                if not parts and re.fullmatch(r".\.\..", body):
-                    parts = [chr(code) for code in range(ord(body[0]), ord(body[-1]) + 1)]
-                if not parts:
-                    expanded.append(value)
-                    continue
-                changed = True
-                expanded.extend(value[:match.start()] + part + value[match.end():] for part in parts)
-            alternatives = expanded
-            if len(alternatives) > 256:
-                return alternatives[:256]
-            if not changed:
-                return alternatives
-
     def startup_path(path: str) -> bool:
         if not startup or not home:
             return False
-        has_pattern = any(ch in path for ch in "*?[") or re.search(r"\{[^{}]+\}", path) is not None
-        for alternative in brace_alternatives(path):
-            expanded = re.sub(r"^(?:~|~omnigent|\$HOME|\$\{HOME\})(?=/|$)", home, alternative)
-            normal = posixpath.normpath(expanded)
-            if normal in {f"{home}/{name}" for name in startup}:
-                return True
-            if not has_pattern:
+        alternatives = brace_alternatives(path)
+        if alternatives is None:
+            names = {part for name in startup for part in name.split("/")}
+            wild = path
+            while _INNER_BRACE.search(wild):
+                wild = _INNER_BRACE.sub(_BRACE_WILD, wild)
+            return any(segment_matches(segment, name) for segment in wild.split("/") for name in names)
+        targets = [f"{home}/{name}".split("/") for name in startup]
+        tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
+        for alternative in alternatives:
+            expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, alternative))
+            normal = posixpath.normpath(re.sub(r"/+", "/", expanded))
+            if not normal.startswith("/"):
                 continue
-            candidate = normal.split("/")
-            for name in startup:
-                target = f"{home}/{name}".split("/")
-                if len(candidate) != len(target):
-                    continue
-                matched = []
-                for expected, actual in zip(target, candidate):
-                    if expected.startswith(".") and actual[:1] in "*?[":
-                        matched.append(False)
-                    elif expected.startswith(".") and "[" in actual:
-                        matched.append(True)
-                    else:
-                        matched.append(fnmatchcase(expected, actual))
-                if all(matched):
+            segments = normal.split("/")
+            for target in targets:
+                if len(segments) == len(target) and all(segment_matches(s, t) for s, t in zip(segments, target)):
                     return True
         return False
 
