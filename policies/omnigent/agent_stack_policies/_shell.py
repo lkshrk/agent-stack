@@ -63,6 +63,8 @@ OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
 _FD = re.compile(r"^\d+$")
 _QUOTED_DOLLAR = re.compile(r"\$['\"]")
+_LITERAL_OPERATOR = re.compile(r"(?<![^\s;&|()])(?:'[<>&|;()]+'|\"[<>&|;()]+\"|\\[<>&|;()])(?=$|[\s;&|()])")
+LITERAL_OPERATOR = "__agent_stack_literal_operator__"
 
 
 @dataclass
@@ -341,9 +343,12 @@ def decode_ansi(command: str) -> str:
     return "".join(out)
 
 
-def parse(command: str) -> list[list[str]]:
+def parse(command: str, literal_operators: bool = False) -> list[list[str]]:
+    """Statements as token lists; with `literal_operators`, a quoted or escaped operator word becomes LITERAL_OPERATOR."""
     statements: list[list[str]] = []
     for line in [decode_ansi(raw) for raw in _lines(command)]:
+        if literal_operators:
+            line = _LITERAL_OPERATOR.sub(LITERAL_OPERATOR, line)
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
@@ -667,9 +672,9 @@ def _rough(text: str) -> list[list[str]]:
     return [tokens for part in _ROUGH_STATEMENT.split(text) if (tokens := _ROUGH_TOKEN.findall(part))]
 
 
-def _walk_quietly(command: str) -> list[list[str]]:
+def _walk_quietly(command: str, literal_operators: bool = False) -> list[list[str]]:
     try:
-        return walk(command)
+        return walk(command, literal_operators)
     except OpaqueCommand:
         raise
     except ValueError:
@@ -695,18 +700,18 @@ def _groups(tokens: list[str]) -> list[list[str]]:
     return [s for s in segments if s]
 
 
-def walk(command: str) -> list[list[str]]:
+def walk(command: str, literal_operators: bool = False) -> list[list[str]]:
     """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly."""
     result: list[list[str]] = []
-    for tokens in parse(command):
+    for tokens in parse(command, literal_operators):
         for unit in [tokens, *_groups(tokens)]:
             result.append(unit)
             nested = resolve(unit).nested
             extra = _nested_command(unit)
             for body in dict.fromkeys([*nested, *([extra] if extra is not None else [])]):
-                result.extend(walk(body))
+                result.extend(walk(body, literal_operators))
     for body in _bodies(command):
-        result.extend(_walk_quietly(body))
+        result.extend(_walk_quietly(body, literal_operators))
     return result
 
 

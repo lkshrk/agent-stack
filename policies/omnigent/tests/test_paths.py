@@ -420,6 +420,25 @@ class ShellWriteScopeTest(unittest.TestCase):
         self.assertEqual(self.verdict("mv docs/a.md /tmp/a", DOCS_SCOPE), "ALLOW")
         self.assertEqual(self.verdict("cp src/a.py /tmp/x"), "ALLOW")
 
+    def test_quoted_operators_are_operands(self):
+        for command in (
+            "cp /tmp/x '<' src/",
+            'cp /tmp/x "<" src/',
+            "cp /tmp/x \\< src/",
+            "mv /tmp/x '<' src/",
+            "cp /tmp/x '<' src/ 2>/dev/null",
+            "cp /tmp/x '>' src/",
+            "cp /tmp/x '2>' src/",
+            "tee '>'",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=POLLY_SCOPE)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("rg -n '<' src > /tmp/x", "cp /tmp/x '<' .polly/diffs/", "echo '>' > /tmp/x"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command), "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
