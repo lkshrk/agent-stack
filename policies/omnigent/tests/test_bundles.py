@@ -203,6 +203,21 @@ N2_PROBES = [
     "timeout 30 rg x",
     "env rg x",
 ]
+N6_PROBES = [
+    "bash -c 'echo ${0@P}' '\\044(touch /tmp/p)'",
+    'bash -c \'echo "${1@P}"\' _ \'\\044(touch /tmp/p)\'',
+    "bash -c 'echo ${0@P}' '\\140touch /tmp/p\\140'",
+    "cat '\\044(touch p)'; echo ${_@P}",
+    'echo "${PWD@P}"',
+    'cd pr-dir && echo "${PWD@P}"',
+    'cd \'$(touch pwn-pwd)\' && echo "${PWD@P}"',
+    'bash -lc \'bash -c "echo \\${0@P}" "\\\\044(touch /tmp/p)"\'',
+    'echo ${x@E}',
+    'echo ${x@Q}',
+    'echo ${x@A}',
+    "bash -c 'rg x' _ a",
+    ["bash", "-lc", "bash -c 'echo ${0@P}' '\\044(touch /tmp/p)'"],
+]
 N4_PROBES = [
     "printf -v y '%s%s' 'a[$' '(touch /tmp/p)]'; echo ${x:y}",
     "printf -v PATH '%s' ./bin; rg x",
@@ -481,7 +496,7 @@ CASES += [
     Case(agent, "tool_call", tool, {"command": command}, "DENY")
     for agent, tools in READ_ONLY_AGENTS.items()
     for tool in tools
-    for command in I1_PROBES + N1_PROBES + N2_PROBES + N4_PROBES
+    for command in I1_PROBES + N1_PROBES + N2_PROBES + N4_PROBES + N6_PROBES
 ]
 CASES += [
     Case("polly", "tool_call", tool, {"command": command}, "DENY")
@@ -494,12 +509,22 @@ CASES += [
         "echo main | xargs git push origin",
         "printf -v HOME '%s' ./evil; git log -p -1",
         "printf -v GIT_DIR '%s' x; git log",
+        "bash -c 'echo ${0@P}' '\\044(git push origin feat/x)'",
+        "cat '\\044(git -C ../wt commit -am x)'; echo ${_@P}",
+        "cd pr-dir && git status && echo \"${PWD@P}\"",
     )
 ]
 CASES += [
     Case("polly/agents/claude_code", "tool_call", tool, {"command": command}, "DENY")
     for tool in ("Bash", "sys_os_shell")
-    for command in ("echo main | xargs git push origin", "echo 5 | xargs gh pr merge", "cat <(git push origin main)")
+    for command in (
+        "echo main | xargs git push origin",
+        "echo 5 | xargs gh pr merge",
+        "cat <(git push origin main)",
+        "bash -c 'echo ${0@P}' '\\044(git push origin main)'",
+        "cat '\\044(git push origin main)'; echo ${_@P}",
+        "git push origin ${b:-main}",
+    )
 ]
 CASES += [
     Case("polly/agents/codex", "tool_call", "shell", {"command": command}, expected)

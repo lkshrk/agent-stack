@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import SHELLS, Command, resolve, shell_command, walk
+from ._shell import SHELLS, Command, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
 from .vcs import _BRANCH_LIST_FLAGS, _GIT_UNSAFE_FLAGS
 
@@ -41,7 +41,7 @@ _SAFE_WRAPPERS = frozenset({"command", "builtin", "find"})
 ASSIGNING_BUILTINS = frozenset({
     "read", "mapfile", "readarray", "declare", "typeset", "local", "export", "readonly", "let", "getopts",
 })
-_EXPANSION = re.compile(r"\$\(\(|\$\[|\(\(|\$\{!|\$\{[^}]*[:\[]")
+_ARITHMETIC = re.compile(r"\$\(\(|\$\[|\(\(")
 _SYSTEM_SHELL_DIRS = ("/bin/", "/usr/bin/")
 _HINT = "this agent is read-only; report the change instead of making it"
 
@@ -202,12 +202,15 @@ def read_only_shell(
         command = _STDERR_ONLY.sub("", command)
         if _FILE_REDIRECT.search(command):
             return deny(f"redirecting output to a file is not allowed; {_HINT}")
-        if _EXPANSION.search(command):
-            return deny(f"arithmetic, subscript, substring and indirect expansions are not allowed; {_HINT}")
+        if _ARITHMETIC.search(command) or opaque(command):
+            return deny(f"arithmetic, subscript, substring, transformation and indirect expansions are not allowed; {_HINT}")
         try:
             statements = walk(command)
         except ValueError:
             return deny("unparseable shell command; simplify it")
+        shape = shell_shape_problem(statements)
+        if shape:
+            return deny(f"{shape}; {_HINT}")
         for tokens in statements:
             reason = _check(tokens, allowed, exact)
             if reason:
@@ -245,6 +248,11 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
             if re.search(r"\bgit\b", command):
                 return deny("unparseable command naming git; simplify it")
             return allow()
+        if opaque(command):
+            return deny("substring, subscript, transformation and indirect expansions are not allowed; write the command literally")
+        shape = shell_shape_problem(statements)
+        if shape:
+            return deny(shape)
         resolved_all = [resolve(tokens) for tokens in statements]
         runs_git = any(r.argv and os.path.basename(r.argv[0]) == "git" for r in resolved_all)
         if runs_git and any(assigns(r) for r in resolved_all):

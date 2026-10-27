@@ -130,3 +130,28 @@ class ProcessSubstitutionTest(unittest.TestCase):
         for command, expected in cases.items():
             with self.subTest(command=command):
                 self.assertIn(expected, [resolve(t).argv for t in walk(command)])
+
+
+class OpaqueTest(unittest.TestCase):
+    def test_opaque_and_decoding(self):
+        from agent_stack_policies._shell import decoding, opaque
+
+        for text in ("${x@P}", "${x:1}", "${a[0]}", "${!x}", "${x@Q}", "${x:-y}"):
+            self.assertTrue(opaque(text), text)
+        for text in ("${HOME}", "$HOME", "${#x}", "${x/a/b}"):
+            self.assertFalse(opaque(text), text)
+        self.assertTrue(decoding("${x@P}"))
+        self.assertTrue(decoding("${_@E}"))
+        self.assertFalse(decoding("${x@Q}"))
+
+    def test_body_arguments(self):
+        cases = {
+            "bash -c 'x' _ a": ["_", "a"],
+            "bash -lc 'x' 2>&1": [],
+            "bash -lc 'x' > out": [],
+            "bash -lc 'x'": [],
+            "sh -c 'x' 2>/dev/null": [],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(resolve(parse(command)[0]).body_arguments, expected)

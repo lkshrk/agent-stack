@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
-from ._shell import shell_command, walk
+from ._shell import shell_command, shell_shape_problem, walk
 
 PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
@@ -146,6 +146,9 @@ def path_guard(
             if has_denied:
                 return _deny("unparseable shell command while forbidden paths are set")
             return allow()
+        reason = shell_shape_problem(statements)
+        if reason:
+            return _deny(reason)
         for tokens in statements:
             for token in tokens:
                 candidate = _FLAG_PREFIX.sub("", token)

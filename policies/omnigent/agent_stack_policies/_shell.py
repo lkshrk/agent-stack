@@ -59,6 +59,9 @@ _PYTHON_SPEC = re.compile(r"[@=<>!~\[]")
 _LAUNCH_OPTIONS = frozenset({"-p", "--package", "-c", "--call"})
 _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": {"exec", "x"}, "bun": {"x"}}
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
+_DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
+_FD = re.compile(r"^\d+$")
 
 
 @dataclass
@@ -70,6 +73,7 @@ class Command:
     wrappers: list[str] = field(default_factory=list)
     nested: list[str] = field(default_factory=list)
     stdin_exec: bool = False
+    body_arguments: list[str] = field(default_factory=list)
 
     @property
     def name(self) -> str:
@@ -196,8 +200,23 @@ def _mise_exec(args: list[str], nested: list[str]) -> list[str]:
     return [] if commands else args[split + 1 :]
 
 
-def _shell_inputs(args: list[str], nested: list[str]) -> bool:
-    """Collect `-c` and here-string bodies; True when the shell runs a script from stdin."""
+def _positional(args: list[str]) -> list[str]:
+    """Arguments after a `-c` body, without redirections (`2>&1` leaves a bare fd when `parse` splits at `>&`)."""
+    out, i = [], 0
+    while i < len(args):
+        if args[i] and set(args[i]) <= set("<>"):
+            i += 2
+            continue
+        if _FD.match(args[i]) and (i + 1 == len(args) or set(args[i + 1]) <= set("<>")):
+            i += 1
+            continue
+        out.append(args[i])
+        i += 1
+    return out
+
+
+def _shell_inputs(args: list[str], nested: list[str], body_arguments: list[str] | None = None) -> bool:
+    """Collect `-c` and here-string bodies (and the positional arguments after a `-c` body); True when the shell runs a script from stdin."""
     i = 0
     while i < len(args):
         arg = args[i]
@@ -220,6 +239,8 @@ def _shell_inputs(args: list[str], nested: list[str]) -> bool:
             if arg.startswith("-") and "c" in arg[1:]:
                 if following is not None:
                     nested.append(following)
+                    if body_arguments is not None:
+                        body_arguments.extend(_positional(args[i + 2 :]))
                 return False
             if arg.startswith("-") and "s" in arg[1:]:
                 return True
@@ -317,7 +338,7 @@ def resolve(tokens: list[str]) -> Command:
             break
         name = os.path.basename(argv[0])
         if name in SHELLS:
-            command.stdin_exec = _shell_inputs(argv[1:], command.nested)
+            command.stdin_exec = _shell_inputs(argv[1:], command.nested, command.body_arguments)
             break
         if name == "eval":
             if argv[1:]:
@@ -346,6 +367,36 @@ def _nested_command(tokens: list[str]) -> str | None:
             if flag.startswith("-") and not flag.startswith("--") and "c" in flag[1:]:
                 return tokens[j + 1]
     return None
+
+
+def opaque(text: str) -> bool:
+    """A `${…}` with `:`, `[`, `@` or `!` after the name: substrings, subscripts, transformations and indirection evaluate or decode values no gate can read."""
+    return OPAQUE_EXPANSION.search(text) is not None
+
+
+def decoding(text: str) -> bool:
+    """`${x@P}` or `${x@E}`: the value's escapes are decoded and, for `@P`, expanded, so it can run any command."""
+    return _DECODING_EXPANSION.search(text) is not None
+
+
+def shell_shape_problem(statements: list[list[str]]) -> str | None:
+    """A reason when a statement passes positional arguments after a shell's `-c` body."""
+    for tokens in statements:
+        command = resolve(tokens)
+        if command.body_arguments:
+            return f"arguments after a {command.name} -c body are not allowed; put everything in the body"
+    return None
+
+
+def hidden_command(text: str, statements: list[list[str]], names: re.Pattern) -> str | None:
+    """A reason when an opaque expansion could run a command matching `names`, or names the command itself, or a `-c` body takes arguments."""
+    if decoding(text):
+        return "${…@P} and ${…@E} decode a value into commands no gate can read; write the command literally"
+    if opaque(text):
+        commands = [resolve(t).argv for t in statements]
+        if names.search(text) or any(argv and opaque(argv[0]) for argv in commands):
+            return "substring, subscript, transformation or indirect expansions next to this command are not allowed; write it literally"
+    return shell_shape_problem(statements)
 
 
 def substituted(token: str) -> bool:

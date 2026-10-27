@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import DEFAULT_PROTECTED, group_token, push_branch, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, glob_match
 
 _VCS = frozenset({"git", "gh"})
@@ -201,6 +201,11 @@ def docs_vcs(
             statements = walk(command)
         except ValueError:
             return _deny("unparseable shell command; simplify it")
+        reason = shell_shape_problem(statements)
+        if reason:
+            return _deny(reason)
+        if opaque(command) and re.search(r"\b(git|gh)\b", command):
+            return _deny("substring, subscript, transformation or indirect expansions next to git or gh are not allowed")
         for tokens in statements:
             if any(substituted(t) and re.search(r"\b(git|gh)\b", t) for t in tokens):
                 return _deny("git or gh inside command substitution is not allowed")

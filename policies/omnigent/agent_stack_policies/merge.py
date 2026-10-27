@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, hidden_command, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
@@ -14,6 +14,7 @@ _HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
 _VCS = frozenset({"git", "gh"})
 _PR_HINT = "open or update a pull request instead"
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
+_VCS_TEXT = re.compile(r"\b(git|gh)\b")
 
 
 def _is_force_flag(token: str) -> bool:
@@ -109,6 +110,9 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             if "merge" in command or "push" in command:
                 return deny("unparseable merge or push command; simplify the command")
             return allow()
+        reason = hidden_command(command, statements, _VCS_TEXT)
+        if reason:
+            return deny(reason)
         for tokens in statements:
             reason = _check_statement(tokens, protected)
             if reason:

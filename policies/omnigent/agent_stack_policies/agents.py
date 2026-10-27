@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import Command, resolve, shell_command, walk
+from ._shell import Command, hidden_command, resolve, shell_command, walk
 from .paths import SHELL_TOOLS
 
 _PRINT_AGENTS = frozenset({"claude", "omp"})
@@ -77,6 +77,9 @@ def no_nested_agents(*, extra_commands: list[str] | None = None) -> Callable[[Ev
             if text_pattern.search(command):
                 return deny("unparseable command naming an agent CLI or piping into a shell; simplify it")
             return allow()
+        reason = hidden_command(command, statements, text_pattern)
+        if reason:
+            return deny(reason)
         for tokens in statements:
             reason = _check(resolve(tokens), extra)
             if reason:

@@ -242,3 +242,31 @@ class VariableTargetTest(unittest.TestCase):
         for command in ("git push -u origin feat/x", "echo $HOME && git push origin feat/x"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class HiddenCommandTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in (
+            "bash -c 'echo ${0@P}' '\\044(git push origin main)'",
+            "cat '\\044(git push origin main)'; echo ${_@P}",
+            "echo ${x@P}",
+            "echo ${x@E}",
+            "${G@P} push origin main",
+            "git push origin ${b:-main}",
+            "git push origin ${a[0]}",
+            "bash -c 'git push origin \"$0\"' main",
+            "bash -c 'git status' _ x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_plain_expansions_allowed(self):
+        for command in (
+            "echo ${HOME} && git push origin feat/x",
+            "git push -u origin feat/x",
+            "bash -lc 'make test' 2>&1 | tail -5",
+            "echo ${x:-y}",
+            "bash -lc 'pytest -q' > /tmp/log",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
