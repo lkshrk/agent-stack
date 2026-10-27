@@ -32,18 +32,24 @@ _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
 _GLOB = re.compile(r"[*?\[{]")
 _REDIRECT_KEY = re.compile(
-    r"^(?:alias\.|push\.|url\.|remote\.pushdefault$|remote\..+\.(?:push|url|pushurl)$|branch\..+\.(?:merge|remote)$)",
+    r"^(?:alias\.|push\.|url\.|include\.|includeif\.|remote\.pushdefault$|remote\..+\.(?:push|url|pushurl)$|branch\..+\.(?:merge|remote)$)",
     re.IGNORECASE,
 )
-_REDIRECT_TEXT = re.compile(r"(?:^|['\"\s])(?:alias|push|url|remote|branch)\.", re.IGNORECASE)
+_REDIRECT_TEXT = re.compile(r"(?:^|['\"\s])(?:alias|push|url|remote|branch|include|includeif)\.", re.IGNORECASE)
 _CONFIG_READS = frozenset(
     {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "--list", "-l", "get", "list"}
 )
 _CONFIG_EDITS = frozenset({"-e", "--edit", "edit"})
 _CONFIG_FILE_ENV = re.compile(r"^GIT_CONFIG(?:_GLOBAL|_SYSTEM)?=")
 _CONFIG_ENV = re.compile(r"^GIT_CONFIG_(?:KEY_\d+|PARAMETERS)=(.*)$", re.DOTALL)
-_GIT_VALUE_OPTIONS = frozenset({"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"})
-_CONFIG_HINT = "git config that redirects a push or merge (alias, remote, branch, push or url keys) is not allowed"
+# git 2.47 and 2.56 global options; a long one outside these sets, with no `=`, fails closed.
+_GIT_VALUE_OPTIONS = frozenset({"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--attr-source", "--shallow-file"})
+_GIT_FLAG_OPTIONS = frozenset({
+    "--paginate", "--no-pager", "--no-replace-objects", "--no-lazy-fetch", "--no-optional-locks", "--no-advice",
+    "--bare", "--literal-pathspecs", "--no-literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+    "--icase-pathspecs", "--exec-path", "--html-path", "--man-path", "--info-path", "--version", "--help",
+})
+_CONFIG_HINT = "git config that redirects a push or merge (alias, remote, branch, push, url or include keys) is not allowed"
 
 
 def _has_substitution(tokens: list[str]) -> bool:
@@ -91,7 +97,7 @@ def _check_gh(rest: list[str]) -> str | None:
 
 
 def _git_parts(args: list[str]) -> tuple[list[str], str, list[str]]:
-    """(`-c`/`--config-env` values, subcommand, its arguments) for a git argv after `git`."""
+    """(`-c`/`--config-env` values, subcommand, its arguments) for a git argv after `git`; an unknown long option without `=` is returned as the subcommand."""
     configs, i = [], 0
     while i < len(args):
         arg = args[i]
@@ -106,6 +112,8 @@ def _git_parts(args: list[str]) -> tuple[list[str], str, list[str]]:
             i += 1
         elif arg in _GIT_VALUE_OPTIONS:
             i += 2
+        elif arg.startswith("--") and "=" not in arg and arg not in _GIT_FLAG_OPTIONS:
+            return configs, arg, args[i + 1 :]
         elif arg.startswith("-"):
             i += 1
         else:
@@ -175,7 +183,7 @@ def _push_parts(args: list[str]) -> tuple[set[str], list[str], str | None]:
     while i < len(args):
         arg = args[i]
         i += 1
-        if arg == "--":
+        if arg in ("--", "--end-of-options"):
             positional.extend(args[i:])
             break
         if arg.startswith("--"):
@@ -236,6 +244,8 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
             reason = _check_gh(rest)
         else:
             _, sub, sub_rest = _git_parts(rest)
+            if sub.startswith("--"):
+                return f"unknown git option {sub} before the subcommand; {_PR_HINT}"
             reason = _check_config(rest) or (_check_push(sub_rest, protected) if sub == "push" else None)
         if reason:
             return reason

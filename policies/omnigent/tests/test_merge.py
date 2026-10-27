@@ -166,6 +166,44 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_git_global_value_options(self):
+        for command in (
+            "git --attr-source push push origin",
+            "git --shallow-file push push origin",
+            "git --frobnicate push push origin",
+            "git --frobnicate push origin HEAD:feat/x",
+            "git --end-of-options push origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertDenied("git --frobnicate status", "unknown git option --frobnicate")
+        for command in (
+            "git -C .worktrees/t1 status",
+            "git --no-pager log -1",
+            "git -P log -1",
+            "git --git-dir=.git status",
+            "git --literal-pathspecs push origin HEAD:feat/x",
+            "git --attr-source HEAD push origin HEAD:feat/x",
+            "git --shallow-file x push -u origin HEAD:feat/x",
+            "git --no-optional-locks status",
+            "git --exec-path",
+            "git --version",
+            "git --list-cmds=main",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_end_of_options_in_push(self):
+        for command in (
+            "git push --end-of-options origin HEAD:feat/x -o HEAD:main",
+            "git push --end-of-options origin",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertEqual(run("git push --end-of-options origin HEAD:feat/x")["result"], "ALLOW")
+
     def test_no_merge_abbreviated_force_and_tag_flags_denied(self):
         for command in (
             "git push --force-w origin HEAD:feat/x",
@@ -408,7 +446,16 @@ class HiddenCommandTest(unittest.TestCase):
 
 
 PUSH_GLOBS = ['touch HEAD:main; git push origin HEAD:ma?n', 'git push origin HEAD:ma[i]n', 'git push origin HEAD:{main,feat/x}', 'git push origin HEAD:{ma,}in', "git push origin 'HEAD:ma*'", 'git push {origin,} HEAD:feat/x']
-CONFIG_REDIRECTS = ["git config alias.ship 'push origin HEAD:main'; git ship", "git config --global alias.ship 'push origin HEAD:main'", "git config --local --add alias.ship 'push origin HEAD:main'", "git config set alias.ship 'push origin HEAD:main'", "git config Alias.Ship 'push origin HEAD:main'", "git -c alias.ship='push origin HEAD:main' ship", "git -calias.ship='push origin HEAD:main' ship", 'git --config-env=alias.ship=SHIP ship', 'git --config-env alias.ship=SHIP ship', 'git config remote.origin.push HEAD:refs/heads/main && git push', 'git config remote.origin.url https://github.com/o/fork.git', 'git config remote.origin.pushurl https://github.com/o/fork.git', 'git config remote.pushDefault fork', 'git config branch.feat/x.merge refs/heads/main', 'git config branch.feat/x.remote upstream', 'git config push.default current', 'git config url.https://github.com/o/fork.git.insteadOf https://github.com/o/r.git', 'git config --unset alias.ship', "git -C repo config alias.ship 'push origin HEAD:main'", 'git -c remote.origin.push=HEAD:refs/heads/main push', 'git -c push.default=upstream push', "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.ship GIT_CONFIG_VALUE_0='push origin HEAD:main' git ship", 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:main; git push', 'GIT_CONFIG_PARAMETERS="\'alias.ship\'=\'push origin HEAD:main\'" git ship', 'GIT_CONFIG_GLOBAL=./evil.gitconfig git push origin feat/x', 'env GIT_CONFIG_SYSTEM=./evil git push origin feat/x']
+CONFIG_REDIRECTS = [
+    "git -c include.path=/tmp/c p origin",
+    "git -c includeIf.gitdir:/repo/.path=/tmp/c p origin",
+    "git -c IncludeIf.onbranch:main.path=/tmp/c p origin",
+    "git --config-env=include.path=E p origin",
+    "git config include.path /tmp/c",
+    "git config --add includeif.gitdir:/x/.path /tmp/c",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=/tmp/c git p origin",
+    "GIT_CONFIG_PARAMETERS=\"'include.path'='/tmp/c'\" git p origin",
+"git config alias.ship 'push origin HEAD:main'; git ship", "git config --global alias.ship 'push origin HEAD:main'", "git config --local --add alias.ship 'push origin HEAD:main'", "git config set alias.ship 'push origin HEAD:main'", "git config Alias.Ship 'push origin HEAD:main'", "git -c alias.ship='push origin HEAD:main' ship", "git -calias.ship='push origin HEAD:main' ship", 'git --config-env=alias.ship=SHIP ship', 'git --config-env alias.ship=SHIP ship', 'git config remote.origin.push HEAD:refs/heads/main && git push', 'git config remote.origin.url https://github.com/o/fork.git', 'git config remote.origin.pushurl https://github.com/o/fork.git', 'git config remote.pushDefault fork', 'git config branch.feat/x.merge refs/heads/main', 'git config branch.feat/x.remote upstream', 'git config push.default current', 'git config url.https://github.com/o/fork.git.insteadOf https://github.com/o/r.git', 'git config --unset alias.ship', "git -C repo config alias.ship 'push origin HEAD:main'", 'git -c remote.origin.push=HEAD:refs/heads/main push', 'git -c push.default=upstream push', "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.ship GIT_CONFIG_VALUE_0='push origin HEAD:main' git ship", 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:main; git push', 'GIT_CONFIG_PARAMETERS="\'alias.ship\'=\'push origin HEAD:main\'" git ship', 'GIT_CONFIG_GLOBAL=./evil.gitconfig git push origin feat/x', 'env GIT_CONFIG_SYSTEM=./evil git push origin feat/x']
 EVERYDAY = ['git push -u origin feat/x', 'git push origin HEAD:feat/x', 'git config user.email bot@example.com', 'git config --get remote.origin.url', "git config --get-regexp '^alias\\.'", 'git config --list', 'git config get remote.origin.url', 'git config list --show-origin', 'git -c core.pager=cat log', 'git -c user.name=bot commit -m x', 'git config core.hooksPath .githooks', "rg 'alias.ship' docs"]
 
 
