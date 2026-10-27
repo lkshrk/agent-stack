@@ -15,6 +15,20 @@ _VCS = frozenset({"git", "gh"})
 _PR_HINT = "open or update a pull request instead"
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
+_GLOB = re.compile(r"[*?\[{]")
+_REDIRECT_KEY = re.compile(
+    r"^(?:alias\.|push\.|url\.|remote\.pushdefault$|remote\..+\.(?:push|url|pushurl)$|branch\..+\.(?:merge|remote)$)",
+    re.IGNORECASE,
+)
+_REDIRECT_TEXT = re.compile(r"(?:^|['\"\s])(?:alias|push|url|remote|branch)\.", re.IGNORECASE)
+_CONFIG_READS = frozenset(
+    {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "--list", "-l", "get", "list"}
+)
+_CONFIG_EDITS = frozenset({"-e", "--edit", "edit"})
+_CONFIG_FILE_ENV = re.compile(r"^GIT_CONFIG(?:_GLOBAL|_SYSTEM)?=")
+_CONFIG_ENV = re.compile(r"^GIT_CONFIG_(?:KEY_\d+|PARAMETERS)=(.*)$", re.DOTALL)
+_GIT_VALUE_OPTIONS = frozenset({"-C", "--git-dir", "--work-tree", "--namespace", "--super-prefix"})
+_CONFIG_HINT = "git config that redirects a push or merge (alias, remote, branch, push or url keys) is not allowed"
 
 
 def _is_force_flag(token: str) -> bool:
@@ -53,9 +67,61 @@ def _check_gh(rest: list[str]) -> str | None:
     return None
 
 
+def _git_parts(args: list[str]) -> tuple[list[str], str, list[str]]:
+    """(`-c`/`--config-env` values, subcommand, its arguments) for a git argv after `git`."""
+    configs, i = [], 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("-c", "--config-env") and i + 1 < len(args):
+            configs.append(args[i + 1])
+            i += 2
+        elif arg.startswith("--config-env="):
+            configs.append(arg.split("=", 1)[1])
+            i += 1
+        elif arg.startswith("-c") and len(arg) > 2 and not arg.startswith("--"):
+            configs.append(arg[2:])
+            i += 1
+        elif arg in _GIT_VALUE_OPTIONS:
+            i += 2
+        elif arg.startswith("-"):
+            i += 1
+        else:
+            return configs, arg, args[i + 1 :]
+    return configs, "", []
+
+
+def _redirect_key(text: str) -> bool:
+    return _REDIRECT_KEY.match(text.split("=", 1)[0].strip("'\"")) is not None
+
+
+def _check_config(args: list[str]) -> str | None:
+    configs, sub, rest = _git_parts(args)
+    if any(_redirect_key(c) for c in configs):
+        return f"{_CONFIG_HINT} through git -c or --config-env; {_PR_HINT}"
+    if sub != "config" or _CONFIG_READS & set(rest):
+        return None
+    if _CONFIG_EDITS & set(rest) or any(_redirect_key(a) for a in rest if not a.startswith("-")):
+        return f"{_CONFIG_HINT}; {_PR_HINT}"
+    return None
+
+
+def _config_environment(statements: list[list[str]]) -> str | None:
+    for tokens in statements:
+        for token in tokens:
+            if _CONFIG_FILE_ENV.match(token):
+                return f"pointing git at another config file is not allowed next to git; {_PR_HINT}"
+            match = _CONFIG_ENV.match(token)
+            if match and _REDIRECT_TEXT.search(match.group(1)):
+                return f"{_CONFIG_HINT} through GIT_CONFIG_*; {_PR_HINT}"
+    return None
+
+
 def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
     flags = [a for a in args if a.startswith("-")]
-    refspecs = [a for a in args if not a.startswith("-")][1:]
+    positional = [a for a in args if not a.startswith("-")]
+    if any(_GLOB.search(a) for a in positional):
+        return f"glob or brace characters in a push are not allowed, since the shell expands them; {_PR_HINT}"
+    refspecs = positional[1:]
     if any(_is_force_flag(f) for f in flags) or any(r.startswith("+") for r in refspecs):
         return f"force-push is not allowed; {_PR_HINT}"
     if any(f.split("=", 1)[0] in _REF_FLAGS for f in flags):
@@ -83,7 +149,9 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
         if os.path.basename(run[0]) == "gh":
             reason = _check_gh(rest)
         else:
-            reason = _check_push(rest[rest.index("push") + 1 :], protected) if "push" in rest else None
+            reason = _check_config(rest) or (
+                _check_push(rest[rest.index("push") + 1 :], protected) if "push" in rest else None
+            )
         if reason:
             return reason
     return None
@@ -111,6 +179,8 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
                 return deny("unparseable merge or push command; simplify the command")
             return allow()
         reason = hidden_command(command, statements, _VCS_TEXT)
+        if not reason and _VCS_TEXT.search(command):
+            reason = _config_environment(statements)
         if reason:
             return deny(reason)
         for tokens in statements:

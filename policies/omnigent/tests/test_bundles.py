@@ -524,6 +524,12 @@ CASES += [
         "bash -c 'echo ${0@P}' '\\044(git push origin main)'",
         "cat '\\044(git push origin main)'; echo ${_@P}",
         "git push origin ${b:-main}",
+        "git push origin HEAD:{ma,}in",
+        "git push origin HEAD:ma[i]n",
+        "touch HEAD:main; git push origin HEAD:ma?n",
+        "git config alias.ship 'push origin HEAD:main'; git ship",
+        "git -c alias.ship='push origin HEAD:main' ship",
+        "git config remote.origin.push HEAD:refs/heads/main && git push",
     )
 ]
 CASES += [
