@@ -271,6 +271,44 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_xargs_parallel_require_literal_non_shell_programs(self):
+        for command in (
+            "echo merge | xargs -I{} sh -c 'g\"\"h pr {} 5'",
+            "echo merge | xargs -I{} sh -c 'g\\h pr {} 5'",
+            "echo merge | xargs -I{} bash -c 'g''h pr {} 5'",
+            "echo merge | xargs -I{} bash -c $'\\x67h pr {} 5'",
+            "echo merge | xargs -I{} eval \"g\"\"h pr {} 5\"",
+            "echo merge | xargs -I{} env sh -c 'gh pr {} 5'",
+            "echo merge | xargs -I{} python3 -c 'import os'",
+            "echo merge | parallel 'g\"\"h pr {} 5'",
+            "parallel 'g\"\"h pr {} 5' ::: merge",
+            "parallel {1} {2} {3} {4} ::: gh ::: pr ::: merge ::: 5",
+            "echo 'gh pr merge 5' | xargs -I{} sh -c '{}'",
+            "printf 'gh pr merge 5\\0' | xargs -0 sh -c",
+            "parallel {} ::: 'gh pr merge 5'",
+            "parallel :::: /tmp/cmds",
+            "xargs",
+            "parallel",
+            "xargs gh pr view",
+            "xargs git status",
+            "parallel gh pr view ::: 5",
+            "parallel git status ::: .",
+            "timeout 5 xargs gh pr view < ids",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("xargs/parallel", decision["reason"])
+        for command in (
+            "ls | xargs wc -l",
+            "ls | xargs -I{} rg -n x {}",
+            "echo a | parallel echo {}",
+            "parallel rg -n x {} ::: src/a.py",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

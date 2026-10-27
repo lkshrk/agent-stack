@@ -40,6 +40,9 @@ _PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "ex
 _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
+_STDIN_SHELLS = SHELLS | frozenset({"eval", "env", "exec", "command", "sudo"})
+_STDIN_INTERPRETERS = frozenset({"python", "python3", "node", "perl", "ruby", "php", "lua", "awk"})
+_STDIN_TEMPLATE = re.compile(r"\{\d*\}")
 _GIT_SENSITIVE = frozenset({"push", "merge", "config"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
 _GLOB = re.compile(r"[*?\[{]")
@@ -349,12 +352,27 @@ def _runs_vcs(command: Command) -> bool:
     return any(_VCS_TEXT.search(t) for t in texts)
 
 
+def _unsafe_stdin_launcher(command: Command) -> bool:
+    """xargs/parallel may start only a literal, non-shell, non-gh/git program."""
+    if not (_STDIN_ARGUMENTS & set(command.wrappers)):
+        return False
+    if not command.argv:
+        return True
+    name = command.name
+    raw = command.argv[0]
+    if name in _VCS or name in _STDIN_SHELLS or name in _STDIN_INTERPRETERS:
+        return True
+    if raw.startswith(":::") or _STDIN_TEMPLATE.search(raw):
+        return True
+    return any(ch in raw for ch in "'\"\\$`")
+
+
 def _check_statement(tokens: list[str], protected: frozenset[str], expanding_query: bool = False) -> str | None:
     if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
     command = resolve(tokens)
-    if _STDIN_ARGUMENTS & set(command.wrappers) and _runs_vcs(command):
-        return f"run gh/git directly, not through xargs/parallel, since stdin can supply their arguments; {_PR_HINT}"
+    if _STDIN_ARGUMENTS & set(command.wrappers) and (_runs_vcs(command) or _unsafe_stdin_launcher(command)):
+        return f"run gh/git directly, not through xargs/parallel; run only a literal, non-shell program there; {_PR_HINT}"
     for run, resolved in _vcs_runs(tokens):
         rest = run[1:]
         if _mentions_merge_or_push(run) and any("$" in t for t in rest):
