@@ -510,6 +510,7 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "git fetch origin"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh pr diff 3 > .polly/diffs/t1-abc.diff"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "git -C .worktrees/t1 diff abc...def > .polly/diffs/t1-def.diff"}, "ALLOW"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "git -C .worktrees/t1 diff abc...def > /repo/.polly/diffs/t1-def.diff"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "make test"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "cp /tmp/x '<' src/"}, "DENY"),
@@ -528,7 +529,14 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > ../other/x.md"}, "DENY"),
     *[
         Case("documenter", "tool_call", "Bash", {"command": form}, "DENY")
-        for command in ("tee ../other/x.md < /tmp/a", "sed -i s/a/b/ ../other/README.md", "mv /tmp/a.md ../../x.md", "cp /tmp/a.md ../x.md")
+        for command in (
+            "tee ../other/x.md < /tmp/a",
+            "sed -i s/a/b/ ../other/README.md",
+            "mv /tmp/a.md ../../x.md",
+            "cp /tmp/a.md ../x.md",
+            "echo x > ~/x.md",
+            "echo x > /etc/x.md",
+        )
         for form in (command, ["bash", "-lc", command])
     ],
 

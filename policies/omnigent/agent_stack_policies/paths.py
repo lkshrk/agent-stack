@@ -216,9 +216,10 @@ def path_guard(
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for tokens in walk(command, literal_operators=True):
             targets += shell_write_targets(tokens)
-        for target in (posixpath.normpath(t) for t in targets):
-            if escapes(target):
-                return _deny(f"shell write to {target} leaves the checkout")
+        for raw in targets:
+            target = posixpath.normpath(raw)
+            if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
+                return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
             if not scratch(target) and not _matches_any(target, scope):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None

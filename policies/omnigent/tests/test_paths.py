@@ -328,7 +328,7 @@ class ShellWriteScopeTest(unittest.TestCase):
             "echo x > /tmp/y",
             "echo x > .polly/registry.json",
             "gh pr diff 3 > .polly/diffs/t1-abc.diff",
-            "git -C .worktrees/t1 diff a...b > /repo/.polly/diffs/t1-b.diff",
+            "git -C .worktrees/t1 diff a...b > .polly/diffs/t1-b.diff",
             "rm /tmp/x",
             "tee /dev/null",
             "cp a /tmp/b",
@@ -447,6 +447,28 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
         self.assertEqual(self.verdict("echo x > ../.polly/registry.json"), "DENY")
+
+    def test_absolute_and_home_targets_denied(self):
+        for command in (
+            "echo x > ~/x.md",
+            "echo x > ~",
+            "echo x > ~/../x.md",
+            "tee ~other/x.md",
+            "echo x > /etc/x.md",
+            "cp /tmp/a.md /etc/x.md",
+            "sed -i s/a/b/ /home/agent/docs/README.md",
+            "tee ../other/x.md",
+            "sed -i s/a/b/ ../other/README.md",
+            "mv /tmp/a.md ../../x.md",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    guard = path_guard(deny=[WORKFLOWS], allow_only=DOCS_SCOPE)
+                    self.assertEqual(guard(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertEqual(self.verdict("git -C .worktrees/t1 diff a...b > /repo/.polly/diffs/t1-b.diff"), "DENY")
+        for command in ("echo x > /tmp/a.md", "cat docs/a.md > /dev/null", "cp /tmp/a.md docs/a.md", "sed -i s/a/b/ docs/a.md"):
+            with self.subTest(command=command):
+                self.assertEqual(self.verdict(command, DOCS_SCOPE), "ALLOW")
 
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
