@@ -295,12 +295,43 @@ CASES: list[Case] = [
             ("echo x | xargs yq", "DENY"),
             ("parallel -I cat cat pr merge 5 ::: gh", "DENY"),
             ("xargs -I XX XX pr merge 5", "DENY"),
+            ("echo x | tee -a $HOME/.bash*", "DENY"),
+            ("echo x >> $HOME/.bash*", "DENY"),
+            ("tee -a ${HOME}/.bash?c", "DENY"),
+            ('tee -a "$HOME"/.bash*', "DENY"),
+            ("tee -a $HOME/.bash{rc,x}", "DENY"),
+            ("tee -a ~omnigent/.bash*", "DENY"),
+            ("echo x | tee -a {x,~}/.bashrc", "DENY"),
+            ("echo x | tee -a {x,/home/omnigent}/.bashrc", "DENY"),
+            ("echo x | tee -a //home/omnigent/.bash*", "DENY"),
+            ("echo x >> //home/omnigent/.bashrc", "DENY"),
+            ("ls /*", "ALLOW"),
+            ("ls /*/", "ALLOW"),
+            ("cat /*/*/*", "ALLOW"),
+            ("du -sh /*", "ALLOW"),
+            ("ls /home/*", "ALLOW"),
+            ("ls ~/*", "ALLOW"),
+            ("find . -name '*.py' | xargs grep -ir todo", "ALLOW"),
+            ("git ls-files | xargs grep -ie foo", "ALLOW"),
+            ("git ls-files | xargs ls -il", "ALLOW"),
+            ("echo x | xargs -i rg foo {}", "ALLOW"),
+            ("echo gh | xargs -icat cat pr merge 5", "DENY"),
+            ("parallel --rpl='cat s/.*/gh/' cat pr merge 5 ::: x", "DENY"),
+            ("echo a | parallel echo {}", "DENY"),
+            ("push", "ALLOW"),
+            ("hash -r", "ALLOW"),
+            ("zsh-5.9 -c 'gh pr merge 5'", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],
     *[
         Case(agent, "tool_call", "Bash", {"command": form}, "ALLOW")
         for agent, command in (("polly/agents/claude_code", "git branch --list 'feat/*'"),)
+        for form in (command, ["bash", "-lc", command])
+    ],
+    *[
+        Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, "DENY")
+        for command in ("cat $HOME/.bash*", "cat ~omnigent/.bash?c", "cat //home/omnigent/.bashrc", "cat ~/.bash{1..1000}rc")
         for form in (command, ["bash", "-lc", command])
     ],
     *[
@@ -344,7 +375,7 @@ CASES: list[Case] = [
             ("parallel :::: /tmp/cmds", "DENY"),
             ("xargs", "DENY"),
             ("ls | xargs wc -l", "ALLOW"),
-            ("echo a | parallel echo {}", "ALLOW"),
+            ("echo a | parallel echo {}", "DENY"),
             ('bash -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""', "DENY"),
             ('gh api graphql -f "$K"="$(cat /tmp/q)"', "DENY"),
             ('gh api graphql "$@"', "DENY"),
@@ -797,6 +828,23 @@ class BundleVerdictTest(unittest.TestCase):
         for case in CASES:
             with self.subTest(case=case):
                 self.assertEqual(verdict(BUNDLES / case.agent, case), case.expected)
+
+    def test_brace_operands_are_not_startup_files(self):
+        for agent, tool in (("polly", "sys_os_shell"), ("polly/agents/claude_code", "Bash"), ("documenter", "Bash")):
+            for command in (
+                "cp {/tmp/a.py,src/a.py}",
+                "install {/tmp/a.py,src/a.py}",
+                "ln -sf {/tmp/a.py,src/a.py}",
+                "cp -t .polly/diffs {/tmp/a.py,src/a.py}",
+                "cp {/tmp/a.md,../other/a.md}",
+                "ls /*",
+                "cat /*/*/*",
+            ):
+                for form in (command, ["bash", "-lc", command]):
+                    case = Case(agent, "tool_call", tool, {"command": form}, "")
+                    with self.subTest(agent=agent, form=form):
+                        reasons = [d.reason or "" for d in results(BUNDLES / agent, case).values()]
+                        self.assertFalse([r for r in reasons if "startup file" in r])
 
     def test_polly_loop_denied_not_asked(self):
         from agent_stack_policies.loop import LOOP_STATE_KEY, _call_hash
