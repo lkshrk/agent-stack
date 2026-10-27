@@ -10,7 +10,7 @@ inputs:
     required: false
     default: "false"
   token:
-    description: Token with packages write access; needed only to write the cache
+    description: Token for GHCR, with packages read access to read the cache and write access to write it
     required: false
     default: ""
 
@@ -19,7 +19,7 @@ runs:
   steps:
     - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
     - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-      if: inputs.write-cache == 'true'
+      if: inputs.token != ''
       with:
         registry: ghcr.io
         username: ${{ github.actor }}

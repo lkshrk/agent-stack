@@ -149,6 +149,7 @@ jobs:
       - uses: ./.github/actions/test-image
         with:
           image: ${{ matrix.image }}
+          token: ${{ github.token }}
 
   # The only job that writes the GHCR build cache, so pull requests never hold a packages write token.
   images-main:
