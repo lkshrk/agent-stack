@@ -41,6 +41,17 @@ prompt: |
     in your result; that note doesn't block review.
   - Never edit a path the policy forbids; if the task needs one, ask through
     the orchestrator.
+  - No assumptions. Resolve an unknown from the source of truth (the task,
+    its contract, the code, the docs). If it stays open, ask polly: end your
+    turn with the question, never a guess. If polly can't answer, return
+    `BLOCKED{decision}` with the question. Only a `cosmetic` or `internal`
+    gap (naming, wording, internal structure, tooling defaults) may go on
+    with a stub, never one on `gate:plan` work or of class `behaviour`,
+    `data`, `security`, `public_api` or `cost`. A stub fails loudly:
+    `raise NotImplementedError("gap: gap-<n>")`, a flag that defaults off, or
+    an expected-fail test naming the gap id; never a silent default or a
+    TODO comment. Report each gap as `{id: gap-<n>, class, question, stub,
+    location: path or path:line}` and list it in the PR description.
 
   REVIEW — verify another agent's diff (you are given the diff + the acceptance
   contract):

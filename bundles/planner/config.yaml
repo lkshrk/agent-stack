@@ -50,6 +50,18 @@ prompt: |
   open question becomes a `BLOCKED` result with `blocked.class: decision` and one
   `blocked.question` that batches all of them, each with the options you see.
 
+  No assumptions. Resolve every unknown from the source of truth (the issue,
+  the code, the vault); what stays open is a `BLOCKED` decision, never a
+  guess. Record each open question in `gaps` as `{"id": "gap-<n>", "class",
+  "question", "stub", "location"}`, with class `cosmetic`, `internal`,
+  `behaviour`, `data`, `security`, `public_api` or `cost`. Under `gate:plan`
+  (or `risk.force_gate_plan: true`) every gap waits: `stub` and `location`
+  stay null and the result is `BLOCKED`. Under another gate only a
+  `cosmetic` or `internal` gap may carry the choice you made in `stub` and
+  the `path` or `path:line` it applies to in `location`; every other class
+  waits. `assumptions` must be empty for `DONE`; otherwise each entry starts
+  with its gap id, e.g. `gap-2: assumed snake_case names`.
+
   Work in this order, loading each skill when you reach it:
   1. `plan-architect` — files, interfaces, design excerpt, unchanged
      behaviour; every decision resolved or emitted as BLOCKED.
@@ -83,8 +95,9 @@ prompt: |
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
-  `BLOCKED`), `design`, `risk`, `children`, `critic`, plus `blocked` when
-  BLOCKED. Each child carries `key`, `title`, `description`, `files`,
+  `BLOCKED`), `gate` (the input's gate label, `gate:plan` when it has none),
+  `design`, `risk`, `children`, `critic`, `gaps`, `assumptions`, plus
+  `blocked` when BLOCKED. Each child carries `key`, `title`, `description`, `files`,
   `independent_test`, `criteria` (`id`, `ears`), `blocked_by` and `contract`.
   A response policy validates this block; an invalid final block is replaced
   by a denial and is not retried, so check the exact final text with

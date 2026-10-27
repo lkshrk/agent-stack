@@ -45,7 +45,8 @@ For every affected passage, check:
   behaviour.
 
 A gap you can only document by guessing at intent becomes an open
-question. Collect them; do not ask.
+question, recorded in `gaps` under the prompt's no-assumptions rule.
+Collect them; do not ask.
 
 ## 5. Edit and verify
 
