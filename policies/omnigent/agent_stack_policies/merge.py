@@ -6,7 +6,7 @@ from ._event import Decision, Event, allow, deny, tool_call, tool_name
 from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
-_MERGE_API = re.compile(r"pulls/\d+/merge(?:$|\?)|/merges(?:$|\?)")
+_MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])")
 _GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
 _MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")

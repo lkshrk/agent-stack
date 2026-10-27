@@ -41,6 +41,21 @@ class NoMergeTest(unittest.TestCase):
         self.assertDenied("gh api -X PUT repos/o/r/pulls/5/merge")
         self.assertDenied("gh api -X POST repos/o/r/merges -f base=main")
 
+    def test_no_merge_gh_api_put_path_suffixes(self):
+        for path in (
+            "repos/o/r/pulls/5/merge#x",
+            "/repos/o/r/pulls/5/merge/",
+            "repos/o/r/pulls/5/merge?x=1",
+            "repos/o/r/merges/",
+            "repos/o/r/merges#x",
+        ):
+            with self.subTest(path=path):
+                self.assertDenied(f"gh api -X PUT {path}")
+                self.assertDenied(f"bash -lc 'gh api -X PUT {path}'")
+                listed = no_merge()(tool_call_event("bash", {"command": ["bash", "-lc", f"gh api -X PUT {path}"]}))
+                self.assertEqual(listed["result"], "DENY")
+        self.assertEqual(run("gh api repos/o/r/pulls/5/mergeable")["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 
