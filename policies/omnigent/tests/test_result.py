@@ -173,7 +173,9 @@ class NoAssumptionsTest(unittest.TestCase):
             "documenter-valid-stub-gap.json": ("documenter", None),
             "planner-invalid-done-assumptions.json": ("planner", "assumptions must be empty for DONE"),
             "security-invalid-done-assumptions.json": ("security", "assumptions must be empty for DONE"),
-            "planner-invalid-gate-plan-stub.json": ("planner", "under gate:plan"),
+            "planner-invalid-stub.json": ("planner", "in a plan"),
+            "security-valid-stub-gap.json": ("security", None),
+            "security-invalid-done-gap.json": ("security", "gaps must be empty for DONE"),
             "security-invalid-waiting-gap.json": ("security", "of class security"),
         }
         for name, (kind, expected) in cases.items():
@@ -190,7 +192,14 @@ class NoAssumptionsTest(unittest.TestCase):
             errors = result.validate_result(kind, {**data, "assumptions": ["x is never null"]})
             self.assertTrue(any("empty for DONE" in e for e in errors), (kind, errors))
             errors = result.validate_result(kind, {**data, "gaps": [stub_gap()], "assumptions": ["gap-1: x"]})
-            self.assertTrue(any("empty for DONE" in e for e in errors), (kind, errors))
+            self.assertTrue(any("assumptions must be empty for DONE" in e for e in errors), (kind, errors))
+
+    def test_done_requires_empty_gaps_for_every_kind(self):
+        for kind, data in self.results().items():
+            self.assertEqual(result.validate_result(kind, {**data, "gaps": []}), [], kind)
+            for gap in (stub_gap(), stub_gap(gap_class="cosmetic"), waiting_gap()):
+                errors = result.validate_result(kind, {**data, "gaps": [gap]})
+                self.assertIn("gaps must be empty for DONE: a gap makes the result DONE_WITH_CONCERNS at best", errors, (kind, gap))
 
     def test_assumptions_must_be_strings(self):
         data = load("security-valid.json")
@@ -199,10 +208,9 @@ class NoAssumptionsTest(unittest.TestCase):
             self.assertIn("assumptions must be a list of non-empty strings", errors, bad)
 
     def test_concerns_assumptions_name_a_gap(self):
-        for kind, data in self.results().items():
+        for kind in ("security", "documenter"):
+            data = self.results()[kind]
             data.update(status="DONE_WITH_CONCERNS", gaps=[stub_gap("gap-1"), stub_gap("gap-12")])
-            if kind == "planner":
-                data["gate"] = "gate:pr"
             for good in (["gap-1: assumed x"], ["gap-12 assumed y", "gap-1"], []):
                 self.assertEqual(result.validate_result(kind, {**data, "assumptions": good}), [], (kind, good))
             for bad in ("assumed x", "gap-2: unknown id", "see gap-1", "gap-1x: no", "gap-120: no", "gap-1-a"):
@@ -250,23 +258,22 @@ class NoAssumptionsTest(unittest.TestCase):
                     errors = result.validate_result(kind, {**blocked, "gaps": [{**gap, field: "src/a.py"}]})
                     self.assertTrue(any(f"{field} must be null" in e for e in errors), (kind, gap_class, field))
 
-    def test_gate_plan_never_stubs(self):
+    def test_planner_never_stubs(self):
         data = load("planner-valid.json")
-        data.update(status="DONE_WITH_CONCERNS", gaps=[stub_gap(gap_class="cosmetic")], assumptions=["gap-1: x"])
-        for gate in ("gate:split", "gate:pr"):
-            self.assertEqual(result.validate_result("planner", {**data, "gate": gate}), [], gate)
-        forced = {**data, "gate": "gate:split", "risk": {"class": "high", "force_gate_plan": True}}
-        for plan in ({**data, "gate": "gate:plan"}, forced):
-            errors = result.validate_result("planner", plan)
-            self.assertTrue(any("under gate:plan" in e for e in errors), errors)
-            self.assertTrue(any("must be BLOCKED" in e for e in errors), errors)
-        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION, "gaps": [waiting_gap(gap_class="cosmetic")]}
-        self.assertEqual(result.validate_result("planner", {**blocked, "gate": "gate:plan"}), [])
-        self.assertEqual(result.validate_result("planner", blocked), [])
-        errors = result.validate_result("planner", {**blocked, "gaps": [stub_gap(gap_class="cosmetic")]})
-        self.assertTrue(any("under gate:plan" in e for e in errors), errors)
-        stubbed = {**blocked, "gate": "gate:split", "gaps": [stub_gap(gap_class="cosmetic")]}
-        self.assertEqual(result.validate_result("planner", stubbed), [])
+        data.update(status="DONE_WITH_CONCERNS", assumptions=["gap-1: x"])
+        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION}
+        for gate in (*result.GATES, None):
+            for gap_class in result.STUB_CLASSES:
+                stubbed = {**data, "gate": gate, "gaps": [stub_gap(gap_class=gap_class)]}
+                errors = result.validate_result("planner", stubbed)
+                self.assertTrue(any("in a plan waits for the owner" in e for e in errors), (gate, errors))
+                self.assertTrue(any("must be BLOCKED" in e for e in errors), (gate, errors))
+                bare = {**data, "gate": gate, "gaps": [waiting_gap(gap_class=gap_class)]}
+                self.assertTrue(any("must be BLOCKED" in e for e in result.validate_result("planner", bare)), gate)
+                asked = {**blocked, "gate": gate, "gaps": [waiting_gap(gap_class=gap_class)]}
+                self.assertEqual(result.validate_result("planner", asked), [], (gate, gap_class))
+                errors = result.validate_result("planner", {**asked, "gaps": [stub_gap(gap_class=gap_class)]})
+                self.assertTrue(any("in a plan waits for the owner" in e for e in errors), (gate, errors))
         self.assertTrue(result.validate_result("planner", {**blocked, "gate": "gate:merge"}))
         self.assertEqual(result.validate_result("security", {**blocked, "gaps": [stub_gap(gap_class="cosmetic")]}), [])
 

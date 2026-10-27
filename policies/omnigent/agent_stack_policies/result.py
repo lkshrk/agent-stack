@@ -267,21 +267,19 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
         errors.append("pr is required in delta mode with changed files")
 
 
-def _check_gate(result: dict, errors: list[str]) -> bool:
+def _check_gate(result: dict, errors: list[str]) -> None:
     gate = result.get("gate")
-    if gate is None and result.get("status") == "BLOCKED":
-        gate = "gate:plan"
-    elif gate not in GATES:
+    if (gate is not None or result.get("status") != "BLOCKED") and gate not in GATES:
         errors.append(f"gate must be one of {'|'.join(GATES)}, echoing the issue's gate label")
-    risk = result.get("risk")
-    return gate == "gate:plan" or (isinstance(risk, dict) and risk.get("force_gate_plan") is True)
 
 
-def _check_gaps(result: dict, plan_gate: bool, errors: list[str]) -> set[str]:
+def _check_gaps(result: dict, may_stub: bool, errors: list[str]) -> set[str]:
     gaps = result.get("gaps", [])
     if not isinstance(gaps, list):
         errors.append("gaps must be a list")
         return set()
+    if gaps and result.get("status") == "DONE":
+        errors.append("gaps must be empty for DONE: a gap makes the result DONE_WITH_CONCERNS at best")
     ids: set[str] = set()
     waiting: list[str] = []
     for i, gap in enumerate(gaps):
@@ -302,7 +300,7 @@ def _check_gaps(result: dict, plan_gate: bool, errors: list[str]) -> set[str]:
         gap_class = gap.get("class")
         if gap_class not in GAP_CLASSES:
             errors.append(f"{where}.class must be one of {'|'.join(GAP_CLASSES)}")
-        elif gap_class in STUB_CLASSES and not plan_gate:
+        elif gap_class in STUB_CLASSES and may_stub:
             if not _text(gap.get("stub")):
                 errors.append(f"{where}.stub must say what was stubbed")
             location = gap.get("location")
@@ -310,7 +308,7 @@ def _check_gaps(result: dict, plan_gate: bool, errors: list[str]) -> set[str]:
                 errors.append(f"{where}.location must be path or path:line")
         else:
             waiting.append(where)
-            reason = "under gate:plan" if plan_gate else f"of class {gap_class}"
+            reason = f"of class {gap_class}" if may_stub else "in a plan"
             for field in ("stub", "location"):
                 if gap.get(field) is not None:
                     errors.append(f"{where}.{field} must be null: a gap {reason} waits for the owner and is never stubbed")
@@ -349,8 +347,9 @@ def validate_result(kind: str, result: dict) -> list[str]:
     if status not in STATUSES:
         errors.append(f"status must be one of {'|'.join(STATUSES)}")
         return errors
-    plan_gate = _check_gate(result, errors) if kind == "planner" else False
-    _check_assumptions(result, _check_gaps(result, plan_gate, errors), errors)
+    if kind == "planner":
+        _check_gate(result, errors)
+    _check_assumptions(result, _check_gaps(result, kind != "planner", errors), errors)
     if status == "BLOCKED":
         blocked = result.get("blocked")
         blocked = blocked if isinstance(blocked, dict) else {}

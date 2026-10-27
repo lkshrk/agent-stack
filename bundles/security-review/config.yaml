@@ -54,7 +54,8 @@ prompt: |
   `public_api` or `cost`. A `cosmetic` or `internal` gap may carry the
   choice you made in `stub` and its `path` or `path:line` in `location`;
   every other class leaves both null and makes the result `BLOCKED` with
-  `blocked.class: decision`. `assumptions` must be empty for `DONE`;
+  `blocked.class: decision`. Any gap rules out `DONE`; a stubbed one allows
+  at best `DONE_WITH_CONCERNS`. `assumptions` must be empty for `DONE`;
   otherwise each entry starts with its gap id, e.g. `gap-1: assumed the
   route is internal`.
 

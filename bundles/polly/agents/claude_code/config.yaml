@@ -51,7 +51,8 @@ prompt: |
     `raise NotImplementedError("gap: gap-<n>")`, a flag that defaults off, or
     an expected-fail test naming the gap id; never a silent default or a
     TODO comment. Report each gap as `{id: gap-<n>, class, question, stub,
-    location: path or path:line}` and list it in the PR description.
+    location: path or path:line}` in your result and the PR description; a
+    gap means the task is not plainly done.
 
   REVIEW — verify another agent's diff (you are given the diff + the acceptance
   contract):

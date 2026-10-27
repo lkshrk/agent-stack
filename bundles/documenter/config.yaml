@@ -69,9 +69,10 @@ prompt: |
   `data`, `security`, `public_api` or `cost`. A `cosmetic` or `internal` gap
   may carry the wording you chose in `stub` and its `path` or `path:line` in
   `location`; every other class leaves both null and makes the result
-  `BLOCKED` with `blocked.class: decision`. `assumptions` must be empty for
-  `DONE`; otherwise each entry starts with its gap id, e.g. `gap-1: used the
-  code's term 'queue worker'`. These gaps are not the audit's `doc_gaps`.
+  `BLOCKED` with `blocked.class: decision`. Any gap rules out `DONE`; a
+  stubbed one allows at best `DONE_WITH_CONCERNS`. `assumptions` must be
+  empty for `DONE`; otherwise each entry starts with its gap id, e.g.
+  `gap-1: used the code's term 'queue worker'`. These gaps are not the audit's `doc_gaps`.
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or

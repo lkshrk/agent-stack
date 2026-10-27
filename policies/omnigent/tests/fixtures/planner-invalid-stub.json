@@ -1,6 +1,6 @@
 {
   "status": "DONE_WITH_CONCERNS",
-  "gate": "gate:plan",
+  "gate": "gate:split",
   "design": "Split into three slices.",
   "risk": {
     "class": "medium",

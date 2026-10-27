@@ -23,8 +23,8 @@ design, and never send back a corrected plan.
    of the form `<child-key>-<n>` and in EARS form, `blocked_by` keys known
    and acyclic, parallel children with disjoint files, `critic.rounds` 1 to
    3, every child criterion in `critic.coverage`, no placeholders
-   anywhere, `gap-<n>` gaps that never stub under `gate:plan`, and empty
-   `assumptions` for `DONE`.
+   anywhere, no gaps unless the result is `BLOCKED` (the planner never stubs),
+   and empty `assumptions` for `DONE`.
 2. **Coverage map.** Build your own map from the root criteria in the
    message and the draft's children: one entry per child criterion,
    `{"criterion": "<child-key>-<n>", "child": "<key>", "root": "<root
@@ -42,7 +42,7 @@ design, and never send back a corrected plan.
    migration, auth or security, infra or deploy changes, a public API change
    or work across more than one repository.
 5. **No assumptions.** A choice the design makes without evidence from the
-   issue, code or vault fails unless it is a gap in `gaps`.
+   issue, code or vault fails; it belongs in `gaps` of a `BLOCKED` result.
 
 ## Findings
 

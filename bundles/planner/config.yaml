@@ -52,15 +52,13 @@ prompt: |
 
   No assumptions. Resolve every unknown from the source of truth (the issue,
   the code, the vault); what stays open is a `BLOCKED` decision, never a
-  guess. Record each open question in `gaps` as `{"id": "gap-<n>", "class",
-  "question", "stub", "location"}`, with class `cosmetic`, `internal`,
-  `behaviour`, `data`, `security`, `public_api` or `cost`. Under `gate:plan`
-  (or `risk.force_gate_plan: true`) every gap waits: `stub` and `location`
-  stay null and the result is `BLOCKED`. Under another gate only a
-  `cosmetic` or `internal` gap may carry the choice you made in `stub` and
-  the `path` or `path:line` it applies to in `location`; every other class
-  waits. `assumptions` must be empty for `DONE`; otherwise each entry starts
-  with its gap id, e.g. `gap-2: assumed snake_case names`.
+  guess. You only ask; you never stub, under any gate. Record each open
+  question in `gaps` as `{"id": "gap-<n>", "class", "question"}`, with class
+  `cosmetic`, `internal`, `behaviour`, `data`, `security`, `public_api` or
+  `cost`, and leave `stub` and `location` out. Any gap makes the result
+  `BLOCKED` with `blocked.class: decision`. `assumptions` must be empty for
+  `DONE`; otherwise each entry starts with its gap id, e.g. `gap-2: assumed
+  snake_case names`.
 
   Work in this order, loading each skill when you reach it:
   1. `plan-architect` — files, interfaces, design excerpt, unchanged
