@@ -391,3 +391,13 @@ class HeredocInQuotedSubstitutionTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW", run(command).get("reason"))
+
+
+class CommentAfterSubstitutionTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in ("echo $(true)#; git push origin main", "echo $((1))#; git push origin main", "(true)# c\ngit push origin main"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_real_comment_allowed(self):
+        self.assertEqual(run("(make test)# run tests\ngit push -u origin feat/x")["result"], "ALLOW")

@@ -176,6 +176,8 @@ def _lines(command: str) -> list[str]:
     """Logical lines: newlines inside quotes and after a backslash join, `#` comments drop, and heredoc bodies are text, not commands."""
     lines, current, quote, escaped, i = [], [], None, False, 0
     frames: list[list] = []
+    parens: list[bool] = []
+    closed_substitution = False
     while i < len(command):
         if frames:
             i = _substitution_char(command, i, current, frames)
@@ -201,10 +203,19 @@ def _lines(command: str) -> list[str]:
             quote = "$'"
             i += 2
             continue
-        elif ch == "#" and (not current or current[-1] in " \t;&|()"):
+        elif ch == "#" and (not current or current[-1] in " \t;&|(" or (current[-1] == ")" and not closed_substitution)):
             end = command.find("\n", i)
             i = len(command) if end < 0 else end
             continue
+        elif command.startswith("$(", i):
+            parens.append(True)
+            current.append("$(")
+            i += 2
+            continue
+        elif ch == "(":
+            parens.append(False)
+        elif ch == ")":
+            closed_substitution = parens.pop() if parens else False
         elif ch in "'\"":
             quote = ch
         elif ch == "\n":

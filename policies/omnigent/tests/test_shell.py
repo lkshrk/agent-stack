@@ -245,3 +245,13 @@ class HeredocInQuotedSubstitutionTest(unittest.TestCase):
         statements = parse("git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore.\nEOF\n)\"")
         self.assertEqual(len(statements), 1)
         self.assertEqual(statements[0][:3], ["git", "commit", "-m"])
+
+
+class CommentAfterSubstitutionTest(unittest.TestCase):
+    def test_hash_after_substitution_continues_the_word(self):
+        self.assertEqual(parse("echo $(true)#; git push origin main")[-1], ["git", "push", "origin", "main"])
+        self.assertEqual(parse("echo $((1))#x; claude -p hi")[-1], ["claude", "-p", "hi"])
+
+    def test_hash_after_subshell_is_a_comment(self):
+        self.assertEqual(parse("(true)# c; git push origin main"), [["(", "true", ")"]])
+        self.assertEqual(parse("(true)# c\ngit push origin main")[-1], ["git", "push", "origin", "main"])

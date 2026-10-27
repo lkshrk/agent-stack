@@ -553,6 +553,9 @@ CASES += [
         "cat <<E\nit's\nE\nclaude -p hi #'",
         "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
         "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\nclaude -p hi\n#\"",
+        "echo $(true)#; git push origin main",
+        "echo $(true)#x; claude -p hi",
+        "(true)# c\ngit push origin main",
     )
 ]
 CASES += [

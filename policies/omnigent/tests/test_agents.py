@@ -260,3 +260,10 @@ class HeredocInQuotedSubstitutionTest(unittest.TestCase):
     def test_pr_body_allowed(self):
         command = "gh pr create --body \"$(cat <<'EOF'\nRun claude -p \"x\" later\nEOF\n)\""
         self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class CommentAfterSubstitutionTest(unittest.TestCase):
+    def test_hidden_agent_denied(self):
+        for command in ("echo $(true)#x; claude -p hi", "(true)# c\nclaude -p hi"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
