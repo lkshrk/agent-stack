@@ -1,6 +1,7 @@
 import os
 import posixpath
 import re
+from fnmatch import fnmatchcase
 from collections.abc import Callable
 from functools import lru_cache
 
@@ -206,12 +207,32 @@ def path_guard(
     deny: list[str] | None = None,
     allow_only: list[str] | None = None,
     exempt: list[str] | None = None,
+    startup_files: list[str] | None = None,
+    startup_home: str | None = None,
 ) -> Callable[[Event], Decision | None]:
     forbidden = forbidden_matcher(deny, exempt)
     has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
+    startup = frozenset(startup_files or [])
+    home = startup_home.rstrip("/") if startup_home else None
+
+    def startup_path(path: str) -> bool:
+        if not startup or not home:
+            return False
+        expanded = re.sub(r"^(?:~|~omnigent|\$HOME|\$\{HOME\})(?=/|$)", home, path)
+        normal = posixpath.normpath(expanded)
+        if not normal.startswith("/") and "/" not in normal:
+            normal = f"{home}/{normal}"
+        if normal in {f"{home}/{name}" for name in startup}:
+            return True
+        if any(ch in path for ch in "*?[") or "{" in path:
+            pattern = re.sub(r"\{[^}]*\}", "*", posixpath.basename(expanded))
+            return any(fnmatchcase(name, pattern) for name in startup)
+        return False
 
     def check_path(path: str) -> Decision | None:
+        if startup_path(path):
+            return _deny(f"startup file {path} is not writable")
         if escapes(path):
             return _deny(f"path {path} tries to escape with '..'")
         if forbidden(path):
@@ -242,20 +263,23 @@ def path_guard(
     def scratch(path: str) -> bool:
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
-    def check_scope(command: str, scope: list[str]) -> Decision | None:
+    def check_scope(command: str, scope: list[str] | None) -> Decision | None:
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for literal in (False, True):
             for tokens in walk(command, literal_operators=literal):
                 targets += shell_write_targets(tokens)
         for raw in targets:
+            if startup_path(raw):
+                return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
-            if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
-                return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
-            if "$" in raw or _EXPANDING_TARGET.search(raw):
-                return _deny(f"shell write to {raw} needs variable, brace or backtick expansion; write the path literally")
-            if not scratch(target) and not matches_allowed(target, scope):
-                return _deny(f"shell write to {target} is outside allowed paths")
+            if scope is not None:
+                if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
+                    return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
+                if "$" in raw or _EXPANDING_TARGET.search(raw):
+                    return _deny(f"shell write to {raw} needs variable, brace or backtick expansion; write the path literally")
+                if not scratch(target) and not matches_allowed(target, scope):
+                    return _deny(f"shell write to {target} is outside allowed paths")
         return None
 
     def check_shell(arguments: dict) -> Decision:
@@ -273,8 +297,8 @@ def path_guard(
         reason = shell_shape_problem(statements)
         if reason:
             return _deny(reason)
-        if allowed_only is not None:
-            decision = check_scope(command, list(allowed_only))
+        if allowed_only is not None or startup:
+            decision = check_scope(command, list(allowed_only) if allowed_only is not None else None)
             if decision:
                 return decision
         for tokens in statements:

@@ -30,6 +30,8 @@ POLICY_REGISTRY: list[dict] = [
                 "deny": {"type": "array", "items": {"type": "string"}},
                 "allow_only": {"type": "array", "items": {"type": "string"}},
                 "exempt": {"type": "array", "items": {"type": "string"}},
+                "startup_files": {"type": "array", "items": {"type": "string"}},
+                "startup_home": {"type": "string"},
             },
             "additionalProperties": False,
         },

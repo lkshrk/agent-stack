@@ -624,6 +624,32 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
 
+    def test_startup_files(self):
+        startup = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".inputrc"]
+        guard = path_guard(startup_files=startup, startup_home="/home/omnigent")
+        for path in (
+            *[f"/home/omnigent/{name}" for name in startup],
+            *[f"~/{name}" for name in startup],
+            *[f"~omnigent/{name}" for name in startup],
+            *["$HOME/" + name for name in startup],
+            *["${HOME}/" + name for name in startup],
+            "/home/omnigent/./.bashrc",
+            "/home/omnigent/x/../.bashrc",
+            "~/.bash{rc,}",
+            "/home/omnigent/.bash{rc,}",
+            "~/.bash?c",
+            ".bashrc",
+            "./.bashrc",
+            "./x/../.bashrc",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
+                self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
+        for path in ("dotfiles/.bashrc", "/home/omnigent/work/dotfiles/zsh/.zshrc", "config/.profile", "~other/.bashrc", "/tmp/.bashrc"):
+            with self.subTest(path=path):
+                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
+                self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "ALLOW")
+
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
