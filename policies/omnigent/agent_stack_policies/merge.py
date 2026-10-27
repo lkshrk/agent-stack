@@ -6,7 +6,8 @@ from ._event import Decision, Event, allow, deny, tool_call, tool_name
 from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
-_MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])")
+_MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])", re.IGNORECASE)
+_MERGE_PATH = re.compile(r"/merges?(?:$|[/?#])", re.IGNORECASE)
 _GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
 _MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")
@@ -45,7 +46,7 @@ def _has_substitution(tokens: list[str]) -> bool:
 
 
 def _mentions_merge_or_push(tokens: list[str]) -> bool:
-    return any(t in ("merge", "push") or t.endswith(("/merge", "/merges")) for t in tokens)
+    return any(t in ("merge", "push") or _MERGE_PATH.search(t) for t in tokens)
 
 
 def _vcs_runs(tokens: list[str]) -> list[list[str]]:

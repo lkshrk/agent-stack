@@ -500,6 +500,8 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "echo x > .polly/diffs/../../src/a.py"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh api -X PUT repos/o/r/pulls/5/merge#x"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "PUT", "/repos/o/r/pulls/5/merge/"]}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "gh api -X PUT repos/o/r/PULLS/5/MERGE"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "POST", "repos/o/r/MERGES", "-f", "base=main"]}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
 
