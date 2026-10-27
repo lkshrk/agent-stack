@@ -26,7 +26,7 @@ _EARS = re.compile(r"^WHEN .+ THE SYSTEM SHALL .+")
 _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
 _GAP_ID = re.compile(r"gap-[1-9][0-9]*")
 _GAP_REF = re.compile(r"(gap-[1-9][0-9]*)(?![\w-])")
-_LOCATION = re.compile(r"[^\s:]+(:[1-9][0-9]*)?")
+_LOCATION = re.compile(r"[^\s:]+:[1-9][0-9]*")
 
 
 def extract_result(text: str) -> dict | None:
@@ -302,11 +302,14 @@ def _check_gaps(result: dict, kind: str, may_stub: bool, errors: list[str]) -> s
         if gap_class not in GAP_CLASSES:
             errors.append(f"{where}.class must be one of {'|'.join(GAP_CLASSES)}")
         elif gap_class in STUB_CLASSES and may_stub:
-            if not _text(gap.get("stub")):
+            stub = gap.get("stub")
+            if not _text(stub):
                 errors.append(f"{where}.stub must say what was stubbed")
+            elif where in ids and not re.search(rf"(?<![\w-]){re.escape(where)}(?![\w-])", stub):
+                errors.append(f"{where}.stub must quote the visible note naming {where}")
             location = gap.get("location")
             if not isinstance(location, str) or not _LOCATION.fullmatch(location):
-                errors.append(f"{where}.location must be path or path:line")
+                errors.append(f"{where}.location must be path:line")
         else:
             waiting.append(where)
             reason = f"of class {gap_class}" if may_stub or gap_class not in STUB_CLASSES else f"in {NO_STUB[kind]}"
@@ -339,8 +342,10 @@ _CHECKS = {"planner": _check_planner, "security": _check_security, "documenter":
 
 
 def validate_result(kind: str, result: dict) -> list[str]:
-    if kind not in _CHECKS:
+    if not isinstance(kind, str) or kind not in _CHECKS:
         return [f"unknown kind {kind!r}"]
+    if not isinstance(result, dict):
+        return ["result must be a JSON object"]
     if _too_deep(result):
         return [f"result nests deeper than {MAX_DEPTH} levels"]
     errors = _placeholders(result)

@@ -148,7 +148,8 @@ class PlannerTest(unittest.TestCase):
 
 
 def stub_gap(gid="gap-1", gap_class="internal", location="src/a.py:12"):
-    return {"id": gid, "class": gap_class, "question": "Name it x or y?", "stub": "Named it x.", "location": location}
+    note = f"Open question ({gid}): x or y." if isinstance(gid, str) else "Open question."
+    return {"id": gid, "class": gap_class, "question": "Name it x or y?", "stub": note, "location": location}
 
 
 def waiting_gap(gid="gap-1", gap_class="behaviour"):
@@ -225,16 +226,23 @@ class NoAssumptionsTest(unittest.TestCase):
 
     def test_stub_gap_needs_stub_and_location(self):
         data = {**load("documenter-valid.json"), "status": "DONE_WITH_CONCERNS"}
-        for location in ("src/a.py", "src/a.py:1", "docs/orders.md:120", "Makefile"):
+        for location in ("src/a.py:1", "docs/orders.md:120", "Makefile:3"):
             gap = stub_gap(location=location)
             self.assertEqual(result.validate_result("documenter", {**data, "gaps": [gap]}), [], location)
-        for location in (None, "", "src/a.py:0", "src/a.py:x", "src/a.py:", "a b.py", ":12", 12, "a:1:2"):
+        bad = (None, "", "src/a.py", "Makefile", "src/a.py:0", "src/a.py:x", "src/a.py:", "a b.py:1", ":12", 12, "a:1:2")
+        for location in bad:
             errors = result.validate_result("documenter", {**data, "gaps": [stub_gap(location=location)]})
-            self.assertTrue(any("location must be path or path:line" in e for e in errors), (location, errors))
+            self.assertTrue(any("location must be path:line" in e for e in errors), (location, errors))
         for stub in (None, "", " ", 1):
             gap = {**stub_gap(), "stub": stub}
             errors = result.validate_result("documenter", {**data, "gaps": [gap]})
             self.assertTrue(any("stub must say what was stubbed" in e for e in errors), (stub, errors))
+        for stub in ("Used the term x.", "Open question (gap-12): x", "Open question (gap-1x).", "see xgap-1", "gap-1-b"):
+            gap = {**stub_gap(), "stub": stub}
+            errors = result.validate_result("documenter", {**data, "gaps": [gap]})
+            self.assertIn("gap-1.stub must quote the visible note naming gap-1", errors, stub)
+        for stub in ("gap-1", "Note gap-1: x", "(gap-1)"):
+            self.assertEqual(result.validate_result("documenter", {**data, "gaps": [{**stub_gap(), "stub": stub}]}), [], stub)
         for gap_class in result.STUB_CLASSES:
             gap = stub_gap(gap_class=gap_class)
             self.assertEqual(result.validate_result("documenter", {**data, "gaps": [gap]}), [], gap_class)
@@ -423,6 +431,17 @@ class SecurityDocumenterTest(unittest.TestCase):
     def test_documenter_legacy_audit_gaps_rejected(self):
         errors = result.validate_result("documenter", load("documenter-invalid-legacy-gaps.json"))
         self.assertTrue(any(e.startswith("gaps[0].id") for e in errors), errors)
+
+
+class NonObjectTest(unittest.TestCase):
+    def test_validate_result_never_raises_on_junk(self):
+        junk = [None, 0, 1.5, True, "s", [], [1], ({"status": "DONE"},), b"x", object()]
+        for kind in result.KINDS:
+            for value in junk:
+                self.assertEqual(result.validate_result(kind, value), ["result must be a JSON object"], (kind, value))
+        for kind in (None, 1, ["planner"], {"a": 1}, "coder"):
+            self.assertEqual(len(result.validate_result(kind, {"status": "DONE"})), 1, kind)
+            self.assertIn("unknown kind", result.validate_result(kind, {"status": "DONE"})[0])
 
 
 class ContractTest(unittest.TestCase):
