@@ -46,12 +46,19 @@ check "home dotfiles are unreadable" "$(sandbox "cat $HOME/.gitconfig >/dev/null
 check "tool binaries run" "$(sandbox 'gitleaks version >/dev/null && uv --version >/dev/null && echo ok')" ok
 check "secret env vars are dropped" "$(sandbox 'env | grep -E "TOKEN|_KEY|SECRET|LITELLM_|GH_" || echo none')" none
 check "other env vars are kept" "$(sandbox 'echo $KEEP_ME')" kept
-secret=$(find /agent-secrets -type f -readable 2>/dev/null | head -1)
-if [[ -n $secret ]]; then
-  check "/agent-secrets is unreadable" "$(sandbox "cat $secret >/dev/null 2>&1; echo \$?")" 1
+if [[ -r /agent-secrets/github/review ]]; then
+  check "the review token is readable" "$(sandbox 'cat /agent-secrets/github/review >/dev/null && echo ok')" ok
+  check "nothing else under /agent-secrets is listed" "$(sandbox 'ls /agent-secrets/github 2>&1 | tr "\n" " "')" "review "
 else
-  echo "SKIP no readable file under /agent-secrets to probe"
+  echo "SKIP no /agent-secrets/github/review to probe"
 fi
+for key in code knowledge; do
+  if [[ -r /agent-secrets/github/$key ]]; then
+    check "the $key token is unreadable" "$(sandbox "cat /agent-secrets/github/$key >/dev/null 2>&1; echo \$?")" 1
+  else
+    echo "SKIP no /agent-secrets/github/$key to probe"
+  fi
+done
 check "the network is reachable" "$(sandbox 'curl -sS -o /dev/null -w %{http_code} https://pypi.org/simple/')" 200
 
 exit "$fail"

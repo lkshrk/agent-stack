@@ -22,7 +22,8 @@ class SecurityReviewProfileTest(unittest.TestCase):
         filesystem = self.profile["permissions"]["security-review"]["filesystem"]
         self.assertNotIn(":root", filesystem)
         self.assertEqual({path for path, access in filesystem.items() if access == "write"}, {"/tmp"})
-        self.assertEqual(filesystem["/agent-secrets"], "none")
+        secrets = {path: access for path, access in filesystem.items() if path.startswith("/agent-secrets")}
+        self.assertEqual(secrets, {"/agent-secrets/github/review": "read"})
         self.assertEqual(filesystem[":workspace_roots"], "read")
         readable = {path for path, access in filesystem.items() if access == "read"}
         self.assertFalse({p for p in readable if p.startswith(("/home", "/sandbox", "/root", "~"))})

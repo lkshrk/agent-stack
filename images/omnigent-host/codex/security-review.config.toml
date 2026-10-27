@@ -5,7 +5,7 @@ default_permissions = "security-review"
 unified_exec = false
 multi_agent = false
 
-# Reads: the session checkout, system and tool dirs. Home, ~/.config and /agent-secrets stay unreadable.
+# Reads: the session checkout, system and tool dirs, and only the read-only review token under /agent-secrets.
 [permissions.security-review.filesystem]
 ":minimal" = "read"
 ":workspace_roots" = "read"
@@ -15,7 +15,7 @@ multi_agent = false
 "/opt/venv" = "read"
 "/opt/agent/bin" = "read"
 "/tmp" = "write"
-"/agent-secrets" = "none"
+"/agent-secrets/github/review" = "read"
 
 [permissions.security-review.network]
 enabled = true
