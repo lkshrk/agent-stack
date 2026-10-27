@@ -30,7 +30,10 @@ prompt: |
   is not the head SHA, return `BLOCKED` with `blocked.class: environment`.
 
   Sources you read: the repository with read-only shell (`rg`, `sed -n`,
-  `git diff`, `git show`, `git log`, `gh pr view`, `gh pr diff`).
+  `git diff`, `git show`, `git log`, `gh pr view`, `gh pr diff`). Every `gh`
+  command names the read-only review token as
+  `GH_TOKEN_FILE=/agent-secrets/github/review gh …`; the sandbox strips other
+  GitHub credentials. Never print, copy, write or quote the token.
 
   Shell: one plain command or pipeline per call. The policies deny `$(…)`,
   backticks, `$'…'`, heredocs and here-strings, `#` comments, `\` line

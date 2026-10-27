@@ -11,8 +11,11 @@ anything, and never comment on or approve the pull request.
 ## 1. Scope
 
 - PR URL `https://github.com/<owner>/<repo>/pull/<n>`: run
-  `gh pr view <n> --repo <owner>/<repo> --json files,baseRefOid,headRefOid`
-  and `gh pr diff <n> --repo <owner>/<repo>`.
+  `GH_TOKEN_FILE=/agent-secrets/github/review gh pr view <n> --repo <owner>/<repo> --json files,baseRefOid,headRefOid`
+  and `GH_TOKEN_FILE=/agent-secrets/github/review gh pr diff <n> --repo <owner>/<repo>`.
+  `gh` authenticates only with the read-only review token, named per command
+  this way; the `gh` wrapper reads the file itself. Never print, copy, write
+  or quote the token, and never `cat` that file.
 - Saved diff with base and head SHAs: read the diff file and run
   `git diff --name-only <base> <head>`.
 - The session starts in a checkout of the head SHA; you never check

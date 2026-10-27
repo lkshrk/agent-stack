@@ -170,6 +170,7 @@ def infra_plan() -> dict:
 
 
 DISPATCH = {"agent": "claude_code", "title": "fix-x", "args": {"purpose": "implement", "input": "x"}}
+REVIEW_TOKEN = "GH_TOKEN_FILE=/agent-secrets/github/review"
 CRITIC = "planner/agents/critic"
 CRITIC_SEND = {"agent": "critic", "title": "plan-critic", "args": {"input": "Round 1. Root criteria ROU-12-1. Draft: ..."}}
 WAKE = "[System: sub-agent critic finished; call sys_read_inbox]"
@@ -297,6 +298,9 @@ CASES: list[Case] = [
     Case("security-review", "tool_call", "Bash", {"command": "gh pr comment 3 --body x"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "git push origin feat/x"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "gitleaks detect --no-git --source ."}, "ALLOW"),
+    Case("security-review", "tool_call", "Bash", {"command": "GH_TOKEN_FILE=/agent-secrets/github/review gh pr view 3 --repo o/r"}, "ALLOW"),
+    Case("security-review", "tool_call", "Bash", {"command": "GH_TOKEN_FILE=/agent-secrets/github/review gh pr review 3 --approve"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": 'GH_TOKEN="$(cat /agent-secrets/github/review)" gh pr diff 3 --repo o/r'}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "rg -n subprocess src"}, "ALLOW"),
     Case("security-review", "tool_call", "mcp__codebase-memory-mcp__delete_project", {"project": "x"}, "DENY"),
     Case("security-review", "tool_call", "mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
@@ -864,9 +868,9 @@ class BundleVerdictTest(unittest.TestCase):
     def test_security_review_normal_run_allowed(self):
         response = "Security review of #3.\n```json\n" + (FIXTURES / "security-valid.json").read_text() + "\n```"
         run = [
-            ("Bash", {"command": "gh pr view 3 --repo routivo/routivo-monorepo --json files,baseRefOid,headRefOid"}),
-            ("Bash", {"command": "gh pr diff 3 --repo routivo/routivo-monorepo"}),
-            ("Bash", {"command": "gh pr diff 3"}),
+            ("Bash", {"command": f"{REVIEW_TOKEN} gh pr view 3 --repo routivo/routivo-monorepo --json files,baseRefOid,headRefOid"}),
+            ("Bash", {"command": f"{REVIEW_TOKEN} gh pr diff 3 --repo routivo/routivo-monorepo"}),
+            ("shell", {"command": ["bash", "-lc", f"{REVIEW_TOKEN} gh pr diff 3 --repo routivo/routivo-monorepo"]}),
             ("Bash", {"command": "git rev-parse HEAD"}),
             ("Bash", {"command": "git diff --name-only abc123 def456"}),
             ("Bash", {"command": "gitleaks detect --no-git --redact --no-banner --source src/a.py"}),
