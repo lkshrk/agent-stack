@@ -327,6 +327,10 @@ CASES: list[Case] = [
             ("capsh -- -c 'gh pr merge 5'", "DENY"),
             ("runuser -l omnigent -c 'gh pr merge 5'", "DENY"),
             ("sg omnigent -c 'gh pr merge 5'", "DENY"),
+            ("echo 'gh pr merge 5' | unshare -r", "DENY"),
+            ("echo 'gh pr merge 5' | chroot /", "DENY"),
+            ("echo 'gh pr merge 5' | nsenter -t 1", "DENY"),
+            ("setpriv --reuid=1000 bash -c 'gh pr merge 5'", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

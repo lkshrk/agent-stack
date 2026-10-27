@@ -428,8 +428,17 @@ class NoMergeTest(unittest.TestCase):
             "runuser -u omnigent -- ls",
             "sg omnigent -c 'gh pr merge 5'",
             "sg omnigent 'gh pr merge 5'",
+            "setpriv --reuid=1000 gh pr merge 5",
+            "echo 'gh pr merge 5' | setpriv bash",
+            "unshare -r bash -c 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | unshare -r",
+            "nsenter -t 1 -- gh pr merge 5",
+            "echo 'gh pr merge 5' | nsenter -t 1",
+            "chroot / bash -c 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | chroot /",
         ):
-            name = command.split()[1 if command.startswith("sudo") else 0].rsplit("/", 1)[-1]
+            words = command.split("| ")[-1].split()
+            name = words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1]
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     decision = run(form)
