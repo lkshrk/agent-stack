@@ -103,6 +103,28 @@ class DocsVcsTest(unittest.TestCase):
         ):
             self.assertDenied(command, "git add")
 
+    def test_git_add_relative_paths_anchored_at_root(self):
+        for command in (
+            "git add backend/app/docs/b.txt",
+            "git add src/docs/img/a.png",
+            "git add x/CHANGELOG",
+            "git add docs/a.md backend/docs/LICENSE",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = docs_vcs(allow_paths=ALLOW_PATHS, deny=DENY, exempt=EXEMPT)(tool_call_event("sys_os_shell", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+        for command in (
+            "git add docs/b.txt",
+            "git add ./docs/img/a.png",
+            "git add backend/README",
+            "git add backend/adr/0001-x.md",
+            "git add a/b/notes.md",
+            "git add /home/omnigent/work/repo/backend/docs/b.txt",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
     def test_git_add_doc_names_and_extensions(self):
         for command in (
             "git add docs/LICENSE",

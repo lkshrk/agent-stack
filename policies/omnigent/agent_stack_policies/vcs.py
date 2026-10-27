@@ -5,7 +5,7 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
 from ._shell import DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
-from .paths import SHELL_TOOLS, escapes, forbidden_matcher, glob_match
+from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
 
 _VCS = frozenset({"git", "gh"})
 _GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "fetch", "merge-base"})
@@ -185,7 +185,7 @@ def docs_vcs(
     def is_doc(path: str) -> bool:
         if escapes(path) or forbidden(path):
             return False
-        return any(glob_match(path, p) for p in allowed)
+        return matches_allowed(path, allowed)
 
     def policy(event: Event) -> Decision | None:
         arguments = tool_call(event, SHELL_TOOLS)
