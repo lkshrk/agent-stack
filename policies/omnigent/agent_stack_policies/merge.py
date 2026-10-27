@@ -7,7 +7,10 @@ from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_comman
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])", re.IGNORECASE)
-_MERGE_PATH = re.compile(r"/merges?(?:$|[/?#])", re.IGNORECASE)
+_MERGE_PATH = re.compile(
+    r"(?:^|/)pulls/[^/\s]+/merge(?:$|[/?#])|(?:^|/)repos/[^/\s]+/[^/\s]+/merges(?:$|[/?#])|/merges?(?:$|[?#])",
+    re.IGNORECASE,
+)
 _GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
 _MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")

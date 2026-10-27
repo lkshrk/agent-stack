@@ -64,6 +64,16 @@ class NoMergeTest(unittest.TestCase):
                 self.assertEqual(listed["result"], "DENY")
         self.assertEqual(run("gh api repos/o/r/PULLS/5/MERGEABLE")["result"], "ALLOW")
 
+    def test_merge_named_paths_with_substitution_allowed(self):
+        for command in (
+            "git diff $(git merge-base main HEAD) -- src/merge/x.py",
+            'rg -n "$(git rev-parse HEAD)" src/Merge/',
+            "git log --oneline $(git merge-base main HEAD)..HEAD -- lib/merges/",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+        self.assertDenied("gh api -X PUT https://api.github.com/repos/$o/r/merges -f base=main")
+
     def test_no_merge_variable_pr_number_with_suffix(self):
         for command in (
             "n=5; gh api -X PUT repos/o/r/pulls/$n/merge#x",
