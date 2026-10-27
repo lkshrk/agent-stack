@@ -16,16 +16,16 @@ sandbox:
       harnesses:
         claude-sdk:
           provider: litellm
-          default_model: claude-opus
-          model_allowlist: [claude-opus, claude-sonnet]
+          default_model: anthropic/claude-opus
+          model_allowlist: [anthropic/claude-opus, anthropic/claude-sonnet]
         claude-native:
           provider: litellm
-          default_model: claude-sonnet
-          model_allowlist: [claude-sonnet, claude-opus]
+          default_model: anthropic/claude-sonnet
+          model_allowlist: [anthropic/claude-sonnet, anthropic/claude-opus]
         codex-native:
           provider: litellm
-          default_model: gpt-sol
-          model_allowlist: [gpt-sol]
+          default_model: openai/gpt-sol
+          model_allowlist: [openai/gpt-sol]
   kubernetes:
     namespace: omnigent-sandboxes
     service_account: omnigent-runner
