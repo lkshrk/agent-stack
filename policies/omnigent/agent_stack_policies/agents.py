@@ -3,12 +3,13 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import Command, ansi_quoted, hidden_command, opaque_name, resolve, shell_command, walk
+from ._shell import OPAQUE_WORD, Command, ansi_quoted, hidden_command, opaque_name, resolve, shell_command, walk
 from .paths import SHELL_TOOLS
 
 _PRINT_AGENTS = frozenset({"claude", "omp"})
 _RUN_SUBCOMMANDS = {"codex": frozenset({"exec", "e", "review"}), "opencode": frozenset({"run"})}
 _PACKAGES = {"claude-code": "claude", "codex": "codex", "pi-coding-agent": "omp", "opencode-ai": "opencode"}
+_AGENTS = frozenset({"claude", "codex", "omp", "opencode"})
 _INFO_FLAGS = {
     "claude": frozenset({"-h", "--help", "-v", "--version"}),
     "codex": frozenset({"-h", "--help", "-V", "--version"}),
@@ -42,6 +43,8 @@ def _check(command: Command, extra: frozenset[str]) -> str | None:
     if not command.argv:
         return None
     name, args = _agent(command.argv)
+    if OPAQUE_WORD in name or (name in _AGENTS and any(OPAQUE_WORD in a for a in args)):
+        return f"a $'…' word with a NUL, \\c or a raw byte is opaque; {_HINT}"
     if name == "apply_patch":
         return "apply_patch through the shell is not allowed; use the file edit tools"
     if name in extra:

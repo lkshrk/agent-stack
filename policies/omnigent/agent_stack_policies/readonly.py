@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import SHELLS, Command, opaque, resolve, shell_command, shell_shape_problem, walk
+from ._shell import SHELLS, Command, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
 from .vcs import _BRANCH_LIST_FLAGS, _GIT_UNSAFE_FLAGS
 
@@ -151,6 +151,8 @@ def _check_args(name: str, args: list[str]) -> str | None:
 def _check(tokens: list[str], allowed: frozenset[str], exact: list[list[str]]) -> str | None:
     if tokens in exact:
         return None
+    if has_opaque_word(tokens):
+        return "a $'…' word with a NUL, \\c or a raw byte is opaque"
     for i, token in enumerate(tokens):
         if ">" in token:
             target = tokens[i + 1] if i + 1 < len(tokens) else ""
@@ -255,6 +257,8 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
         runs_git = any(r.argv and os.path.basename(r.argv[0]) == "git" for r in resolved_all)
         if runs_git and any(assigns(r) for r in resolved_all):
             return deny("setting variables in a command that runs git is not allowed; hand repository changes to the implementer")
+        if any(has_opaque_word(t) for t in statements):
+            return deny("a $'…' word with a NUL, \\c or a raw byte is opaque; write the command literally")
         for resolved in resolved_all:
             argv = resolved.argv
             if argv and "$" in argv[0]:

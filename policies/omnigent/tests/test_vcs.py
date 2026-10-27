@@ -364,3 +364,10 @@ class MidWordQuotingTest(unittest.TestCase):
         for command in ("g$'it' push origin main", "git a$'dd' backend/app/main.py", "g$'h' pr merge 1"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "DENY")
+
+
+class AnsiCOpaqueWordTest(unittest.TestCase):
+    def test_opaque_words_denied(self):
+        for command in ("$'git\\0' push origin main", "git push origin $'HEAD:main\\0'", "git add $'docs/a.md\\0'"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")

@@ -230,3 +230,13 @@ class MidWordQuotingTest(unittest.TestCase):
         for command in ("printf $'a\\tb'", "rg $'\\t' src", "git commit -m $'a\\nb'"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class AnsiCOpaqueWordTest(unittest.TestCase):
+    def test_opaque_words_denied(self):
+        for command in ("$'claude\\0' -p hi", "codex $'exec\\0' x", "claude $'-p\\0' hi", "$'\\cA'claude -p hi"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_opaque_words_elsewhere_allowed(self):
+        self.assertEqual(run("printf $'a\\0b'")["result"], "ALLOW")

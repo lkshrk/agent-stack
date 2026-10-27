@@ -541,6 +541,9 @@ CASES += [
         "git p$'ush' origin main",
         "c$'laude' -p hi",
         "g$'h' pr merge 1",
+        "$'git\\0' push origin main",
+        "git push origin $'main\\0x'",
+        "echo $'\\c'; git push origin main #'",
     )
 ]
 CASES += [

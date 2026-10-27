@@ -334,3 +334,18 @@ class MidWordQuotingTest(unittest.TestCase):
         for command in ("git commit -m $'a\\nb'", "printf $'a\\tb'", "rg $'\\t' src", "git push -u origin feat/x"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class AnsiCOpaqueWordTest(unittest.TestCase):
+    def test_opaque_words_denied(self):
+        for command in (
+            "$'git\\0' push origin main",
+            "git push origin $'main\\0x'",
+            "git $'push\\0' origin main",
+            "echo $'\\c'; git push origin main #'",
+            "echo $'\\c'; git push origin main",
+            "gh pr merge $'1\\0'",
+            "$'gh\\x00' pr merge 1",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")

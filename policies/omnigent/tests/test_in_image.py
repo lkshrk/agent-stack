@@ -98,6 +98,27 @@ class InImageTest(unittest.TestCase):
         self.assertEqual(run(contract, {"kind": "planner"}, **final), "DENY")
         self.assertEqual(run(contract, {"kind": "planner"}, **{**final, "turn_final": False}), "ALLOW")
 
+    def test_ansi_c_decoder_matches_bash(self):
+        from agent_stack_policies._shell import OPAQUE_WORD, parse
+
+        words = [
+            "$'\\x67it'", "$'\\x6'", "$'\\x7e'", "$'\\147\\151\\164'", "$'\\7'", "$'\\101b'",
+            "$'\\u0067'", "$'\\u263a'", "$'\\U0001F600'", "$'\\U67'",
+            "$'\\cA'", "$'\\c'", "$'a\\c\\\\b'", "$'\\c?'",
+            "$'git\\0x'", "$'\\x00y'", "$'\\u0000z'", "$'\\000'",
+            "$'a''b'", "$'a'$'b'", "g$'i't", "$'ab\\\\'", "$'it\\'s'", "$'\\q'", "$'\\e[0m'", "$'a\\tb\\nc'",
+        ]
+        must_be_opaque = {"$'\\cA'", "$'\\c'", "$'a\\c\\\\b'", "$'\\c?'", "$'git\\0x'", "$'\\x00y'", "$'\\u0000z'", "$'\\000'"}
+        for word in words:
+            with self.subTest(word=word):
+                script = "printf '%s\\0' " + word
+                expected = subprocess.run(["bash", "-c", script], capture_output=True, check=True).stdout
+                tokens = parse(script)[0][2:]
+                if any(OPAQUE_WORD in t for t in tokens):
+                    continue
+                self.assertNotIn(word, must_be_opaque)
+                self.assertEqual(("\0".join(tokens) + "\0").encode(), expected)
+
     def test_every_bundle_loads(self):
         from omnigent.spec import load
 

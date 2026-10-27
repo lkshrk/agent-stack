@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import DEFAULT_PROTECTED, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
+from ._shell import DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, glob_match
 
 _VCS = frozenset({"git", "gh"})
@@ -162,6 +162,8 @@ def _check_statement(tokens: list[str], is_doc: Callable[[str], bool]) -> str | 
     if any(a.startswith("GIT_") and a not in _ALLOWED_GIT_ENV for a in resolved.assignments):
         return "GIT_* environment overrides other than GIT_PAGER=cat are not allowed"
     command, rest = resolved.name, resolved.argv[1:]
+    if OPAQUE_WORD in command or (command in _VCS and any(OPAQUE_WORD in a for a in rest)):
+        return "a $'…' word with a NUL, \\c or a raw byte is opaque"
     if command not in _VCS:
         return None
     if resolved.wrappers:

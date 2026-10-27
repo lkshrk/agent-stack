@@ -177,3 +177,19 @@ class AnsiCDecodeTest(unittest.TestCase):
     def test_newline_and_tab_stay_inside_the_word(self):
         self.assertEqual(parse("git commit -m $'a\\nb'"), [["git", "commit", "-m", "a\nb"]])
         self.assertEqual(parse("printf $'a\\tb'"), [["printf", "a\tb"]])
+
+
+class AnsiCOpaqueTest(unittest.TestCase):
+    def test_nul_and_control_forms_are_opaque(self):
+        from agent_stack_policies._shell import OPAQUE_WORD
+
+        for word in ("$'git\\0'", "$'git\\x00'", "$'git\\u0000'", "$'git\\000x'", "$'\\cA'", "$'\\c'", "$'\\x80'", "$'\\200'", "$'\\c\\\\'"):
+            with self.subTest(word=word):
+                self.assertIn(OPAQUE_WORD, parse("echo " + word)[0][1])
+
+    def test_nul_truncates_like_bash(self):
+        self.assertTrue(parse("echo $'git\\0x'")[0][1].startswith("git$"))
+
+    def test_c_before_the_closing_quote_closes_it(self):
+        statements = parse("echo $'\\c'; git push origin main")
+        self.assertEqual(statements[1], ["git", "push", "origin", "main"])

@@ -111,41 +111,72 @@ _ANSI_SIMPLE = {
 _ANSI_DIGITS = {"x": (16, 2), "u": (16, 4), "U": (16, 8)}
 
 
-def _ansi_body(text: str, start: int) -> tuple[str, int] | None:
-    """Decode a `$'…'` body from `start` (just after the opening quote) by bash's rules; (value, index after the closing quote) or None when unterminated."""
-    out, i = [], start
+OPAQUE_WORD = "$__agent_stack_opaque__"
+
+
+def _ansi_body(text: str, start: int) -> tuple[str, int, bool] | None:
+    """(value, index after the closing quote, opaque) for a `$'…'` body by bash's rules, or None when unterminated; a NUL, `\\c` or a raw byte ≥ 0x80 is opaque."""
+    out, i, opaque, truncated = [], start, False, False
+
+    def add(char: str) -> None:
+        nonlocal opaque, truncated
+        if char == "\0":
+            opaque = truncated = True
+        elif not truncated:
+            out.append(char)
+
     while i < len(text):
         ch = text[i]
         if ch == "'":
-            return "".join(out), i + 1
+            return "".join(out), i + 1, opaque
         if ch != "\\" or i + 1 >= len(text):
-            out.append(ch)
+            add(ch)
             i += 1
             continue
         esc = text[i + 1]
         if esc in _ANSI_SIMPLE:
-            out.append(_ANSI_SIMPLE[esc])
+            add(_ANSI_SIMPLE[esc])
             i += 2
         elif esc in _ANSI_DIGITS:
             base, width = _ANSI_DIGITS[esc]
             digits = re.match(r"[0-9a-fA-F]{1,%d}" % width, text[i + 2 :])
-            if digits:
-                out.append(chr(int(digits.group(), base) % 0x110000))
-                i += 2 + len(digits.group())
-            else:
-                out.append("\\" + esc)
+            if not digits:
+                add("\\")
+                add(esc)
                 i += 2
+                continue
+            code = int(digits.group(), base)
+            if (esc == "x" and code >= 0x80) or code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+                opaque = True
+            else:
+                add(chr(code))
+            i += 2 + len(digits.group())
         elif esc in "01234567":
             digits = re.match(r"[0-7]{1,3}", text[i + 1 :]).group()
-            out.append(chr(int(digits, 8) & 0xFF))
+            code = int(digits, 8) & 0xFF
+            if code >= 0x80:
+                opaque = True
+            else:
+                add(chr(code))
             i += 1 + len(digits)
-        elif esc == "c" and i + 2 < len(text):
-            out.append(chr(ord(text[i + 2]) & 0x1F))
-            i += 3
+        elif esc == "c":
+            opaque = True
+            following = text[i + 2 : i + 3]
+            if following in ("", "'"):
+                add("\\")
+                add("c")
+                i += 2
+            else:
+                i += 4 if text[i + 2 : i + 4] == "\\\\" else 3
         else:
-            out.append("\\" + esc)
+            add("\\")
+            add(esc)
             i += 2
     return None
+
+
+def has_opaque_word(tokens: list[str]) -> bool:
+    return any(OPAQUE_WORD in t for t in tokens)
 
 
 def decode_ansi(command: str) -> str:
@@ -168,8 +199,8 @@ def decode_ansi(command: str) -> str:
         elif ch == "$" and command[i + 1 : i + 2] == "'":
             decoded = _ansi_body(command, i + 2)
             if decoded is not None:
-                value, i = decoded
-                out.append("'" + value.replace("'", "'\\''") + "'")
+                value, i, opaque_value = decoded
+                out.append("'" + value.replace("'", "'\\''") + "'" + (OPAQUE_WORD if opaque_value else ""))
                 continue
         elif ch == "$" and command[i + 1 : i + 2] == '"':
             i += 1
