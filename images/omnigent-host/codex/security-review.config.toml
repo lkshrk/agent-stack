@@ -5,12 +5,24 @@ default_permissions = "security-review"
 unified_exec = false
 multi_agent = false
 
+# Reads: the session checkout, system and tool dirs. Home, ~/.config and /agent-secrets stay unreadable.
 [permissions.security-review.filesystem]
-":root" = "read"
+":minimal" = "read"
+":workspace_roots" = "read"
+"/usr" = "read"
+"/etc" = "read"
+"/opt/mise" = "read"
+"/opt/venv" = "read"
+"/opt/agent/bin" = "read"
 "/tmp" = "write"
+"/agent-secrets" = "none"
 
 [permissions.security-review.network]
 enabled = true
+
+[shell_environment_policy]
+ignore_default_excludes = false
+exclude = ["*_KEY", "*_TOKEN", "*_SECRET", "LITELLM_*", "GH_*", "GITHUB_TOKEN"]
 
 # The sandbox only writes /tmp, so tool caches live there.
 [shell_environment_policy.set]
