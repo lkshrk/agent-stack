@@ -371,3 +371,23 @@ class HeredocTest(unittest.TestCase):
         ):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class HeredocInQuotedSubstitutionTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
+            "git commit -m \"$(cat <<EOF\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
+            "git commit -m \"$(cat <<'EOF'\nx\"\n)\"",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_commit_and_pr_forms_allowed(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore text.\nEOF\n)\"",
+            "gh pr create --title \"fix: x\" --body \"$(cat <<'EOF'\n## Summary\n- it's \"quoted\"\n\n## Testing\n- make test\nEOF\n)\"",
+            "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\" && git push -u origin feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW", run(command).get("reason"))

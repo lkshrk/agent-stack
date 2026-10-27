@@ -133,10 +133,53 @@ def _skip_heredocs(text: str, pos: int, docs: list[tuple[str, bool]]) -> int:
     return pos
 
 
+def _substitution_char(command: str, i: int, current: list[str], frames: list[list]) -> int:
+    """One character inside a `$(…)` opened within double quotes, where bash parses a fresh shell context; returns the next index."""
+    frame = frames[-1]
+    quote, ch = frame[0], command[i]
+    if ch == "\\" and quote != "'" and i + 1 < len(command):
+        current.append(command[i : i + 2])
+        return i + 2
+    if quote == '"' and command.startswith("$(", i):
+        frames.append([None, 0, len(current) + 1])
+        current.append("$(")
+        return i + 2
+    if quote:
+        frame[0] = None if ch == quote[-1] else quote
+    elif command.startswith("$'", i):
+        frame[0] = "$'"
+        current.append("$'")
+        return i + 2
+    elif command.startswith("$(", i):
+        frames.append([None, 0, len(current) + 1])
+        current.append("$(")
+        return i + 2
+    elif ch in "'\"":
+        frame[0] = ch
+    elif ch == "(":
+        frame[1] += 1
+    elif ch == ")":
+        if frame[1]:
+            frame[1] -= 1
+        else:
+            frames.pop()
+    elif ch == "\n":
+        current.append(ch)
+        docs = _heredocs("".join(current[frame[2] :]))
+        frame[2] = len(current)
+        return _skip_heredocs(command, i + 1, docs)
+    current.append(ch)
+    return i + 1
+
+
 def _lines(command: str) -> list[str]:
     """Logical lines: newlines inside quotes and after a backslash join, `#` comments drop, and heredoc bodies are text, not commands."""
     lines, current, quote, escaped, i = [], [], None, False, 0
+    frames: list[list] = []
     while i < len(command):
+        if frames:
+            i = _substitution_char(command, i, current, frames)
+            continue
         ch = command[i]
         if escaped:
             escaped = False
@@ -146,6 +189,11 @@ def _lines(command: str) -> list[str]:
                 continue
         elif ch == "\\" and quote != "'":
             escaped = True
+        elif quote == '"' and command.startswith("$(", i):
+            frames.append([None, 0, len(current) + 1])
+            current.append("$(")
+            i += 2
+            continue
         elif quote:
             quote = None if ch == quote[-1] else quote
         elif ch == "$" and command[i + 1 : i + 2] == "'":
@@ -169,7 +217,7 @@ def _lines(command: str) -> list[str]:
         i += 1
     line = "".join(current)
     lines.append(line)
-    if quote is None and _heredocs(line):
+    if (quote is None or frames) and _heredocs(line if not frames else "".join(current[frames[-1][2] :])):
         raise OpaqueCommand("heredoc without a body")
     return lines
 

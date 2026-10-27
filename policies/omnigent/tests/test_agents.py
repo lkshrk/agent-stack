@@ -250,3 +250,13 @@ class HeredocTest(unittest.TestCase):
 
     def test_heredoc_text_allowed(self):
         self.assertEqual(run("cat <<'EOF' > a.md\nRun claude -p it's\nEOF")["result"], "ALLOW")
+
+
+class HeredocInQuotedSubstitutionTest(unittest.TestCase):
+    def test_hidden_agent_denied(self):
+        command = "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\nclaude -p hi\n#\""
+        self.assertEqual(run(command)["result"], "DENY")
+
+    def test_pr_body_allowed(self):
+        command = "gh pr create --body \"$(cat <<'EOF'\nRun claude -p \"x\" later\nEOF\n)\""
+        self.assertEqual(run(command)["result"], "ALLOW")

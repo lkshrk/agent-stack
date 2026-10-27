@@ -232,3 +232,16 @@ class HeredocTest(unittest.TestCase):
     def test_unquoted_heredoc_substitution_is_walked(self):
         statements = walk("cat <<E\n$(claude -p x)\nE")
         self.assertTrue(any(s[:2] == ["claude", "-p"] for s in statements), statements)
+
+
+class HeredocInQuotedSubstitutionTest(unittest.TestCase):
+    def test_body_inside_quoted_substitution_is_text(self):
+        command = "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\ngit push origin main\n#\""
+        self.assertEqual(parse(command)[-1], ["git", "push", "origin", "main"])
+        command = "gh pr create --title t --body \"$(cat <<'EOF'\nit's \"done\"\nEOF\n)\"\nclaude -p hi"
+        self.assertEqual(parse(command)[-1], ["claude", "-p", "hi"])
+
+    def test_commit_form_stays_one_statement(self):
+        statements = parse("git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore.\nEOF\n)\"")
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(statements[0][:3], ["git", "commit", "-m"])

@@ -257,6 +257,7 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_add_policy", {"handler": "x"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git push -u origin feat/x"}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\""}, "ALLOW"),
+    Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\n- it's \"done\"\nEOF\n)\""}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cat <<E\nit's\nE\ngit push origin main #'"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env"}, "DENY"),
     Case("polly/agents/claude_code", "tool_call", "Edit", {"file_path": "backend/.env.example"}, "ALLOW"),
@@ -550,6 +551,8 @@ CASES += [
         "cat <<E\nit's\nE\ngit push origin main #'",
         "cat <<E\n$'\nE\ngit push origin main\n#'",
         "cat <<E\nit's\nE\nclaude -p hi #'",
+        "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
+        "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\nclaude -p hi\n#\"",
     )
 ]
 CASES += [
