@@ -40,8 +40,7 @@ Use it when the person reporting is not technical, or when asked.
 - Cover: what happened or should change, what they expected, who or what is affected, how often or how
   important, steps or examples, evidence (screenshots, recordings, error messages, links), workaround,
   and what success looks like.
-- For UI problems and errors, strongly encourage screenshots or recordings; attach them as in
-  `docs/attachments.md`.
+- For UI problems and errors, strongly encourage screenshots or recordings (`docs/attachments.md`).
 - Capture their words faithfully. Do not ask them about code, root causes or tests.
 
 Put the report into the Bug or Feature form (`templates/forms.md`): what happened, expected or desired
