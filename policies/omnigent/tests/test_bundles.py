@@ -309,6 +309,8 @@ CASES: list[Case] = [
             ('bash -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""', "DENY"),
             ('gh api graphql -f "$K"="$(cat /tmp/q)"', "DENY"),
             ('gh api graphql "$@"', "DENY"),
+            ("gh api graphql -iFquer{y,}=@/tmp/q", "DENY"),
+            ("K=query; gh api graphql -iF$K=@/tmp/q", "DENY"),
             ("gh api graphql -f $'\\x71uery'=\"$(cat /tmp/q)\"", "DENY"),
             ("gh api graphql -F owner=$OWNER -f query='query($owner: String!) { repositoryOwner(login: $owner) { login } }'", "ALLOW"),
         )

@@ -16,11 +16,12 @@ _MERGE_MUTATION = re.compile(r"mergePullRequest|mergeBranch|enablePullRequestAut
 _GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:$|[?#])", re.IGNORECASE)
 _FIELD_ASSIGNMENT = re.compile(r"^[A-Za-z_][\w.\[\]]*=")
 _GH_GROUPS = frozenset({"alias", "extension", "extensions", "ext"})
-_GH_API_FIELDS = frozenset({"-f", "-F", "--field", "--raw-field"})
-_GH_API_VALUES = frozenset({
-    "-X", "--method", "-H", "--header", "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache",
-    "-p", "--preview",
-}) | _GH_API_FIELDS
+# gh 2.102 `gh api` flags (pflag): long options that take a value, and short letters that do.
+_GH_API_LONG_VALUES = frozenset({
+    "--field", "--raw-field", "--header", "--jq", "--method", "--preview", "--template", "--cache", "--hostname", "--input",
+})
+_GH_API_LONG_FIELDS = frozenset({"--field", "--raw-field"})
+_GH_API_SHORT_VALUES = frozenset("fFHqXpt")
 _LITERAL_KEY = re.compile(r"[^$`*?\[\]{}]+")
 _GH_CONFIG_ENV = re.compile(r"^(?:GH_CONFIG_DIR|XDG_CONFIG_HOME)=")
 _FORCE_LONG = frozenset({"force", "force-with-lease", "force-if-includes"})
@@ -104,25 +105,36 @@ def _graphql_request(rest: list[str]) -> bool:
 
 
 def _api_parts(rest: list[str]) -> tuple[list[str], list[str]]:
-    """(positional words, -f/-F/--field/--raw-field values) of a `gh … api` argv."""
+    """(positional words, -f/-F/--field/--raw-field values) of a `gh … api` argv, with short clusters read as pflag reads them."""
     args = rest[rest.index("api") + 1 :] if "api" in rest else []
     positional, fields, i = [], [], 0
     while i < len(args):
         arg = args[i]
-        name, eq, value = arg.partition("=")
-        if arg in _GH_API_VALUES:
-            if arg in _GH_API_FIELDS and i + 1 < len(args):
-                fields.append(args[i + 1])
-            i += 2
-            continue
-        if arg.startswith("--") and eq:
-            if name in _GH_API_FIELDS:
-                fields.append(value)
-        elif arg[:2] in ("-f", "-F") and len(arg) > 2:
-            fields.append(arg[2:])
-        elif not arg.startswith("-") or arg == "-":
-            positional.append(arg)
         i += 1
+        if arg == "--":
+            positional.extend(args[i:])
+            break
+        if arg.startswith("--"):
+            name, eq, value = arg.partition("=")
+            if name in _GH_API_LONG_VALUES:
+                if not eq:
+                    value = args[i] if i < len(args) else ""
+                    i += 1
+                if name in _GH_API_LONG_FIELDS:
+                    fields.append(value)
+        elif arg.startswith("-") and arg != "-":
+            for k, letter in enumerate(arg[1:], start=1):
+                if letter in _GH_API_SHORT_VALUES:
+                    value = arg[k + 1 :]
+                    value = value[1:] if value.startswith("=") else value
+                    if not value:
+                        value = args[i] if i < len(args) else ""
+                        i += 1
+                    if letter in "fF":
+                        fields.append(value)
+                    break
+        else:
+            positional.append(arg)
     return positional, fields
 
 
