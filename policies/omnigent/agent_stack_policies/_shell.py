@@ -311,7 +311,7 @@ def has_opaque_word(tokens: list[str]) -> bool:
 
 
 def decode_ansi(command: str) -> str:
-    """Rewrite `$'…'` as the single-quoted decoded value and `$"…"` as `"…"`, so the lexer sees the words bash runs."""
+    """Rewrite `$'…'` as the single-quoted decoded value, `$"…"` as `"…"` and `\\$`/`` \\` `` inside double quotes as `$`/`` ` ``, so the lexer sees the words bash runs."""
     out, i, quote = [], 0, None
     while i < len(command):
         ch = command[i]
@@ -319,7 +319,7 @@ def decode_ansi(command: str) -> str:
             quote = None if ch == "'" else quote
         elif quote == '"':
             if ch == "\\" and i + 1 < len(command):
-                out.append(command[i : i + 2])
+                out.append(command[i + 1] if command[i + 1] in "$`" else command[i : i + 2])
                 i += 2
                 continue
             quote = None if ch == '"' else quote

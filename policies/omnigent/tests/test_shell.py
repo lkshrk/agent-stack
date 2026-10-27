@@ -87,6 +87,19 @@ class ResolveTest(unittest.TestCase):
         self.assertEqual(argv("$G push origin main"), ["$G", "push", "origin", "main"])
 
 
+class DoubleQuoteEscapeTest(unittest.TestCase):
+    def test_bash_double_quote_escapes(self):
+        cases = (
+            ('bash -c "echo \\$X"', "echo $X"),
+            ('bash -c "a \\`b\\` \\\\ \\" \\n"', 'a `b` \\ " \\n'),
+            ('sh -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""', 'gh api graphql -f query="$(cat /tmp/q)"'),
+            ("bash -c 'echo \\$X'", "echo \\$X"),
+        )
+        for command, body in cases:
+            with self.subTest(command=command):
+                self.assertEqual(resolve(parse(command)[0]).nested, [body])
+        self.assertEqual(parse('echo "x\\$y" \\$z'), [["echo", "x$y", "$z"]])
+
 class WalkTest(unittest.TestCase):
     def test_wrapper_bodies_walked(self):
         statements = walk("script -qc 'claude -p x' /dev/null")
