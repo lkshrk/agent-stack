@@ -230,10 +230,13 @@ def path_guard(
             return any(fnmatchcase(name, pattern) for name in startup)
         return False
 
+    def relative_startup_template(path: str) -> bool:
+        return bool(startup) and not path.startswith(("/", "~", "$HOME", "${HOME}")) and posixpath.normpath(path) in startup
+
     def check_path(path: str) -> Decision | None:
         if startup_path(path):
             return _deny(f"startup file {path} is not writable")
-        if escapes(path):
+        if escapes(path) and not relative_startup_template(path):
             return _deny(f"path {path} tries to escape with '..'")
         if forbidden(path):
             return _deny(f"forbidden path {path}")

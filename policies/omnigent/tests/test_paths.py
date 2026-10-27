@@ -642,7 +642,7 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
-        for path in (".bashrc", "./.bashrc", "zsh/.zshrc", "dotfiles/.profile", "dotfiles/.bashrc", "/home/omnigent/work/dotfiles/zsh/.zshrc", "config/.profile", "~other/.bashrc", "/tmp/.bashrc"):
+        for path in (".bashrc", "./.bashrc", "./.profile", "x/../.bashrc", "zsh/.zshrc", "dotfiles/.profile", "dotfiles/.bashrc", "/home/omnigent/work/dotfiles/zsh/.zshrc", "config/.profile", "~other/.bashrc", "/tmp/.bashrc"):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "ALLOW")
