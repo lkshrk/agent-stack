@@ -69,7 +69,10 @@ class SecretReadsTest(unittest.TestCase):
             "ls /agent-secrets/github",
             "cat /agent-secrets/github/code",
             "cat /agent-secrets/github/..data/review",
-            "cd / && cat agent-secrets/github/review",
+            "cd /agent-secrets && cat github/review",
+            "cd /agent-secret? && cat github/review",
+            "cat /*/*/*",
+            "cat /*/github/review",
             "cat /agent-sec''rets/github/review",
             "cat /agent-*/github/review",
             "cat /agent-secret?/github/review",
@@ -123,6 +126,10 @@ class SecretReadsTest(unittest.TestCase):
             "rg -n -g '*.py' x",
             "gh pr view 3 --repo o/r",
             "rg -n 'gh auth' docs",
+            "rg -n agent-secrets .",
+            "rg -n 'agent-secrets/github' k8s",
+            "ls /*",
+            "ls /?*",
         ):
             self.assertAbstains(command)
 

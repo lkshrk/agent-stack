@@ -12,6 +12,7 @@ from .paths import SHELL_TOOLS
 _GH_SECRET_COMMANDS = frozenset({"auth", "config", "alias", "extension", "ext"})
 _GH_RAW = re.compile(r"\bgh\b[^;&|\n]*\s(?:auth|config|alias|ext|extension|--web|-w)(?=$|[\s;&|)'\"=])")
 _GLOB = frozenset("*?[")
+_WILDCARDS = frozenset("*?")
 _PATH_LEAD = frozenset("@=<:'\"")
 
 
@@ -23,9 +24,15 @@ def _ancestors(path: str, root: str) -> list[str]:
     return out
 
 
+def _glob_match(path: str, pattern: str) -> bool:
+    """Shell-style: each `/`-separated component matches on its own, so `*` never crosses a `/`."""
+    parts, wanted = path.split("/"), pattern.rstrip("/").split("/")
+    return len(parts) == len(wanted) and all(fnmatchcase(p, w) for p, w in zip(parts, wanted))
+
+
 def no_secret_reads(*, secret_dir: str, token_file: str) -> Callable[[Event], Decision | None]:
     """Best-effort: deny shell commands that name `secret_dir` other than as `GH_TOKEN_FILE=<token_file>` right before `gh`, and gh commands that print or hand out the token."""
-    name = os.path.basename(secret_dir.rstrip("/"))
+    name = secret_dir.rstrip("/")
     assignment = f"GH_TOKEN_FILE={token_file}"
     protected = _ancestors(token_file, secret_dir)
     exempt_text = re.compile(r"(?<![^\s;&|('\"])" + re.escape(assignment) + r"(?=\s+gh\s)")
@@ -35,7 +42,12 @@ def no_secret_reads(*, secret_dir: str, token_file: str) -> Callable[[Event], De
         for i, ch in enumerate(token):
             if ch == "/" and (i == 0 or token[i - 1] in _PATH_LEAD):
                 candidate = token[i:]
-                if _GLOB & set(candidate) and any(fnmatchcase(p, candidate) for p in protected):
+                if not _GLOB & set(candidate):
+                    continue
+                if any(_glob_match(p, candidate) for p in protected if p != name):
+                    return True
+                first = candidate.split("/")[1]
+                if _glob_match(name, candidate) and not set(first) <= _WILDCARDS:
                     return True
         return False
 
