@@ -350,10 +350,26 @@ def _runs_vcs(command: Command) -> bool:
     return any(_VCS_TEXT.search(t) for t in texts)
 
 
-_STDIN_ALLOWED = frozenset({"rg", "grep", "egrep", "fgrep", "wc", "cat", "head", "tail", "ls", "stat", "file", "echo", "printf", "basename", "dirname", "realpath", "readlink", "sort", "uniq", "cut", "tr", "jq", "yq", "sha256sum", "md5sum", "du", "test", "true"})
+_STDIN_ALLOWED = frozenset({"rg", "grep", "egrep", "fgrep", "wc", "cat", "head", "tail", "ls", "stat", "file", "echo", "printf", "basename", "dirname", "realpath", "readlink", "cut", "tr", "jq", "sha256sum", "md5sum", "du", "test", "true"})
 
 
-def _unsafe_stdin_launcher(command: Command) -> bool:
+def _stdin_replacements(tokens: list[str]) -> set[str]:
+    """Custom xargs/parallel replacement strings, including attached short and = forms."""
+    values = set()
+    for i, token in enumerate(tokens):
+        if os.path.basename(token) not in _STDIN_ARGUMENTS:
+            continue
+        for j, option in enumerate(tokens[i + 1 :], start=i + 1):
+            if option in ("-I", "-i", "--replace"):
+                values.add(tokens[j + 1] if j + 1 < len(tokens) else "")
+            elif option.startswith("--replace="):
+                values.add(option.split("=", 1)[1])
+            elif option.startswith("-I") or option.startswith("-i"):
+                values.add(option[2:])
+    return values
+
+
+def _unsafe_stdin_launcher(command: Command, tokens: list[str]) -> bool:
     """xargs/parallel may start only a literal allowlisted read or format program."""
     if not (_STDIN_ARGUMENTS & set(command.wrappers)):
         return False
@@ -364,15 +380,14 @@ def _unsafe_stdin_launcher(command: Command) -> bool:
         return True
     if any(ch in raw for ch in "'\\\"$`"):
         return True
-    args = command.argv[1:]
-    return name == "sort" and any(a == "-o" or a == "--output" or a.startswith("--output=") or (a.startswith("-o") and len(a) > 2) for a in args)
+    return any(replacement and replacement in raw for replacement in _stdin_replacements(tokens))
 
 
 def _check_statement(tokens: list[str], protected: frozenset[str], expanding_query: bool = False) -> str | None:
     if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
     command = resolve(tokens)
-    if _STDIN_ARGUMENTS & set(command.wrappers) and (_runs_vcs(command) or _unsafe_stdin_launcher(command)):
+    if _STDIN_ARGUMENTS & set(command.wrappers) and (_runs_vcs(command) or _unsafe_stdin_launcher(command, tokens)):
         return f"run gh/git directly, not through xargs/parallel; run only a literal, non-shell program there; {_PR_HINT}"
     for run, resolved in _vcs_runs(tokens):
         rest = run[1:]

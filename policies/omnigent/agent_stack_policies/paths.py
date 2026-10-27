@@ -223,12 +223,14 @@ def path_guard(
         normal = posixpath.normpath(expanded)
         if normal in {f"{home}/{name}" for name in startup}:
             return True
-        if any(ch in path for ch in "*?[") or ("{" in path and "," in path):
-            basename = posixpath.basename(expanded)
-            if basename in startup:
-                return True
-            pattern = re.sub(r"[{},]", "*", basename)
-            return any(fnmatchcase(name, pattern) for name in startup)
+        braces = re.search(r"\{[^{}]+\}", path) is not None
+        if any(ch in path for ch in "*?[") or braces:
+            pattern = path.replace("~", home)
+            while re.search(r"\{[^{}]*\}", pattern):
+                pattern = re.sub(r"\{[^{}]*\}", "*", pattern)
+            pattern = re.sub(r"\[[^]]*\]", "*", pattern)
+            normal = posixpath.normpath(pattern)
+            return any(fnmatchcase(f"{home}/{name}", normal) for name in startup)
         return False
 
     def relative_startup_template(path: str) -> bool:

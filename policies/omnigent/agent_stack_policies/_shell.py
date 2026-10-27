@@ -10,7 +10,7 @@ SHELLS = frozenset({"sh", "bash", "rbash", "zsh", "dash", "ash", "ksh", "mksh", 
 
 
 def shell_name(name: str) -> bool:
-    return name in SHELLS or name.endswith("sh")
+    return name != "ssh" and re.fullmatch(r"[a-z]*sh[0-9.]*", name) is not None
 DEFAULT_PROTECTED = ("main", "master")
 _KEYWORDS = frozenset({"!", "if", "then", "elif", "else", "do", "while", "until", "(", "{"})
 _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -24,12 +24,12 @@ _SUDO_VALUES = {
     "--host", "--prompt", "--role", "--type", "--other-user", "--close-from", "--command-timeout",
 }
 _XARGS_VALUES = {
-    "-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--max-lines",
-    "--max-chars", "--delimiter", "--eof", "--arg-file", "--process-slot-var",
+    "-I", "-i", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--max-lines",
+    "--max-chars", "--delimiter", "--eof", "--arg-file", "--process-slot-var", "--replace",
 }
 _PARALLEL_VALUES = {
     "-j", "--jobs", "-S", "--sshlogin", "--joblog", "--delay", "--timeout", "-N", "-n",
-    "--max-args", "--colsep", "-d", "--delimiter", "-a", "--arg-file", "-I", "--tmpdir", "--results",
+    "--max-args", "--colsep", "-d", "--delimiter", "-a", "--arg-file", "-I", "-i", "--replace", "--arg-sep", "--arg-file-sep", "-E", "--eof", "--tmpdir", "--results",
 }
 # wrapper -> (options that take a value, operands before the wrapped command)
 _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
