@@ -156,6 +156,10 @@ jobs:
         if: matrix.image == 'omnigent-host'
         run: |
           docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/node-pin.sh
+      - name: Refuse planted bare repositories in the runner's git
+        if: matrix.image == 'omnigent-host'
+        run: |
+          docker run --rm -u 1000660000 -v "$PWD/images/omnigent-host/test:/t:ro" agent-stack/omnigent-host:ci bash /t/git-safety.sh
       - name: Install the read-only security-review Codex profile
         if: matrix.image == 'omnigent-host'
         run: |
