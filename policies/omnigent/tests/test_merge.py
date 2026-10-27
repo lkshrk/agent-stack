@@ -116,6 +116,55 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_graphql_endpoint_forms_and_expansions(self):
+        mutation = "mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}"
+        for command in (
+            "gh extensions install x/y",
+            "gh extensions exec y",
+            "gh extensions upgrade --all",
+            "gh api /graphql --input q.json",
+            "gh api /graphql -F query=@q",
+            "gh api https://api.github.com/graphql --input q.json",
+            "gh api https://ghe.example.com/api/graphql -F query=@q",
+            "gh api GRAPHQL -F query=@q",
+            "gh api /graphql/ --input q.json",
+            "gh api 'https://api.github.com/graphql?x=1' --input q.json",
+            f"gh api /graphql -f query='{mutation}'",
+            f"gh api https://api.github.com/graphql -f query='{mutation}'",
+            "gh api graphql -f query='mutation{mergeBranch(input:{repositoryId:\"x\",base:\"main\",head:\"f\"}){clientMutationId}}'",
+            "gh api graphql -f query='mutation{enqueuePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+            "gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+            'gh api graphql -f query="$(cat q.graphql)"',
+            'gh api graphql -f query="`cat q`"',
+            'gh api graphql -f query="$Q"',
+            "gh api graphql -f query=$Q",
+            'gh api graphql -f "query=${Q}"',
+            "gh api /graphql --field query=\"$(cat q)\"",
+            "gh api graphql -f query='{ viewer { login } }'\"$X\"",
+            "GH_CONFIG_DIR=/tmp/g gh m 5",
+            "env GH_CONFIG_DIR=/tmp/g gh m 5",
+            "export GH_CONFIG_DIR=/tmp/g; gh m 5",
+            "XDG_CONFIG_HOME=/tmp/x gh m 5",
+            "export XDG_CONFIG_HOME=/tmp/x && gh pr view 5",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh extensions list",
+            "gh api graphql -f query='{ viewer { login } }'",
+            "gh api /graphql -f query='{ viewer { login } }'",
+            "gh api graphql -F owner=o -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api graphql -F owner=\"$OWNER\" -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api repos/o/r/issues/5/comments -f body='see /graphql docs'",
+            "gh api repos/o/r/contents/graphql.md",
+            "gh pr view 5 --repo o/r",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+        listed = no_merge()(tool_call_event("bash", {"command": ["gh", "api", "graphql", "-f", "query=$Q"]}))
+        self.assertEqual(listed["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

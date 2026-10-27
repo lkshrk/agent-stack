@@ -3,7 +3,7 @@ import re
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call, tool_name
-from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
+from ._shell import DEFAULT_PROTECTED, OpaqueCommand, _nested_command, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
 _MERGE_API = re.compile(r"pulls/\d+/merge(?:$|[/?#])|/merges(?:$|[/?#])", re.IGNORECASE)
@@ -12,7 +12,11 @@ _MERGE_PATH = re.compile(
     re.IGNORECASE,
 )
 _GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
-_MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
+_MERGE_MUTATION = re.compile(r"mergePullRequest|mergeBranch|enablePullRequestAutoMerge|enqueuePullRequest")
+_GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:$|[?#])", re.IGNORECASE)
+_FIELD_ASSIGNMENT = re.compile(r"^[A-Za-z_][\w.\[\]]*=")
+_GH_GROUPS = frozenset({"alias", "extension", "extensions", "ext"})
+_GH_CONFIG_ENV = re.compile(r"^(?:GH_CONFIG_DIR|XDG_CONFIG_HOME)=")
 _FORCE_LONG = frozenset({"force", "force-with-lease", "force-if-includes"})
 _REF_FLAGS = frozenset({"tags", "follow-tags", "mirror", "all", "branches"})
 _HEADS_PREFIX = re.compile(r"^(?:refs/)?heads/")
@@ -86,17 +90,53 @@ def _gh_words(rest: list[str]) -> list[str]:
     return words
 
 
-def _check_gh(rest: list[str]) -> str | None:
+def _graphql_request(rest: list[str]) -> bool:
+    """A gh api call whose endpoint is GraphQL in any spelling gh routes there (`graphql`, `/graphql`, a full or GHES URL)."""
+    return "api" in rest and any(
+        _GRAPHQL_ENDPOINT.search(t) and not _FIELD_ASSIGNMENT.match(t) for t in rest if not t.startswith("-")
+    )
+
+
+def _expanding_query(text: str) -> bool:
+    """A word containing `query=` with a `$` or backtick the shell expands (outside single quotes)."""
+    word, quote, expands, i = [], None, False, 0
+    while i < len(text):
+        ch = text[i]
+        if quote == "'":
+            quote = None if ch == "'" else quote
+        elif ch == "\\":
+            word.append(text[i : i + 2])
+            i += 2
+            continue
+        elif quote == '"':
+            quote = None if ch == '"' else quote
+            expands = expands or ch in "$`"
+        elif ch in "'\"":
+            quote = ch
+        elif ch in "$`":
+            expands = True
+        elif ch.isspace() or ch in ";&|()":
+            if expands and "query=" in "".join(word):
+                return True
+            word, expands = [], False
+            i += 1
+            continue
+        word.append(ch)
+        i += 1
+    return expands and "query=" in "".join(word)
+
+
+def _check_gh(rest: list[str], expanding_query: bool = False) -> str | None:
     words = _gh_words(rest)
     if words[:2] == ["pr", "merge"] or any(a == "pr" and b == "merge" for a, b in zip(words, words[1:])):
         return f"gh pr merge is not allowed; {_PR_HINT}"
     if "api" in rest and any(_MERGE_API.search(t) for t in rest):
         return f"merge through gh api is not allowed; {_PR_HINT}"
-    if words[:1] in (["alias"], ["extension"], ["ext"]) and words[1:2] not in (["list"], ["ls"]):
+    if words[:1] and words[0] in _GH_GROUPS and words[1:2] not in (["list"], ["ls"]):
         return f"gh {words[0]} can define a command that merges; only `gh {words[0]} list` is allowed; {_PR_HINT}"
-    if "api" in rest and "graphql" in rest:
-        if any(t == "--input" or t.startswith("--input=") or "query=@" in t for t in rest):
-            return f"gh api graphql with a query from a file or stdin is not allowed; pass the query inline; {_PR_HINT}"
+    if _graphql_request(rest):
+        if any(t == "--input" or t.startswith("--input=") or "query=@" in t for t in rest) or expanding_query:
+            return f"gh api graphql with a query from a file, stdin, a variable or a command substitution is not allowed; write the query inline in single quotes; {_PR_HINT}"
         if any(_MERGE_MUTATION.search(t) for t in rest):
             return f"merge through gh api graphql is not allowed; {_PR_HINT}"
     return None
@@ -235,7 +275,7 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
     return None
 
 
-def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None:
+def _check_statement(tokens: list[str], protected: frozenset[str], expanding_query: bool = False) -> str | None:
     if _has_substitution(tokens) and _mentions_merge_or_push(tokens):
         return "command substitution in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
     command = resolve(tokens)
@@ -247,7 +287,7 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
         if _mentions_merge_or_push(run) and any("$" in t for t in rest):
             return "a variable in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
         if os.path.basename(run[0]) == "gh":
-            reason = _check_gh(rest)
+            reason = _check_gh(rest, expanding_query)
         else:
             _, sub, sub_rest = _git_parts(rest)
             if sub.startswith("--"):
@@ -288,8 +328,18 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             reason = _config_environment(statements)
         if reason:
             return deny(reason)
+        gh_runs = any(os.path.basename(run[0]) == "gh" for tokens in statements for run, _ in _vcs_runs(tokens))
+        if gh_runs and any(_GH_CONFIG_ENV.match(t) for tokens in statements for t in tokens):
+            return deny(f"gh with GH_CONFIG_DIR or XDG_CONFIG_HOME set can load aliases from another config; {_PR_HINT}")
+        texts = [command]
         for tokens in statements:
-            reason = _check_statement(tokens, protected)
+            texts += resolve(tokens).nested
+            extra = _nested_command(tokens)
+            if extra is not None:
+                texts.append(extra)
+        expanding_query = gh_runs and any(_expanding_query(t) for t in texts)
+        for tokens in statements:
+            reason = _check_statement(tokens, protected, expanding_query)
             if reason:
                 return deny(reason)
         return allow()

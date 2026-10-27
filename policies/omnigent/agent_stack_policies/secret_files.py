@@ -9,8 +9,8 @@ from ._shell import _nested_command, resolve, shell_command, walk
 from .merge import _gh_words
 from .paths import SHELL_TOOLS
 
-_GH_SECRET_COMMANDS = frozenset({"auth", "config", "alias", "extension", "ext"})
-_GH_RAW = re.compile(r"\bgh\b[^;&|\n]*\s(?:auth|config|alias|ext|extension|--web|-w)(?=$|[\s;&|)'\"=])")
+_GH_SECRET_COMMANDS = frozenset({"auth", "config", "alias", "extension", "extensions", "ext"})
+_GH_RAW = re.compile(r"\bgh\b[^;&|\n]*\s(?:auth|config|alias|ext|extension|extensions|--web|-w)(?=$|[\s;&|)'\"=])")
 _GLOB = frozenset("*?[")
 _WILDCARDS = frozenset("*?")
 _PATH_LEAD = frozenset("@=<:'\"")

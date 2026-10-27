@@ -110,6 +110,8 @@ class SecretReadsTest(unittest.TestCase):
             "gh alias set x '!env'",
             "gh extension install o/gh-x",
             "gh ext exec x",
+            "gh extensions install x/y",
+            "gh extensions exec y",
             f"{ASSIGN} gh pr view 3 --web",
             f"{ASSIGN} gh pr view 3 -w",
             "xargs gh auth token",
@@ -143,6 +145,7 @@ class SecretReadsTest(unittest.TestCase):
     def test_unparseable_with_secret_denied(self):
         self.assertEqual(run(f"cat {TOKEN} 'unterminated")["result"], "DENY")
         self.assertEqual(run("gh auth token 'unterminated")["result"], "DENY")
+        self.assertEqual(run("gh extensions install x/y 'unterminated")["result"], "DENY")
         self.assertIsNone(run("echo 'unterminated"))
 
     def test_unreadable_arguments_denied(self):
