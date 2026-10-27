@@ -40,8 +40,8 @@ _PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "ex
 _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs"})
-# These hand a command string to a shell in a form the resolver doesn't unwrap.
-_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg"})
+# The resolver doesn't unwrap these, and each can start a shell or hand it a command string.
+_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot"})
 # GNU xargs getopt: options with a required value, and those with an optional attached value.
 _XARGS_REQUIRED = frozenset("aEILnsPd")
 _XARGS_OPTIONAL = frozenset("eil")
