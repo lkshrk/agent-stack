@@ -29,6 +29,7 @@ _PUSH_LONG_VALUES = frozenset({"repo", "recurse-submodules", "receive-pack", "ex
 _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f": "force", "u": "set-upstream", "4": "ipv4", "6": "ipv6"}
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs", "parallel"})
+_GIT_SENSITIVE = frozenset({"push", "merge", "config"})
 _VCS_TEXT = re.compile(r"\b(git|gh)\b")
 _GLOB = re.compile(r"[*?\[{]")
 _REDIRECT_KEY = re.compile(
@@ -62,13 +63,13 @@ def _mentions_merge_or_push(tokens: list[str]) -> bool:
     return any(t in ("merge", "push") or _MERGE_PATH.search(t) for t in tokens)
 
 
-def _vcs_runs(tokens: list[str]) -> list[list[str]]:
-    """The resolved git/gh argv first, then every later git/gh token for launchers the resolver doesn't know."""
+def _vcs_runs(tokens: list[str]) -> list[tuple[list[str], bool]]:
+    """(argv, resolved) for the resolved git/gh argv first, then every later git/gh token for launchers the resolver doesn't know."""
     runs = []
     argv = resolve(tokens).argv
     if argv and os.path.basename(argv[0]) in _VCS:
-        runs.append(argv)
-    runs.extend(tokens[i:] for i, t in enumerate(tokens) if os.path.basename(t) in _VCS)
+        runs.append((argv, True))
+    runs.extend((tokens[i:], False) for i, t in enumerate(tokens) if os.path.basename(t) in _VCS)
     return runs
 
 
@@ -236,7 +237,7 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
     if _STDIN_ARGUMENTS & set(command.wrappers) and command.argv and os.path.basename(command.argv[0]) in _VCS:
         if _mentions_merge_or_push(command.argv):
             return f"{command.wrappers[0]} into a merge or push is not allowed, since stdin can supply the branch; {_PR_HINT}"
-    for run in _vcs_runs(tokens):
+    for run, resolved in _vcs_runs(tokens):
         rest = run[1:]
         if _mentions_merge_or_push(run) and any("$" in t for t in rest):
             return "a variable in a merge or push is not allowed; name the branch literally, e.g. `git push -u origin feat/x`"
@@ -245,7 +246,9 @@ def _check_statement(tokens: list[str], protected: frozenset[str]) -> str | None
         else:
             _, sub, sub_rest = _git_parts(rest)
             if sub.startswith("--"):
-                return f"unknown git option {sub} before the subcommand; {_PR_HINT}"
+                if resolved or _GIT_SENSITIVE & set(rest):
+                    return f"unknown git option {sub} before the subcommand; {_PR_HINT}"
+                continue
             reason = _check_config(rest) or (_check_push(sub_rest, protected) if sub == "push" else None)
         if reason:
             return reason

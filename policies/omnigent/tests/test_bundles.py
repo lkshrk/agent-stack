@@ -279,6 +279,16 @@ CASES: list[Case] = [
         )
         for form in (command, ["bash", "-lc", command])
     ],
+    *[
+        Case(agent, "tool_call", tool, {"command": form}, "ALLOW")
+        for agent, tool in (("polly", "sys_os_shell"), ("polly/agents/claude_code", "Bash"), ("polly/agents/codex", "Bash"), ("documenter", "Bash"))
+        for command in ("rg -n git --hidden", "grep -rn git --include '*.md' docs")
+        for form in (command, ["bash", "-lc", command])
+    ],
+    *[
+        Case(agent, "tool_call", tool, {"command": "apt-get install -y git --no-install-recommends"}, "ALLOW")
+        for agent, tool in (("polly", "sys_os_shell"), ("polly/agents/claude_code", "Bash"), ("documenter", "Bash"))
+    ],
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "git commit -m \"$(cat <<'EOF'\nfix: it's done\nEOF\n)\""}, "ALLOW"),
     Case("polly/agents/claude_code", "tool_call", "Bash", {"command": "gh pr create --title x --body \"$(cat <<'EOF'\n## Summary\n- it's \"done\"\nEOF\n)\""}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cat <<E\nit's\nE\ngit push origin main #'"}, "DENY"),
