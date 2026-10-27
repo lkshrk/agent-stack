@@ -211,7 +211,7 @@ def path_guard(
     def scratch(path: str) -> bool:
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
-    def check_scope(command: str) -> Decision | None:
+    def check_scope(command: str, scope: list[str]) -> Decision | None:
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for tokens in walk(command, literal_operators=True):
@@ -219,7 +219,7 @@ def path_guard(
         for target in (posixpath.normpath(t) for t in targets):
             if escapes(target):
                 return _deny(f"shell write to {target} leaves the checkout")
-            if not scratch(target) and not _matches_any(target, allowed_only + exempted):
+            if not scratch(target) and not _matches_any(target, scope):
                 return _deny(f"shell write to {target} is outside allowed paths")
         return None
 
@@ -239,7 +239,7 @@ def path_guard(
         if reason:
             return _deny(reason)
         if allowed_only is not None:
-            decision = check_scope(command)
+            decision = check_scope(command, [*allowed_only, *exempted])
             if decision:
                 return decision
         for tokens in statements:
