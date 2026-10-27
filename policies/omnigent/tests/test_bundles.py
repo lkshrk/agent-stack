@@ -526,6 +526,11 @@ CASES: list[Case] = [
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "cp a src/x 2>/dev/null"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "echo x > ../other/x.md"}, "DENY"),
+    *[
+        Case("documenter", "tool_call", "Bash", {"command": form}, "DENY")
+        for command in ("tee ../other/x.md < /tmp/a", "sed -i s/a/b/ ../other/README.md", "mv /tmp/a.md ../../x.md", "cp /tmp/a.md ../x.md")
+        for form in (command, ["bash", "-lc", command])
+    ],
 
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]
