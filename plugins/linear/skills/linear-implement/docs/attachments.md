@@ -23,9 +23,13 @@ Do these steps for one file at a time.
    (`Content-Type` is one of them):
 
    ```sh
+   bash <<'SH'
    mapfile -t H < <(jq -r '.uploadRequest.headers | to_entries[] | "-H\n\(.key): \(.value)"' prepare.json)
    curl -sS --fail-with-body -X PUT --data-binary @shot.png "${H[@]}" "$(jq -r .uploadRequest.url prepare.json)"
+   SH
    ```
+
+   Needs `bash`, `jq` and `curl`; the explicit `bash` keeps it working from zsh.
 
    Any non-2xx status makes `curl` exit non-zero; stop and report it.
 3. Call `create_attachment_from_upload(issue, assetUrl, title?, subtitle?)`.
