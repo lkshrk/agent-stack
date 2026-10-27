@@ -221,10 +221,10 @@ def path_guard(
             return False
         expanded = re.sub(r"^(?:~|~omnigent|\$HOME|\$\{HOME\})(?=/|$)", home, path)
         normal = posixpath.normpath(expanded)
-        if not normal.startswith("/") and "/" not in normal:
-            normal = f"{home}/{normal}"
         if normal in {f"{home}/{name}" for name in startup}:
             return True
+        if posixpath.dirname(normal) != home:
+            return False
         if any(ch in path for ch in "*?[") or "{" in path:
             pattern = re.sub(r"\{[^}]*\}", "*", posixpath.basename(expanded))
             return any(fnmatchcase(name, pattern) for name in startup)
