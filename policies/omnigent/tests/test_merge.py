@@ -220,6 +220,44 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
+    def test_no_merge_graphql_literal_fields_only(self):
+        q = "\"$(cat /tmp/q)\""
+        for command in (
+            'bash -c "gh api graphql -f query=\\$Q"',
+            'bash -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""',
+            'bash -c "gh api graphql -f query=\\`cat /tmp/q\\`"',
+            'sh -c "gh api graphql -f \'query\'=\\"\\$(cat /tmp/q)\\""',
+            f"gh api graphql -f $'\\x71uery'={q}",
+            f"gh api graphql -f $'\\161uery'={q}",
+            f"gh api graphql -f q$'u'ery={q}",
+            f'gh api graphql -f "$K"={q}',
+            f"gh api graphql -f $K={q}",
+            'gh api graphql -f "$K=$V"',
+            'gh api graphql -f "$F"',
+            "gh api graphql -F $F",
+            'gh api graphql "$@"',
+            f"gh api graphql -f quer?={q}",
+            f"gh api graphql -f quer[y]={q}",
+            "gh api graphql -f novalue",
+            "E=graphql; gh api $E -f query='mutation { mergePullRequest(input:{}) { x } }'",
+            "gh api \"$E\" --input /tmp/q.json",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh api graphql -F owner=$OWNER -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api graphql -F owner=\"$OWNER\" -F repo='{repo}' -f query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }'",
+            "gh api graphql -F owner={owner} -f query='{ viewer { login } }'",
+            "gh api graphql --paginate -f query='query($endCursor: String) { viewer { login } }' --jq '.data.viewer'",
+            "gh api graphql -f query='{ viewer { login } }' --template '{{.data.viewer.login}}'",
+            "gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: \"x\"}) { thread { id } } }'",
+            "bash -c \"gh api graphql -f query='{ viewer { login } }'\"",
+            "gh api repos/o/r/issues/5/comments -f body=\"$BODY\"",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

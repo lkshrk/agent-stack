@@ -16,6 +16,12 @@ _MERGE_MUTATION = re.compile(r"mergePullRequest|mergeBranch|enablePullRequestAut
 _GRAPHQL_ENDPOINT = re.compile(r"(?:^|/)graphql/?(?:$|[?#])", re.IGNORECASE)
 _FIELD_ASSIGNMENT = re.compile(r"^[A-Za-z_][\w.\[\]]*=")
 _GH_GROUPS = frozenset({"alias", "extension", "extensions", "ext"})
+_GH_API_FIELDS = frozenset({"-f", "-F", "--field", "--raw-field"})
+_GH_API_VALUES = frozenset({
+    "-X", "--method", "-H", "--header", "--input", "-q", "--jq", "-t", "--template", "--hostname", "--cache",
+    "-p", "--preview",
+}) | _GH_API_FIELDS
+_LITERAL_KEY = re.compile(r"[^$`*?\[\]{}]+")
 _GH_CONFIG_ENV = re.compile(r"^(?:GH_CONFIG_DIR|XDG_CONFIG_HOME)=")
 _FORCE_LONG = frozenset({"force", "force-with-lease", "force-if-includes"})
 _REF_FLAGS = frozenset({"tags", "follow-tags", "mirror", "all", "branches"})
@@ -97,13 +103,46 @@ def _graphql_request(rest: list[str]) -> bool:
     )
 
 
+def _api_parts(rest: list[str]) -> tuple[list[str], list[str]]:
+    """(positional words, -f/-F/--field/--raw-field values) of a `gh … api` argv."""
+    args = rest[rest.index("api") + 1 :] if "api" in rest else []
+    positional, fields, i = [], [], 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, value = arg.partition("=")
+        if arg in _GH_API_VALUES:
+            if arg in _GH_API_FIELDS and i + 1 < len(args):
+                fields.append(args[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--") and eq:
+            if name in _GH_API_FIELDS:
+                fields.append(value)
+        elif arg[:2] in ("-f", "-F") and len(arg) > 2:
+            fields.append(arg[2:])
+        elif not arg.startswith("-") or arg == "-":
+            positional.append(arg)
+        i += 1
+    return positional, fields
+
+
+def _graphql_field_problem(rest: list[str]) -> str | None:
+    positional, fields = _api_parts(rest)
+    if len(positional) > 1:
+        return "gh api graphql with an extra argument (such as \"$@\") is not allowed"
+    for field in fields:
+        key, eq, _ = field.partition("=")
+        if not eq or not _LITERAL_KEY.fullmatch(key):
+            return f"gh api graphql field {field!r} needs a literal key=value; write each field literally"
+    return None
+
+
 def _expanding_query(text: str) -> bool:
-    """A word whose shell-dequoted form contains `query=` and has a `$` or backtick the shell expands, or whose key is built by an unquoted `{…}` before its `=`."""
-    plain, quote, expands, braced, i = [], None, False, False, 0
+    """A word whose shell-dequoted form contains `query=` and has a `$` or backtick the shell expands."""
+    plain, quote, expands, i = [], None, False, 0
 
     def flagged() -> bool:
-        word = "".join(plain)
-        return ("=" in word and braced) or (expands and "query=" in word)
+        return expands and "query=" in "".join(plain)
 
     while i < len(text):
         ch = text[i]
@@ -127,10 +166,9 @@ def _expanding_query(text: str) -> bool:
         elif ch.isspace() or ch in ";&|()":
             if flagged():
                 return True
-            plain, expands, braced = [], False, False
+            plain, expands = [], False
         else:
             expands = expands or ch in "$`"
-            braced = braced or (ch == "{" and "=" not in plain)
             plain.append(ch)
         i += 1
     return flagged()
@@ -145,8 +183,11 @@ def _check_gh(rest: list[str], expanding_query: bool = False) -> str | None:
     if words[:1] and words[0] in _GH_GROUPS and words[1:2] not in (["list"], ["ls"]):
         return f"gh {words[0]} can define a command that merges; only `gh {words[0]} list` is allowed; {_PR_HINT}"
     if _graphql_request(rest):
+        problem = _graphql_field_problem(rest)
+        if problem:
+            return f"{problem}; {_PR_HINT}"
         if any(t == "--input" or t.startswith("--input=") or "query=@" in t for t in rest) or expanding_query:
-            return f"gh api graphql with a query from a file, stdin, a variable or a command substitution is not allowed; write the query inline in single quotes; {_PR_HINT}"
+            return f"gh api graphql with a query from a file, stdin, a variable, a command substitution or $'…' quoting is not allowed; write the query inline in single quotes; {_PR_HINT}"
         if any(_MERGE_MUTATION.search(t) for t in rest):
             return f"merge through gh api graphql is not allowed; {_PR_HINT}"
     return None
@@ -357,7 +398,7 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             extra = _nested_command(tokens)
             if extra is not None:
                 texts.append(extra)
-        expanding_query = gh_runs and any(_expanding_query(t) for t in texts)
+        expanding_query = gh_runs and any(_expanding_query(t) or ansi_quoted(t) for t in texts)
         for tokens in statements:
             reason = _check_statement(tokens, protected, expanding_query)
             if reason:

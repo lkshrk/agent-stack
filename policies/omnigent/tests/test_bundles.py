@@ -293,6 +293,11 @@ CASES: list[Case] = [
             ("echo graphql | xargs -I{} gh api {} -f query='mutation { mergePullRequest(input:{}) { x } }'", "DENY"),
             ("echo merge 5 | xargs gh pr", "DENY"),
             ("ls | xargs -I{} gh pr view {}", "DENY"),
+            ('bash -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""', "DENY"),
+            ('gh api graphql -f "$K"="$(cat /tmp/q)"', "DENY"),
+            ('gh api graphql "$@"', "DENY"),
+            ("gh api graphql -f $'\\x71uery'=\"$(cat /tmp/q)\"", "DENY"),
+            ("gh api graphql -F owner=$OWNER -f query='query($owner: String!) { repositoryOwner(login: $owner) { login } }'", "ALLOW"),
         )
         for form in (command, ["bash", "-lc", command])
     ],
