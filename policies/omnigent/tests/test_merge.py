@@ -401,3 +401,24 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
 
     def test_real_comment_allowed(self):
         self.assertEqual(run("(make test)# run tests\ngit push -u origin feat/x")["result"], "ALLOW")
+
+
+class GhFlagsBeforeVerbTest(unittest.TestCase):
+    def test_pr_merge_with_flags_between_denied(self):
+        for command in (
+            "gh pr -R o/r merge 5",
+            "gh pr --repo=o/r merge 5",
+            "gh pr --repo o/r merge 5",
+            "gh --repo o/r pr --repo o/r merge 5",
+            "gh -R o/r pr -R o/r merge",
+            "gh pr -Ro/r merge 5",
+            "gh api -X PUT 'repos/o/r/pulls/5/merge?merge_method=squash'",
+            "gh alias set pm pr merge",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_other_pr_verbs_allowed(self):
+        for command in ("gh pr -R o/r view 5", "gh pr --repo=o/r diff 5", "gh pr view merge", "gh pr list --search merge"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

@@ -6,7 +6,8 @@ from ._event import Decision, Event, allow, deny, tool_call, tool_name
 from ._shell import DEFAULT_PROTECTED, OpaqueCommand, ansi_quoted, hidden_command, opaque_name, push_branch, push_destination, resolve, shell_command, substituted, walk
 from .paths import SHELL_TOOLS
 
-_MERGE_API = re.compile(r"pulls/\d+/merge$|/merges$")
+_MERGE_API = re.compile(r"pulls/\d+/merge(?:$|\?)|/merges(?:$|\?)")
+_GH_VALUE_FLAGS = frozenset({"-R", "--repo", "--hostname"})
 _MERGE_MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge")
 _FORCE_LONG = ("--force", "--force-with-lease", "--force-if-includes")
 _REF_FLAGS = ("--tags", "--follow-tags", "--mirror", "--all")
@@ -57,8 +58,22 @@ def _vcs_runs(tokens: list[str]) -> list[list[str]]:
     return runs
 
 
+def _gh_words(rest: list[str]) -> list[str]:
+    """gh's command words without flags and their values (`-R o/r`, `--repo=o/r`, `-Ro/r`)."""
+    words, i = [], 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg.startswith("-"):
+            i += 2 if arg in _GH_VALUE_FLAGS else 1
+            continue
+        words.append(arg)
+        i += 1
+    return words
+
+
 def _check_gh(rest: list[str]) -> str | None:
-    if any(a == "pr" and b == "merge" for a, b in zip(rest, rest[1:])):
+    words = _gh_words(rest)
+    if words[:2] == ["pr", "merge"] or any(a == "pr" and b == "merge" for a, b in zip(words, words[1:])):
         return f"gh pr merge is not allowed; {_PR_HINT}"
     if "api" in rest and any(_MERGE_API.search(t) for t in rest):
         return f"merge through gh api is not allowed; {_PR_HINT}"
