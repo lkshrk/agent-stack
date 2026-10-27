@@ -218,7 +218,7 @@ N6_PROBES = [
     "bash -c 'rg x' _ a",
     ["bash", "-lc", "bash -c 'echo ${0@P}' '\\044(touch /tmp/p)'"],
 ]
-QUOTED_NAME_PROBES = ["$'rg' x", "$'\\x72g' x src"]
+QUOTED_NAME_PROBES = ["$'\\x74ouch' x", "t$'ouch' x"]
 N4_PROBES = [
     "printf -v y '%s%s' 'a[$' '(touch /tmp/p)]'; echo ${x:y}",
     "printf -v PATH '%s' ./bin; rg x",
@@ -537,6 +537,10 @@ CASES += [
         "$'git' push origin main",
         "$'\\x63laude' -p hi",
         "$'claude' -p hi",
+        "g$'it' push origin main",
+        "git p$'ush' origin main",
+        "c$'laude' -p hi",
+        "g$'h' pr merge 1",
     )
 ]
 CASES += [

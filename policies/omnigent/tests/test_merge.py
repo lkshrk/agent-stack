@@ -313,3 +313,24 @@ class QuotedNameTest(unittest.TestCase):
         for command in ("echo $'a\\tb' && git push -u origin feat/x", "printf $'x\\n'", "git commit -m $'line\\nmore'"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class MidWordQuotingTest(unittest.TestCase):
+    def test_mid_word_quoting_denied(self):
+        for command in (
+            "g$'it' push origin main",
+            "git p$'ush' origin main",
+            "g$'h' pr merge 1",
+            "gh pr m$'erge' 1",
+            "g$'\\x69t' push origin main",
+            "g$\"it\" push origin main",
+            "git push origin m$'ain'",
+            "git push origin HEAD:$'\\x6d'ain",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_ansi_c_in_arguments_allowed(self):
+        for command in ("git commit -m $'a\\nb'", "printf $'a\\tb'", "rg $'\\t' src", "git push -u origin feat/x"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

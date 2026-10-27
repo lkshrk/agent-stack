@@ -125,9 +125,9 @@ def _quoted_vcs(text: str, statements: list[list[str]]) -> str | None:
         if opaque_name(text, argv[0]):
             return f"a command name in $'…' or $\"…\" quoting is not allowed; {_PR_HINT}"
         name = os.path.basename(argv[0])
-        if name == "git" and _git_parts(argv[1:])[1].startswith("$"):
+        if name == "git" and "$" in _git_parts(argv[1:])[1]:
             return f"a git subcommand in a variable or $'…' quoting is not allowed; {_PR_HINT}"
-        if name == "gh" and any(a.startswith("$") for a in argv[1:3]):
+        if name == "gh" and any("$" in a for a in argv[1:3]):
             return f"a gh subcommand in a variable or $'…' quoting is not allowed; {_PR_HINT}"
     return None
 

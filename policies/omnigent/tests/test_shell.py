@@ -155,3 +155,25 @@ class OpaqueTest(unittest.TestCase):
         for command, expected in cases.items():
             with self.subTest(command=command):
                 self.assertEqual(resolve(parse(command)[0]).body_arguments, expected)
+
+
+class AnsiCDecodeTest(unittest.TestCase):
+    def test_words_decoded(self):
+        cases = {
+            "g$'it' push": ["git", "push"],
+            "$'\\x67it' push": ["git", "push"],
+            "$'\\147it' push": ["git", "push"],
+            "$'\\u0067it' push": ["git", "push"],
+            "g$\"it\" push": ["git", "push"],
+            "echo $'it\\'s'": ["echo", "it's"],
+            "echo $'a\\\\b'": ["echo", "a\\b"],
+            "echo '$'\"'\"x": ["echo", "$'x"],
+            "echo \"$'x'\"": ["echo", "$'x'"],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(parse(command)[0], expected)
+
+    def test_newline_and_tab_stay_inside_the_word(self):
+        self.assertEqual(parse("git commit -m $'a\\nb'"), [["git", "commit", "-m", "a\nb"]])
+        self.assertEqual(parse("printf $'a\\tb'"), [["printf", "a\tb"]])

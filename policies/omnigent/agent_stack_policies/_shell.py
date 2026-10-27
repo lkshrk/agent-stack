@@ -104,9 +104,86 @@ def _lines(command: str) -> list[str]:
     return lines
 
 
+_ANSI_SIMPLE = {
+    "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v",
+    "\\": "\\", "'": "'", '"': '"', "?": "?",
+}
+_ANSI_DIGITS = {"x": (16, 2), "u": (16, 4), "U": (16, 8)}
+
+
+def _ansi_body(text: str, start: int) -> tuple[str, int] | None:
+    """Decode a `$'…'` body from `start` (just after the opening quote) by bash's rules; (value, index after the closing quote) or None when unterminated."""
+    out, i = [], start
+    while i < len(text):
+        ch = text[i]
+        if ch == "'":
+            return "".join(out), i + 1
+        if ch != "\\" or i + 1 >= len(text):
+            out.append(ch)
+            i += 1
+            continue
+        esc = text[i + 1]
+        if esc in _ANSI_SIMPLE:
+            out.append(_ANSI_SIMPLE[esc])
+            i += 2
+        elif esc in _ANSI_DIGITS:
+            base, width = _ANSI_DIGITS[esc]
+            digits = re.match(r"[0-9a-fA-F]{1,%d}" % width, text[i + 2 :])
+            if digits:
+                out.append(chr(int(digits.group(), base) % 0x110000))
+                i += 2 + len(digits.group())
+            else:
+                out.append("\\" + esc)
+                i += 2
+        elif esc in "01234567":
+            digits = re.match(r"[0-7]{1,3}", text[i + 1 :]).group()
+            out.append(chr(int(digits, 8) & 0xFF))
+            i += 1 + len(digits)
+        elif esc == "c" and i + 2 < len(text):
+            out.append(chr(ord(text[i + 2]) & 0x1F))
+            i += 3
+        else:
+            out.append("\\" + esc)
+            i += 2
+    return None
+
+
+def decode_ansi(command: str) -> str:
+    """Rewrite `$'…'` as the single-quoted decoded value and `$"…"` as `"…"`, so the lexer sees the words bash runs."""
+    out, i, quote = [], 0, None
+    while i < len(command):
+        ch = command[i]
+        if quote == "'":
+            quote = None if ch == "'" else quote
+        elif quote == '"':
+            if ch == "\\" and i + 1 < len(command):
+                out.append(command[i : i + 2])
+                i += 2
+                continue
+            quote = None if ch == '"' else quote
+        elif ch == "\\" and i + 1 < len(command):
+            out.append(command[i : i + 2])
+            i += 2
+            continue
+        elif ch == "$" and command[i + 1 : i + 2] == "'":
+            decoded = _ansi_body(command, i + 2)
+            if decoded is not None:
+                value, i = decoded
+                out.append("'" + value.replace("'", "'\\''") + "'")
+                continue
+        elif ch == "$" and command[i + 1 : i + 2] == '"':
+            i += 1
+            continue
+        elif ch in "'\"":
+            quote = ch
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def parse(command: str) -> list[list[str]]:
     statements: list[list[str]] = []
-    for line in _lines(command):
+    for line in _lines(decode_ansi(command)):
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
@@ -381,7 +458,7 @@ def ansi_quoted(text: str) -> bool:
 
 
 def opaque_name(text: str, token: str) -> bool:
-    return token.startswith("$") and ansi_quoted(text)
+    return "$" in token and ansi_quoted(text)
 
 
 def decoding(text: str) -> bool:

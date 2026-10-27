@@ -218,3 +218,15 @@ class NoNestedAgentsTest(unittest.TestCase):
     def test_unparseable_arguments_denied(self):
         event = {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}}
         self.assertEqual(no_nested_agents()(event)["result"], "DENY")
+
+
+class MidWordQuotingTest(unittest.TestCase):
+    def test_mid_word_quoting_denied(self):
+        for command in ("c$'laude' -p hi", "c$'\\x6c'aude -p hi", "co$\"dex\" exec x", "codex e$'xec' x"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_ansi_c_in_arguments_allowed(self):
+        for command in ("printf $'a\\tb'", "rg $'\\t' src", "git commit -m $'a\\nb'"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

@@ -357,3 +357,10 @@ class SharedResolverTest(unittest.TestCase):
     def test_non_string_command_denied(self):
         policy = docs_vcs(allow_paths=ALLOW_PATHS)
         self.assertEqual(policy(tool_call_event("bash", {"command": {"a": 1}}))["result"], "DENY")
+
+
+class MidWordQuotingTest(unittest.TestCase):
+    def test_mid_word_quoting_denied(self):
+        for command in ("g$'it' push origin main", "git a$'dd' backend/app/main.py", "g$'h' pr merge 1"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
