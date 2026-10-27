@@ -84,6 +84,38 @@ class NoMergeTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
+    def test_no_merge_gh_alias_extension_and_graphql_files_denied(self):
+        for command in (
+            "gh alias set m 'pr merge'",
+            "gh alias import /tmp/aliases.yml",
+            "gh alias delete m",
+            "gh alias",
+            "gh -R o/r alias set m 'pr merge'",
+            "gh extension install x/y",
+            "gh ext install x/y",
+            "gh extension upgrade --all",
+            "gh extension exec y",
+            "gh api graphql -F query=@/tmp/q.graphql",
+            "gh api graphql -f query=@/tmp/q.graphql",
+            "gh api graphql -Fquery=@/tmp/q.graphql",
+            "gh api graphql --field=query=@- < /tmp/q",
+            "gh api graphql --input /tmp/q.json",
+            "gh api graphql --input=- < /tmp/q.json",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh alias list",
+            "gh extension list",
+            "gh ext ls",
+            "gh api graphql -f query='{ viewer { login } }'",
+            "gh api graphql -F owner=o -f query='query { repository(owner: \"o\", name: \"r\") { id } }'",
+            "gh api repos/o/r/pulls/5 --input /tmp/x.json",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
     def test_no_merge_gh_api_read_allowed(self):
         self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
 

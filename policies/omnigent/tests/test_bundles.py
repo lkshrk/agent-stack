@@ -276,6 +276,9 @@ CASES: list[Case] = [
             ("git -c include.path=/tmp/c p origin", "DENY"),
             ("git -C .worktrees/t1 status", "ALLOW"),
             ("git --no-pager log -1", "ALLOW"),
+            ("gh alias set m 'pr merge'", "DENY"),
+            ("gh extension install x/y", "DENY"),
+            ("gh api graphql -F query=@/tmp/q.graphql", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],
@@ -574,6 +577,8 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh api -X PUT repos/o/r/pulls/5/merge#x"}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "PUT", "/repos/o/r/pulls/5/merge/"]}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "gh api -X PUT repos/o/r/PULLS/5/MERGE"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": "gh alias set m 'pr merge'"}, "DENY"),
+    Case("polly", "tool_call", "sys_os_shell", {"command": ["bash", "-lc", "gh api graphql -F query=@/tmp/q.graphql"]}, "DENY"),
     Case("polly", "tool_call", "sys_os_shell", {"command": "git diff $(git merge-base main HEAD) -- src/merge/x.py"}, "ALLOW"),
     Case("polly", "tool_call", "sys_os_shell", {"command": ["gh", "api", "-X", "POST", "repos/o/r/MERGES", "-f", "base=main"]}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ docs/a.md 2>/dev/null"}, "ALLOW"),

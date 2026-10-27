@@ -92,8 +92,13 @@ def _check_gh(rest: list[str]) -> str | None:
         return f"gh pr merge is not allowed; {_PR_HINT}"
     if "api" in rest and any(_MERGE_API.search(t) for t in rest):
         return f"merge through gh api is not allowed; {_PR_HINT}"
-    if "api" in rest and "graphql" in rest and any(_MERGE_MUTATION.search(t) for t in rest):
-        return f"merge through gh api graphql is not allowed; {_PR_HINT}"
+    if words[:1] in (["alias"], ["extension"], ["ext"]) and words[1:2] not in (["list"], ["ls"]):
+        return f"gh {words[0]} can define a command that merges; only `gh {words[0]} list` is allowed; {_PR_HINT}"
+    if "api" in rest and "graphql" in rest:
+        if any(t == "--input" or t.startswith("--input=") or "query=@" in t for t in rest):
+            return f"gh api graphql with a query from a file or stdin is not allowed; pass the query inline; {_PR_HINT}"
+        if any(_MERGE_MUTATION.search(t) for t in rest):
+            return f"merge through gh api graphql is not allowed; {_PR_HINT}"
     return None
 
 
