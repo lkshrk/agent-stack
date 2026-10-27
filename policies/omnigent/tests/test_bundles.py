@@ -656,6 +656,18 @@ class BundleVerdictTest(unittest.TestCase):
         run = [("sys_os_shell", {"command": "rg -n createOrder backend/src"}), ("response", response)]
         self.assertEqual(run_sequence("planner", run), ["ALLOW", "DENY"])
 
+    def test_polly_denied_send_is_not_counted(self):
+        state = {}
+        no_purpose = {"agent": "claude_code", "title": "fix-x", "args": {"input": "x"}}
+        self.assertEqual(run_sequence("polly", [("sys_session_send", no_purpose)], state), ["DENY"])
+        self.assertNotIn("agent_stack_dispatches", state)
+        state = {"_policy_tool_call_count": 800}
+        self.assertEqual(run_sequence("polly", [("sys_session_send", DISPATCH)], state), ["DENY"])
+        self.assertNotIn("agent_stack_dispatches", state)
+        state = {}
+        self.assertEqual(run_sequence("polly", [("sys_session_send", DISPATCH)], state), ["ALLOW"])
+        self.assertEqual(state["agent_stack_dispatches"], 1)
+
     def test_planner_denied_send_is_not_counted(self):
         state = {"_policy_tool_call_count": 300}
         run = [("sys_session_send", CRITIC_SEND), ("response", "Draft sent to the critic.")]

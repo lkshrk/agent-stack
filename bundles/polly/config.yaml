@@ -353,12 +353,6 @@ guardrails:
         arguments:
           max_dispatches_per_turn: 6
           dispatch_tools: [sys_session_send]
-    max_dispatches_per_session:
-      type: function
-      function:
-        path: agent_stack_policies.spawn.max_dispatches_per_session
-        arguments:
-          limit: 24
     max_tool_calls_per_session:
       type: function
       function:
@@ -383,3 +377,10 @@ guardrails:
         path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
         arguments:
           allowed_purposes: [implement, review, explore, search]
+    # Last: the engine keeps earlier policies' state on a later DENY.
+    max_dispatches_per_session:
+      type: function
+      function:
+        path: agent_stack_policies.spawn.max_dispatches_per_session
+        arguments:
+          limit: 24
