@@ -18,9 +18,21 @@ class SecurityReviewProfileTest(unittest.TestCase):
         self.assertEqual(self.profile["default_permissions"], "security-review")
         self.assertNotIn("sandbox_mode", self.profile)
 
-    def test_filesystem_is_read_only_except_tmp(self):
+    def test_filesystem_reads_are_narrow_and_only_tmp_is_writable(self):
         filesystem = self.profile["permissions"]["security-review"]["filesystem"]
-        self.assertEqual(filesystem, {":root": "read", "/tmp": "write"})
+        self.assertNotIn(":root", filesystem)
+        self.assertEqual({path for path, access in filesystem.items() if access == "write"}, {"/tmp"})
+        self.assertEqual(filesystem["/agent-secrets"], "none")
+        self.assertEqual(filesystem[":workspace_roots"], "read")
+        readable = {path for path, access in filesystem.items() if access == "read"}
+        self.assertFalse({p for p in readable if p.startswith(("/home", "/sandbox", "/root", "~"))})
+
+    def test_secret_env_vars_dropped(self):
+        policy = self.profile["shell_environment_policy"]
+        self.assertIs(policy["ignore_default_excludes"], False)
+        self.assertLessEqual(
+            {"*_KEY", "*_TOKEN", "*_SECRET", "LITELLM_*", "GH_*", "GITHUB_TOKEN"}, set(policy["exclude"])
+        )
 
     def test_network_enabled(self):
         self.assertIs(self.profile["permissions"]["security-review"]["network"]["enabled"], True)
