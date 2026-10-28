@@ -334,7 +334,7 @@ def _range_parts(body: str) -> list[str]:
     start, end = (int(first), int(last)) if numeric else (ord(first), ord(last))
     count = abs(end - start) // step + 1
     if count > _MAX_ALTERNATIVES:
-        return [r"-?[0-9]+"] if numeric else [r"[A-Za-z]"]
+        return ["__NUMBER_RANGE__"] if numeric else ["__LETTER_RANGE__"]
     values = range(start, end + (1 if end >= start else -1), step if end >= start else -step)
     if not numeric:
         return [chr(value) for value in values]
@@ -355,6 +355,10 @@ def _glob_regex(word: str, home: str, dotglob: bool, segment_start: bool = True)
         if i == 0 and word.startswith("~") and (len(word) == 1 or word[1] == "/" or word.startswith("~" + posixpath.basename(home))):
             end = 1 + len(posixpath.basename(home)) if word.startswith("~" + posixpath.basename(home)) else 1
             out.append(re.escape(home)); i = end; segment_start = False; continue
+        if word.startswith("__NUMBER_RANGE__", i):
+            out.append(r"-?[0-9]+"); i += len("__NUMBER_RANGE__"); segment_start = False; continue
+        if word.startswith("__LETTER_RANGE__", i):
+            out.append(r"[A-Za-z]"); i += len("__LETTER_RANGE__"); segment_start = False; continue
         char = word[i]
         if char == "{":
             depth, close, commas = 0, None, []
@@ -424,15 +428,22 @@ def path_guard(
             return True
         if not path.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")):
             return False
-        if len(path) > 4096 or sum(path.count(char) for char in "*?{") > 16:
-            return True
-        if "/../" in path and any(name in path for name in startup):
-            return True
+        alternatives = brace_alternatives(path)
+        home_marked = path.startswith("~") or "$HOME" in path or "${HOME" in path or "/home/omnigent" in path or ("{" in path and ("home" in path or "omnigent" in path))
+        if alternatives is None:
+            if home_marked and ("/./" in path or "/../" in path or "/..{" in path or "/.{" in path):
+                return True
+        elif any("/." in alternative for alternative in alternatives):
+            tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
+            targets = [f"{home}/{name}" for name in startup]
+            for alternative in alternatives:
+                expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, alternative))
+                if posixpath.normpath(re.sub(r"/+", "/", expanded)) in targets:
+                    return True
         pattern = _glob_regex(re.sub(r"/+", "/", path), home, dotglob)
         targets = [f"{home}/{name}" for name in startup]
         if any(re.fullmatch(pattern, target) for target in targets):
             return True
-        alternatives = brace_alternatives(path)
         if alternatives is None:
             return False
         tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
@@ -481,7 +492,7 @@ def path_guard(
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
         dotglob = dotglob_enabled(command)
-        if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\}|/home/[^/]+)/(?:(?!\$\()[^\s;|])*\(", command):
+        if re.search(r"(?:~(?:omnigent)?|\"?\$HOME\"?|\"?\$\{HOME[^}]*\}\"?|/home/[^/]+)/(?:(?!\$\()[^\s;|])*\(", command):
             return _deny("startup file target with zsh grouping is not readable or writable")
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
@@ -492,6 +503,10 @@ def path_guard(
             home_capable = raw.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")) or "home" in raw or "omnigent" in raw
             if home_capable and (len(raw) > 4096 or sum(raw.count(char) for char in "*?{") > 16):
                 return _deny("startup path pattern is too large")
+            grouped = "(" in raw and "$(" not in raw and "<(" not in raw and ">(" not in raw
+            home_marked = raw.startswith(("~", "$HOME", "${HOME}", '"$HOME"', "/")) or "home" in raw or "omnigent" in raw
+            if grouped and home_marked:
+                return _deny(f"startup file {raw} is not readable or writable")
             if startup_path(raw, dotglob):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
