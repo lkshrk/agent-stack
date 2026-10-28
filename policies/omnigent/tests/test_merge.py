@@ -436,6 +436,17 @@ class NoMergeTest(unittest.TestCase):
             "echo 'gh pr merge 5' | nsenter -t 1",
             "chroot / bash -c 'gh pr merge 5'",
             "echo 'gh pr merge 5' | chroot /",
+            "taskset 1 capsh -- -c 'gh pr merge 5'",
+            "prlimit capsh -- -c 'gh pr merge 5'",
+            "setarch x86_64 capsh -- -c 'gh pr merge 5'",
+            "linux32 capsh -- -c 'gh pr merge 5'",
+            "linux64 capsh -- -c 'gh pr merge 5'",
+            "x86_64 capsh -- -c 'gh pr merge 5'",
+            "i386 capsh -- -c 'gh pr merge 5'",
+            "xvfb-run capsh -- -c 'gh pr merge 5'",
+            "bwrap --bind / / capsh -- -c 'gh pr merge 5'",
+            "start-stop-daemon -S -x /bin/bash -- -c 'gh pr merge 5'",
+            "chrt -o 0 sg omnigent 'gh pr merge 5'",
         ):
             words = command.split("| ")[-1].split()
             name = words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1]

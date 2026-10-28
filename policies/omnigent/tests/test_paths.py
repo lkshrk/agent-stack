@@ -719,11 +719,58 @@ class ShellWriteScopeTest(unittest.TestCase):
             "ln -sf {/tmp/a.py,src/a.py}",
             "cp -t .polly/diffs {/tmp/a.py,src/a.py}",
             "cp {/tmp/a.md,../other/a.md}",
-            "cat ~/.bash{1..1000}x/y",
         ):
             with self.subTest(command=command):
                 for decision in shell(command):
                     self.assertEqual(decision["result"], "ALLOW")
+        for command in ("cat ~/.bash{1..1000}x/y",):
+            with self.subTest(command=command):
+                for decision in shell(command):
+                    self.assertEqual(decision["result"], "DENY")
+
+    def test_startup_globs_honor_dotglob_settings(self):
+        guard = path_guard(startup_files=[".bashrc", ".bash_profile", ".zshrc", ".profile"], startup_home="/home/omnigent")
+        for command in (
+            "shopt -s dotglob; echo x | tee -a ~/*shrc",
+            "shopt -s globskipdots; echo x >> ~/*bashrc",
+            "shopt -s dotglob && echo x | tee -a /home/omnigent/?bashrc",
+            "shopt -s dotglob; echo x | tee -a ~/[.]bashrc",
+            "bash -O dotglob -c 'echo x | tee -a ~/*shrc'",
+            "bash +O dotglob -c 'echo x | tee -a ~/*shrc'",
+            "GLOBIGNORE=x; echo x | tee -a ~/*bashrc",
+            "GLOBIGNORE=x; echo x >> ~/*bashrc",
+            "zsh -c 'setopt globdots; echo x | tee -a ~/*bashrc'",
+            "zsh -c 'setopt glob_dots; echo x | tee -a ~/*bashrc'",
+            "zsh -o globdots -c 'echo x | tee -a ~/*bashrc'",
+            "zsh -c 'echo x | tee -a ~/*bashrc(D)'",
+            "zsh -c 'echo x | tee -a ~/*bashrc(.D)'",
+            "zsh -c 'echo x | tee -a ~/*bashrc(#qD)'",
+            "set -o dotglob; echo x | tee -a ~/*bashrc",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "DENY")
+        self.assertEqual(guard(tool_call_event("Bash", {"command": "tee -a ~/*bashrc"}))["result"], "ALLOW")
+
+    def test_cap_fallback_requires_home_like_text(self):
+        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
+        for command in (
+            "echo {1..300}",
+            "mkdir -p out/{a,b}/{1..200}",
+            "ls /usr/lib/{x,y}{1..300}",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
+        for command in (
+            "tee -a /h{ome/omnigent/.bashrc,}{,{1..300}}",
+            "tee -a /home/omnigen{t/.bashrc,}{,{1..300}}",
+            "cat /home/omnigen{t/.bashrc,}{,{1..300}}",
+            "tee -a {~/.bashrc,x}{,{1..300}}",
+            "tee -a /{home,x}/omnigent/.bashrc{,{1..300}}",
+            "cat ~/.bash{1..1000}rc",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "DENY")
 
     def test_brace_alternatives(self):
         self.assertEqual(brace_alternatives("a{b,c}d"), ["abd", "acd"])
