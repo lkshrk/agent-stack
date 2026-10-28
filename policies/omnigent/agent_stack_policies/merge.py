@@ -41,7 +41,7 @@ _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f":
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs"})
 # The resolver doesn't unwrap these, and each can start a shell or hand it a command string.
-_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot"})
+_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt"})
 # GNU xargs getopt: options with a required value, and those with an optional attached value.
 _XARGS_REQUIRED = frozenset("aEILnsPd")
 _XARGS_OPTIONAL = frozenset("eil")
@@ -467,8 +467,10 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             resolved = resolve(tokens)
             if "parallel" in resolved.wrappers:
                 return deny("parallel is not available; run commands directly")
-            if resolved.name in _SHELL_LAUNCHERS:
-                return deny(f"{resolved.name} is not allowed; run commands directly")
+            names = [os.path.basename(token) for token in tokens]
+            name = next((name for name in names if name in _SHELL_LAUNCHERS), resolved.name)
+            if name in _SHELL_LAUNCHERS and not (names and names[0] in {"which", "rg", "grep", "egrep", "fgrep", "man", "echo", "printf"}):
+                return deny(f"{name} is not allowed; run commands directly")
         reason = hidden_command(command, statements, _VCS_TEXT) or _quoted_vcs(command, statements)
         if not reason and _VCS_TEXT.search(command):
             reason = _config_environment(statements)

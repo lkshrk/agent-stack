@@ -41,6 +41,7 @@ _MAX_ALTERNATIVES = 256
 _BRACE_WILD = "\0"
 _INNER_BRACE = re.compile(r"\{[^{}]*\}")
 _HOME_VARIABLE = re.compile(r"\"?\$(?:HOME\b|\{HOME\})\"?")
+_DOTGLOB = re.compile(r"(?:\b(?:dotglob|globskipdots|globdots|glob_dots)\b|\bGLOBIGNORE\s*=|\([^)]*(?:#q[^)]*D|\.D|D)[^)]*\))", re.IGNORECASE)
 _POSIX_CLASSES = {
     "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
     "xdigit": "0-9A-Fa-f", "space": r" \t\n\r\f\v", "blank": r" \t", "word": "a-zA-Z0-9_",
@@ -300,9 +301,9 @@ def _bracket(pattern: str, start: int) -> tuple[str, int] | None:
     return "[" + ("^" if negate else "") + "".join(body) + "]", i + 1
 
 
-def segment_matches(pattern: str, name: str) -> bool:
+def segment_matches(pattern: str, name: str, dotglob: bool = False) -> bool:
     """Bash glob match of one path segment, with dotglob off."""
-    if name.startswith(".") and pattern[:1] in ("*", "?", "["):
+    if not dotglob and name.startswith(".") and pattern[:1] in ("*", "?", "["):
         return False
     regex, i = [], 0
     while i < len(pattern):
@@ -335,16 +336,13 @@ def path_guard(
     startup = frozenset(startup_files or [])
     home = startup_home.rstrip("/") if startup_home else None
 
-    def startup_path(path: str) -> bool:
+    def startup_path(path: str, dotglob: bool = False) -> bool:
         if not startup or not home:
             return False
         alternatives = brace_alternatives(path)
         if alternatives is None:
-            names = {part for name in startup for part in name.split("/")}
-            wild = path
-            while _INNER_BRACE.search(wild):
-                wild = _INNER_BRACE.sub(_BRACE_WILD, wild)
-            return any(segment_matches(segment, name) for segment in wild.split("/") for name in names)
+            skeleton = re.sub(r"[{},]", "", _HOME_VARIABLE.sub(lambda _: home, path))
+            return "~" in skeleton or "home" in skeleton or "omnigent" in skeleton
         targets = [f"{home}/{name}".split("/") for name in startup]
         tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
         for alternative in alternatives:
@@ -354,7 +352,7 @@ def path_guard(
                 continue
             segments = normal.split("/")
             for target in targets:
-                if len(segments) == len(target) and all(segment_matches(s, t) for s, t in zip(segments, target)):
+                if len(segments) == len(target) and all(segment_matches(s, t, dotglob) for s, t in zip(segments, target)):
                     return True
         return False
 
@@ -395,13 +393,14 @@ def path_guard(
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
+        dotglob = _DOTGLOB.search(command) is not None
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for literal in (False, True):
             for tokens in walk(command, literal_operators=literal):
                 targets += shell_write_targets(tokens)
         for raw in targets:
-            if startup_path(raw):
+            if startup_path(raw, dotglob):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
             if scope is not None:
@@ -435,7 +434,7 @@ def path_guard(
         for tokens in statements:
             for token in tokens:
                 candidate = _FLAG_PREFIX.sub("", token)
-                if candidate and startup_path(candidate):
+                if candidate and startup_path(candidate, _DOTGLOB.search(command) is not None):
                     return _deny(f"startup file {candidate} is not readable or writable")
                 if candidate and forbidden(candidate):
                     return _deny(
