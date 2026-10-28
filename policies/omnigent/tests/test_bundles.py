@@ -347,6 +347,16 @@ CASES: list[Case] = [
             ("echo 'gh pr merge 5' | taskset 1 setarch x86_64", "DENY"),
             ("which capsh", "ALLOW"),
             ("rg sg src", "ALLOW"),
+            ("command -V bwrap", "ALLOW"),
+            ("command -pv bwrap", "ALLOW"),
+            ("X=1 command -v bwrap", "ALLOW"),
+            ("if command -v bwrap >/dev/null; then echo y; fi", "ALLOW"),
+            ("shopt -s dot{glob,}; echo x | tee -a ~/*bashrc", "DENY"),
+            ("GLOBIGNORE{,X}=x; echo x | tee -a ~/*bashrc", "DENY"),
+            ("zsh -x4 -c 'echo x | tee -a ~/*bashrc'", "DENY"),
+            ("ls ~/* | head -40", "ALLOW"),
+            ("tee -a {/home/omnigent/.bashrc,x}{,{1..300}}", "DENY"),
+            ("tee -a /home/omnigent/.b?shrc{,{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}}", "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

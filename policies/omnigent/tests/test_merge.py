@@ -458,7 +458,7 @@ class NoMergeTest(unittest.TestCase):
                     decision = run(form)
                     self.assertEqual(decision["result"], "DENY")
                     self.assertIn(f"{name} is not allowed; run commands directly", decision["reason"])
-        for command in ("which capsh", "grep -r runuser docs", "rg sg src", "git log --grep chroot", "git grep -n taskset", '[ "$(uname -m)" = x86_64 ]', "test x86_64 = x86_64", "command -v bwrap", "cd sg", "find . -name chroot", "docker build --platform linux/x86_64 .", "ls /usr/sbin/runuser"):
+        for command in ("which capsh", "grep -r runuser docs", "rg sg src", "git log --grep chroot", "git grep -n taskset", '[ "$(uname -m)" = x86_64 ]', "test x86_64 = x86_64", "command -v bwrap", "command -V bwrap", "command -pv bwrap", "command -vp bwrap", "X=1 command -v bwrap", "if command -v bwrap >/dev/null; then echo y; fi", "cd sg", "find . -name chroot", "docker build --platform linux/x86_64 .", "ls /usr/sbin/runuser"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
