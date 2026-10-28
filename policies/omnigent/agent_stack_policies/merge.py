@@ -465,12 +465,10 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             return allow()
         for tokens in statements:
             resolved = resolve(tokens)
-            argv = list(tokens)
-            while argv and (argv[0] in {"if", "then", "elif", "while", "until", "do", "!", "{", "("} or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[0])):
-                argv.pop(0)
-            if argv and os.path.basename(argv[0]) == "command":
+            command_index = next((i for i, token in enumerate(tokens) if os.path.basename(token) == "command"), None)
+            if command_index is not None:
                 options = []
-                for arg in argv[1:]:
+                for arg in tokens[command_index + 1:]:
                     if arg == "--":
                         break
                     if not arg.startswith("-") or arg == "-":
