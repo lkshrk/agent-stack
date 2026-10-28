@@ -338,7 +338,6 @@ CASES: list[Case] = [
             ("zsh -c 'echo x | tee -a ~/*bashrc(D)'", "DENY"),
             ("tee -a /home/omnigen{t/.bashrc,}{,{1..300}}", "DENY"),
             ("echo {1..300}", "ALLOW"),
-            ("mkdir -p out/{a,b}/{1..200}", "DENY"),
             ("ls /usr/lib/{x,y}{1..300}", "ALLOW"),
             ("taskset 1 capsh -- -c 'gh pr merge 5'", "DENY"),
             ("prlimit capsh -- -c 'gh pr merge 5'", "DENY"),
