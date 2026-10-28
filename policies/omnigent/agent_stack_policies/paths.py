@@ -352,6 +352,17 @@ def path_guard(
         if alternatives is None:
             if not (path.startswith(("~", "$HOME", "${HOME}", '"$HOME"', "/")) or (path.startswith("{") and any(marker in path for marker in ("~", "$HOME", "${HOME}")))):
                 return False
+            partial = re.sub(r"\{(?:[-+]?\d+|[A-Za-z])\.\.(?:[-+]?\d+|[A-Za-z])(?:\.\.[-+]?\d+)?\}", "*", path)
+            partials = brace_alternatives(partial)
+            if partials is not None:
+                targets = [f"{home}/{name}".split("/") for name in startup]
+                tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
+                for alternative in partials:
+                    expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, alternative))
+                    normal = posixpath.normpath(re.sub(r"/+", "/", expanded))
+                    segments = normal.split("/")
+                    if normal.startswith("/") and any(len(segments) == len(target) and all(segment_matches(segment, expected, dotglob) for segment, expected in zip(segments, target)) for target in targets):
+                        return True
             wildcard = path
             while _INNER_BRACE.search(wildcard):
                 wildcard = _INNER_BRACE.sub("*", wildcard)
