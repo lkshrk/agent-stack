@@ -803,6 +803,13 @@ class ShellWriteScopeTest(unittest.TestCase):
                 self.assertLess(time.perf_counter() - started, 0.05)
                 self.assertEqual(decision["result"], "DENY")
 
+    def test_large_non_home_commands_keep_their_verdict(self):
+        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
+        body = "x" * 10_000
+        for command in (f"cat <<'EOF' > docs/x.md\n{body}\nEOF", f"gh pr create --body '{body}'", "rg -g '" + "*.{" + ",".join(chr(97 + i) for i in range(20)) + "}' x"):
+            with self.subTest(length=len(command)):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
+
     def test_brace_alternatives(self):
         self.assertEqual(brace_alternatives("a{b,c}d"), ["abd", "acd"])
         self.assertEqual(brace_alternatives("{x,~}/.bashrc"), ["x/.bashrc", "~/.bashrc"])
