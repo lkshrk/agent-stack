@@ -812,6 +812,12 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(length=len(command)):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
 
+    def test_large_range_parts_match_nonempty_values(self):
+        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
+        for command in ("cat ~/.bash{1..1000}rc", "cat ~/.bash{0..9}{0..9}{0..9}rc", "cat ~/.bash{1..1000}x/y"):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
+
     def test_brace_alternatives(self):
         self.assertEqual(brace_alternatives("a{b,c}d"), ["abd", "acd"])
         self.assertEqual(brace_alternatives("{x,~}/.bashrc"), ["x/.bashrc", "~/.bashrc"])
