@@ -420,6 +420,8 @@ def path_guard(
             return True
         if not path.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")):
             return False
+        if len(path) > 4096 or sum(path.count(char) for char in "*?{") > 16:
+            return True
         if "/../" in path and any(name in path for name in startup):
             return True
         pattern = _glob_regex(re.sub(r"/+", "/", path), home, dotglob)
@@ -474,6 +476,8 @@ def path_guard(
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
+        if startup and len(command) > 4096:
+            return _deny("startup path pattern is too large")
         dotglob = dotglob_enabled(command)
         if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\})/[^\s;|]*\(", command):
             return _deny("startup file target with zsh grouping is not readable or writable")
@@ -499,6 +503,8 @@ def path_guard(
         command = shell_command(arguments)
         if command is None:
             return _deny("shell command is not a string")
+        if startup and len(command) > 4096:
+            return _deny("startup path pattern is too large")
         try:
             statements = walk(command)
         except OpaqueCommand:
