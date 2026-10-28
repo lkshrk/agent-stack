@@ -344,6 +344,7 @@ CASES: list[Case] = [
             ("setarch x86_64 capsh -- -c 'gh pr merge 5'", "DENY"),
             ("xvfb-run capsh -- -c 'gh pr merge 5'", "DENY"),
             ("bwrap --bind / / capsh -- -c 'gh pr merge 5'", "DENY"),
+            ("echo 'gh pr merge 5' | taskset 1 setarch x86_64", "DENY"),
             ("which capsh", "ALLOW"),
             ("rg sg src", "ALLOW"),
         )

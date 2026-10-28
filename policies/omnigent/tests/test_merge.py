@@ -447,6 +447,7 @@ class NoMergeTest(unittest.TestCase):
             "bwrap --bind / / capsh -- -c 'gh pr merge 5'",
             "start-stop-daemon -S -x /bin/bash -- -c 'gh pr merge 5'",
             "chrt -o 0 sg omnigent 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | taskset 1 setarch x86_64",
         ):
             words = command.split("| ")[-1].split()
             name = words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1]
