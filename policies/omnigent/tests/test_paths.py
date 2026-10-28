@@ -812,6 +812,24 @@ class ShellWriteScopeTest(unittest.TestCase):
             with self.subTest(length=len(command)):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
 
+    def test_startup_dot_and_grouped_paths(self):
+        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
+        for command in (
+            "tee -a ~/./.bashrc{,{1..300}}",
+            "tee -a /home/omnigent/./.bashrc{,{1..300}}",
+            "tee -a /./home/omnigent/.bashrc{,{1..300}}",
+            "tee -a ~/x/../.bash{rc,{1..300}}",
+            "tee -a ~/x{/..,{1..300}}/.bashrc",
+            "tee -a /home/omnigent/(*bashrc)(D)",
+            'tee -a "$HOME"/(*bashrc)(D)',
+            "tee -a /home/omnigent/.bash(rc|x)",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "DENY")
+        for command in ('cat ~/notes/$(date +%F).md', 'ls $HOME/$(whoami)', 'mkdir -p "$HOME/.cache/$(date +%F)"'):
+            with self.subTest(command=command):
+                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
+
     def test_large_range_parts_match_nonempty_values(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
         for command in ("cat ~/.bash{1..1000}rc", "cat ~/.bash{0..9}{0..9}{0..9}rc", "cat ~/.bash{1..1000}x/y"):
