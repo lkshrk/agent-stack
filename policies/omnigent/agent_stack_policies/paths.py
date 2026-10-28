@@ -387,15 +387,19 @@ def _glob_regex(word: str, home: str, dotglob: bool, segment_start: bool = True)
 
 
 def dotglob_enabled(command: str) -> bool:
-    words = [re.sub(r"['\\\"]", "", token) for statement in walk(command) for token in statement]
-    zsh = any(os.path.basename(word) == "zsh" for word in words)
-    for word in words:
-        for variant in brace_alternatives(word) or [re.sub(r"[{},]", "", word)]:
-            folded = variant.lower().replace("_", "")
-            if "glob" in variant.lower() or "bashopts" in variant.lower() or (zsh and "globdots" in folded): return True
-            if zsh and re.fullmatch(r"[+-][^-]*4[^-]*", variant): return True
-    return any("(" in word and re.search(r"[*?[]", word) for word in words)
-
+    for tokens in walk(command):
+        resolved = resolve(tokens)
+        if resolved.name in {"shopt", "setopt", "unsetopt", "zsh"}:
+            return True
+        if resolved.name == "set" and any(arg.startswith(("-", "+")) for arg in resolved.argv[1:]):
+            return True
+        if resolved.name == "bash" and any(arg.startswith(("-O", "+O")) for arg in resolved.argv[1:]):
+            return True
+        for word in tokens:
+            variants = brace_alternatives(word) or [re.sub(r"[{},]", "", word)]
+            if any("glob" in re.sub(r"['\\\"]", "", variant).lower() or "bashopts" in variant.lower() for variant in variants):
+                return True
+    return False
 
 def path_guard(
     *,
@@ -479,7 +483,7 @@ def path_guard(
         if startup and len(command) > 4096:
             return _deny("startup path pattern is too large")
         dotglob = dotglob_enabled(command)
-        if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\})/[^\s;|]*\(", command):
+        if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\}|/home/[^/]+)/(?:(?!\$\()[^\s;|])*\(", command):
             return _deny("startup file target with zsh grouping is not readable or writable")
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
