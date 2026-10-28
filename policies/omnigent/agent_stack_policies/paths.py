@@ -431,7 +431,7 @@ def path_guard(
         alternatives = brace_alternatives(path)
         home_marked = path.startswith("~") or "$HOME" in path or "${HOME" in path or "/home/omnigent" in path or ("{" in path and ("home" in path or "omnigent" in path))
         if alternatives is None:
-            if home_marked and ("/./" in path or "/../" in path or "/..{" in path or "/.{" in path):
+            if home_marked and ("/./" in path or "/../" in path or "/..{" in path or "/.{" in path or "/..," in path or "/.," in path):
                 return True
         elif any("/." in alternative for alternative in alternatives):
             tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
