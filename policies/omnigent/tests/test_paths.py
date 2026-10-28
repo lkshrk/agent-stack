@@ -794,8 +794,9 @@ class ShellWriteScopeTest(unittest.TestCase):
         for path in ("~/." + "*" * 25 + "X", "~/.b" + "{*,?}" * 20 + "X", "~/" + "x" * 200_000):
             with self.subTest(length=len(path)):
                 started = time.perf_counter()
-                guard(tool_call_event("Bash", {"command": f"echo x > {path}"}))
+                decision = guard(tool_call_event("Bash", {"command": f"echo x > {path}"}))
                 self.assertLess(time.perf_counter() - started, 0.05)
+                self.assertEqual(decision["result"], "DENY")
 
     def test_brace_alternatives(self):
         self.assertEqual(brace_alternatives("a{b,c}d"), ["abd", "acd"])
