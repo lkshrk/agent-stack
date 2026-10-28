@@ -354,6 +354,7 @@ CASES: list[Case] = [
             ("shopt -s dot{glob,}; echo x | tee -a ~/*bashrc", "DENY"),
             ("GLOBIGNORE{,X}=x; echo x | tee -a ~/*bashrc", "DENY"),
             ("zsh -x4 -c 'echo x | tee -a ~/*bashrc'", "DENY"),
+            ("zsh -c 'echo x | tee -a ~/(*bashrc)(D)'", "DENY"),
             ("ls ~/* | head -40", "ALLOW"),
             ("tee -a {/home/omnigent/.bashrc,x}{,{1..300}}", "DENY"),
             ("tee -a /home/omnigent/.b?shrc{,{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}}", "DENY"),

@@ -756,6 +756,8 @@ class ShellWriteScopeTest(unittest.TestCase):
             "zsh -c 'setopt glob__dots; echo x | tee -a ~/*bashrc'",
             "zsh -4 -c 'echo x | tee -a ~/*bashrc'",
             "zsh -c 'setopt -4; echo x | tee -a ~/*bashrc'",
+            "zsh -c 'echo x | tee -a ~/(*bashrc)(D)'",
+            "zsh -c 'echo x | tee -a ~/(*|x)bashrc(D)'",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
