@@ -323,13 +323,77 @@ def segment_matches(pattern: str, name: str, dotglob: bool = False) -> bool:
 
 
 
+def _range_parts(body: str) -> list[str]:
+    match = re.fullmatch(r"([-+]?\d+)\.\.([-+]?\d+)(?:\.\.([-+]?\d+))?", body)
+    if match is None:
+        match = re.fullmatch(r"([A-Za-z])\.\.([A-Za-z])(?:\.\.([-+]?\d+))?", body)
+    if match is None:
+        return [body]
+    first, last, step = match.group(1), match.group(2), abs(int(match.group(3) or 1)) or 1
+    numeric = first.lstrip("+-").isdigit()
+    start, end = (int(first), int(last)) if numeric else (ord(first), ord(last))
+    count = abs(end - start) // step + 1
+    if count > _MAX_ALTERNATIVES:
+        return [r"-?[0-9]+"] if numeric else [r"[A-Za-z]"]
+    values = range(start, end + (1 if end >= start else -1), step if end >= start else -step)
+    if not numeric:
+        return [chr(value) for value in values]
+    padded = re.match(r"[-+]?0\d", first) or re.match(r"[-+]?0\d", last)
+    width = max(len(first), len(last)) if padded else 0
+    return [f"{value:0{width}d}" for value in values]
+
+
+def _glob_regex(word: str, home: str, dotglob: bool, segment_start: bool = True) -> str:
+    out, i = [], 0
+    while i < len(word):
+        if word.startswith("$HOME", i):
+            out.append(re.escape(home)); i += 5; segment_start = False; continue
+        if word.startswith("${HOME}", i):
+            out.append(re.escape(home)); i += 7; segment_start = False; continue
+        if i == 0 and word.startswith("~") and (len(word) == 1 or word[1] == "/" or word.startswith("~" + posixpath.basename(home))):
+            end = 1 + len(posixpath.basename(home)) if word.startswith("~" + posixpath.basename(home)) else 1
+            out.append(re.escape(home)); i = end; segment_start = False; continue
+        char = word[i]
+        if char == "{":
+            depth, close, commas = 0, None, []
+            for j in range(i, len(word)):
+                if word[j] == "{": depth += 1
+                elif word[j] == "}":
+                    depth -= 1
+                    if depth == 0: close = j; break
+                elif word[j] == "," and depth == 1: commas.append(j)
+            if close is not None:
+                body = word[i + 1:close]
+                if commas:
+                    bounds = [i, *commas, close]
+                    parts = [word[x + 1:y] for x, y in zip(bounds, bounds[1:])]
+                else:
+                    parts = _range_parts(body)
+                out.append("(?:" + "|".join(_glob_regex(part, home, dotglob, segment_start) for part in parts) + ")")
+                i = close + 1; segment_start = False; continue
+        if char in "*?": out.append((r"(?!\.)" if segment_start and not dotglob else "") + ("[^/]*" if char == "*" else "[^/]"))
+        elif char == "[" and (bracket := _bracket(word, i)) is not None:
+            out.append((r"(?!\.)" if segment_start and not dotglob else "") + bracket[0]); i = bracket[1]; segment_start = False; continue
+        elif char == "(":
+            end = word.find(")", i + 1)
+            out.append("[^/]*")
+            if end >= 0: i = end + 1; segment_start = False; continue
+        elif char == "/": out.append("/+")
+        else: out.append(re.escape(char))
+        segment_start = char == "/"; i += 1
+    return "".join(out)
+
+
 def dotglob_enabled(command: str) -> bool:
     words = [re.sub(r"['\\\"]", "", token) for statement in walk(command) for token in statement]
+    zsh = any(os.path.basename(word) == "zsh" for word in words)
     for word in words:
-        folded = word.lower().replace("_", "")
-        if _DOTGLOB_WORD.search(word) or "globdots" in folded or "-4" in word:
-            return True
-    return re.search(r"(?<!\$)[^\s()]*[*?[][^\s()]*\([^)]*D[^)]*\)", command) is not None
+        for variant in brace_alternatives(word) or [re.sub(r"[{},]", "", word)]:
+            folded = variant.lower().replace("_", "")
+            if "glob" in variant.lower() or "bashopts" in variant.lower() or (zsh and "globdots" in folded): return True
+            if zsh and re.fullmatch(r"[+-][^-]*4[^-]*", variant): return True
+    return any("(" in word and re.search(r"[*?[]", word) for word in words)
+
 
 def path_guard(
     *,
@@ -348,38 +412,21 @@ def path_guard(
     def startup_path(path: str, dotglob: bool = False) -> bool:
         if not startup or not home:
             return False
+        if not path.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")):
+            return False
+        pattern = _glob_regex(re.sub(r"/+", "/", path), home, dotglob)
+        targets = [f"{home}/{name}" for name in startup]
+        if any(re.fullmatch(pattern, target) for target in targets):
+            return True
         alternatives = brace_alternatives(path)
         if alternatives is None:
-            if not (path.startswith(("~", "$HOME", "${HOME}", '"$HOME"', "/")) or (path.startswith("{") and any(marker in path for marker in ("~", "$HOME", "${HOME}")))):
-                return False
-            partial = re.sub(r"\{(?:[-+]?\d+|[A-Za-z])\.\.(?:[-+]?\d+|[A-Za-z])(?:\.\.[-+]?\d+)?\}", "*", path)
-            partials = brace_alternatives(partial)
-            if partials is not None:
-                targets = [f"{home}/{name}".split("/") for name in startup]
-                tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
-                for alternative in partials:
-                    expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, alternative))
-                    normal = posixpath.normpath(re.sub(r"/+", "/", expanded))
-                    segments = normal.split("/")
-                    if normal.startswith("/") and any(len(segments) == len(target) and all(segment_matches(segment, expected, dotglob) for segment, expected in zip(segments, target)) for target in targets):
-                        return True
-            wildcard = path
-            while _INNER_BRACE.search(wildcard):
-                wildcard = _INNER_BRACE.sub("*", wildcard)
-            wildcard = _HOME_VARIABLE.sub(lambda _: home, wildcard)
-            wildcard = re.sub(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)", home, wildcard)
-            return any(re.fullmatch(re.escape(wildcard).replace(r"\*", ".*"), f"{home}/{name}") for name in startup)
-        targets = [f"{home}/{name}".split("/") for name in startup]
+            return False
         tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
         for alternative in alternatives:
             expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, alternative))
             normal = posixpath.normpath(re.sub(r"/+", "/", expanded))
-            if not normal.startswith("/"):
-                continue
-            segments = normal.split("/")
-            for target in targets:
-                if len(segments) == len(target) and all(segment_matches(s, t, dotglob) for s, t in zip(segments, target)):
-                    return True
+            if normal in targets:
+                return True
         return False
 
     def relative_startup_template(path: str) -> bool:
