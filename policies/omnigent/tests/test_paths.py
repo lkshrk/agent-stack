@@ -759,12 +759,17 @@ class ShellWriteScopeTest(unittest.TestCase):
             "zsh -c 'setopt -4; echo x | tee -a ~/*bashrc'",
             "zsh -c 'echo x | tee -a ~/(*bashrc)(D)'",
             "zsh -c 'echo x | tee -a ~/(*|x)bashrc(D)'",
+            "shopt -s $(echo dotgl)ob; echo x | tee -a ~/*bashrc",
+            "X=ob; shopt -s dotgl$X; echo x | tee -a ~/*bashrc",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "DENY")
         self.assertEqual(guard(tool_call_event("Bash", {"command": "tee -a ~/*bashrc"}))["result"], "ALLOW")
-        self.assertEqual(guard(tool_call_event("Bash", {"command": 'du -sh ~/* "$(date +%F)"'}))["result"], "ALLOW")
+        for command in ('du -sh ~/* "$(date +%F)"', 'ls ~/* | grep "$(id -un)"', '(cd /tmp && ls ~/*)', 'ls ~/*; echo "$(ls *.py)"'):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "ALLOW")
 
     def test_cap_fallback_requires_home_like_text(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
