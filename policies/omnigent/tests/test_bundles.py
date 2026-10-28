@@ -358,6 +358,8 @@ CASES: list[Case] = [
             ("ls ~/* | head -40", "ALLOW"),
             ("tee -a {/home/omnigent/.bashrc,x}{,{1..300}}", "DENY"),
             ("tee -a /home/omnigent/.b?shrc{,{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}}", "DENY"),
+            ("tee -a ${HOME%/}/.bashrc", "DENY"),
+            ('tee -a ~/{"}",.bashrc}', "DENY"),
         )
         for form in (command, ["bash", "-lc", command])
     ],

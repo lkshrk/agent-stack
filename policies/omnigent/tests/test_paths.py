@@ -781,6 +781,9 @@ class ShellWriteScopeTest(unittest.TestCase):
             "tee -a {~/.bashrc,x}{,{1..300}}",
             "tee -a /{home,x}/omnigent/.bashrc{,{1..300}}",
             "tee -a ~/x{,/../.bashrc}{,{1..300}}",
+            "tee -a ${HOME%/}/.bashrc",
+            "tee -a ${HOME:-x}/.bashrc",
+            'tee -a ~/{"}",.bashrc}',
         ):
             with self.subTest(command=command):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "DENY")
