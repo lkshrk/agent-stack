@@ -508,7 +508,7 @@ def path_guard(
         command = shell_command(arguments)
         if command is None:
             return _deny("shell command is not a string")
-        if startup and len(command) > 4096 and re.search(r"(?:~|\$\{?HOME|/home|omnigent)", command):
+        if startup and len(command) > 4096 and re.search(r"(?:~/|\$HOME|\$\{HOME|/home/omnigent)", command):
             return _deny("startup path pattern is too large")
         try:
             statements = walk(command)
