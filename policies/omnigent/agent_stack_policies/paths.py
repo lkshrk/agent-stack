@@ -41,7 +41,7 @@ _MAX_ALTERNATIVES = 256
 _BRACE_WILD = "\0"
 _INNER_BRACE = re.compile(r"\{[^{}]*\}")
 _HOME_VARIABLE = re.compile(r"\"?\$(?:HOME\b|\{HOME\})\"?")
-_DOTGLOB = re.compile(r"(?:\b(?:dotglob|globskipdots|globdots|glob_dots)\b|\bGLOBIGNORE\s*=|\([^)]*(?:#q[^)]*D|\.D|D)[^)]*\))", re.IGNORECASE)
+_DOTGLOB_WORD = re.compile(r"(?:dotglob|globskipdots|globdots|glob_dots|globignore|bashopts)", re.IGNORECASE)
 _POSIX_CLASSES = {
     "alpha": "a-zA-Z", "digit": "0-9", "alnum": "a-zA-Z0-9", "upper": "A-Z", "lower": "a-z",
     "xdigit": "0-9A-Fa-f", "space": r" \t\n\r\f\v", "blank": r" \t", "word": "a-zA-Z0-9_",
@@ -322,6 +322,15 @@ def segment_matches(pattern: str, name: str, dotglob: bool = False) -> bool:
     return re.fullmatch("".join(regex), name, re.DOTALL) is not None
 
 
+
+def dotglob_enabled(command: str) -> bool:
+    words = [re.sub(r"['\\\"]", "", token) for statement in walk(command) for token in statement]
+    for word in words:
+        folded = word.lower().replace("_", "")
+        if _DOTGLOB_WORD.search(word) or "globdots" in folded or "-4" in word:
+            return True
+    return re.search(r"(?<!\$)[^\s()]*[*?[][^\s()]*\([^)]*D[^)]*\)", command) is not None
+
 def path_guard(
     *,
     deny: list[str] | None = None,
@@ -341,8 +350,14 @@ def path_guard(
             return False
         alternatives = brace_alternatives(path)
         if alternatives is None:
-            skeleton = re.sub(r"[{},]", "", _HOME_VARIABLE.sub(lambda _: home, path))
-            return "~" in skeleton or "home" in skeleton or "omnigent" in skeleton
+            if not (path.startswith(("~", "$HOME", "${HOME}", '"$HOME"', "/")) or (path.startswith("{") and any(marker in path for marker in ("~", "$HOME", "${HOME}")))):
+                return False
+            wildcard = path
+            while _INNER_BRACE.search(wildcard):
+                wildcard = _INNER_BRACE.sub("*", wildcard)
+            wildcard = _HOME_VARIABLE.sub(lambda _: home, wildcard)
+            wildcard = re.sub(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)", home, wildcard)
+            return any(re.fullmatch(re.escape(wildcard).replace(r"\*", ".*"), f"{home}/{name}") for name in startup)
         targets = [f"{home}/{name}".split("/") for name in startup]
         tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)")
         for alternative in alternatives:
@@ -393,7 +408,7 @@ def path_guard(
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
-        dotglob = _DOTGLOB.search(command) is not None
+        dotglob = dotglob_enabled(command)
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for literal in (False, True):
@@ -434,7 +449,7 @@ def path_guard(
         for tokens in statements:
             for token in tokens:
                 candidate = _FLAG_PREFIX.sub("", token)
-                if candidate and startup_path(candidate, _DOTGLOB.search(command) is not None):
+                if candidate and startup_path(candidate, dotglob_enabled(command)):
                     return _deny(f"startup file {candidate} is not readable or writable")
                 if candidate and forbidden(candidate):
                     return _deny(

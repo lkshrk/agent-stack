@@ -465,11 +465,12 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             return allow()
         for tokens in statements:
             resolved = resolve(tokens)
+            if tokens[:2] == ["command", "-v"]:
+                continue
             if "parallel" in resolved.wrappers:
                 return deny("parallel is not available; run commands directly")
-            names = [os.path.basename(token) for token in tokens]
-            name = next((name for name in names if name in _SHELL_LAUNCHERS), resolved.name)
-            if name in _SHELL_LAUNCHERS and not (names and names[0] in {"which", "rg", "grep", "egrep", "fgrep", "man", "echo", "printf"}):
+            name = resolved.name
+            if name in _SHELL_LAUNCHERS or re.fullmatch(r"ld-(?:linux)?[^/]*\.so(?:\.[^/]*)?", name) or name == "ld.so":
                 return deny(f"{name} is not allowed; run commands directly")
         reason = hidden_command(command, statements, _VCS_TEXT) or _quoted_vcs(command, statements)
         if not reason and _VCS_TEXT.search(command):
