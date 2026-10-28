@@ -761,6 +761,8 @@ class ShellWriteScopeTest(unittest.TestCase):
             "zsh -c 'echo x | tee -a ~/(*|x)bashrc(D)'",
             "shopt -s $(echo dotgl)ob; echo x | tee -a ~/*bashrc",
             "X=ob; shopt -s dotgl$X; echo x | tee -a ~/*bashrc",
+            "bash -lc 'shopt -s dotglob; tee -a ~/*bashrc'",
+            "BASHOPTS=dotglob bash -c 'tee -a ~/*bashrc'",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
@@ -805,7 +807,7 @@ class ShellWriteScopeTest(unittest.TestCase):
 
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        body = "x" * 10_000
+        body = "homepage omnigent " * 500
         for command in (f"cat <<'EOF' > docs/x.md\n{body}\nEOF", f"gh pr create --body '{body}'", "rg -g '" + "*.{" + ",".join(chr(97 + i) for i in range(20)) + "}' x"):
             with self.subTest(length=len(command)):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
