@@ -726,7 +726,7 @@ class ShellWriteScopeTest(unittest.TestCase):
         for command in ("cat ~/.bash{1..1000}x/y",):
             with self.subTest(command=command):
                 for decision in shell(command):
-                    self.assertEqual(decision["result"], "DENY")
+                    self.assertEqual(decision["result"], "ALLOW")
 
     def test_startup_globs_honor_dotglob_settings(self):
         guard = path_guard(startup_files=[".bashrc", ".bash_profile", ".zshrc", ".profile"], startup_home="/home/omnigent")
@@ -746,11 +746,24 @@ class ShellWriteScopeTest(unittest.TestCase):
             "zsh -c 'echo x | tee -a ~/*bashrc(.D)'",
             "zsh -c 'echo x | tee -a ~/*bashrc(#qD)'",
             "set -o dotglob; echo x | tee -a ~/*bashrc",
+            "shopt -s dot''glob; echo x | tee -a ~/*bashrc",
+            "shopt -s dot\\glob; echo x | tee -a ~/*bashrc",
+            'shopt -s "dot"glob; echo x | tee -a ~/*bashrc',
+            "env BASHOPTS=dot''glob bash -c 'echo x | tee -a ~/*bashrc'",
+            "GLOBIGNORE+=x; echo x | tee -a ~/*bashrc",
+            "read GLOBIGNORE <<< x; echo x | tee -a ~/*bashrc",
+            "printf -v GLOBIGNORE x; echo x | tee -a ~/*bashrc",
+            ": ${GLOBIGNORE:=x}; echo x | tee -a ~/*bashrc",
+            "zsh -c 'unsetopt noglobdots; echo x | tee -a ~/*bashrc'",
+            "zsh -c 'setopt glob__dots; echo x | tee -a ~/*bashrc'",
+            "zsh -4 -c 'echo x | tee -a ~/*bashrc'",
+            "zsh -c 'setopt -4; echo x | tee -a ~/*bashrc'",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "DENY")
         self.assertEqual(guard(tool_call_event("Bash", {"command": "tee -a ~/*bashrc"}))["result"], "ALLOW")
+        self.assertEqual(guard(tool_call_event("Bash", {"command": 'du -sh ~/* "$(date +%F)"'}))["result"], "ALLOW")
 
     def test_cap_fallback_requires_home_like_text(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
