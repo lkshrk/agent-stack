@@ -480,8 +480,6 @@ def path_guard(
         return path == "/dev/null" or path == "/tmp" or path.startswith("/tmp/")
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
-        if startup and len(command) > 4096:
-            return _deny("startup path pattern is too large")
         dotglob = dotglob_enabled(command)
         if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\}|/home/[^/]+)/(?:(?!\$\()[^\s;|])*\(", command):
             return _deny("startup file target with zsh grouping is not readable or writable")
@@ -491,6 +489,9 @@ def path_guard(
             for tokens in walk(command, literal_operators=literal):
                 targets += shell_write_targets(tokens)
         for raw in targets:
+            home_capable = raw.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")) or "home" in raw or "omnigent" in raw
+            if home_capable and (len(raw) > 4096 or sum(raw.count(char) for char in "*?{") > 16):
+                return _deny("startup path pattern is too large")
             if startup_path(raw, dotglob):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
@@ -507,7 +508,7 @@ def path_guard(
         command = shell_command(arguments)
         if command is None:
             return _deny("shell command is not a string")
-        if startup and len(command) > 4096:
+        if startup and len(command) > 4096 and re.search(r"(?:~|\$\{?HOME|/home|omnigent)", command):
             return _deny("startup path pattern is too large")
         try:
             statements = walk(command)
