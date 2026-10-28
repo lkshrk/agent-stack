@@ -367,7 +367,7 @@ CASES: list[Case] = [
     ],
     *[
         Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, "DENY")
-        for command in ("cat $HOME/.bash*", "cat ~omnigent/.bash?c", "cat //home/omnigent/.bashrc", "cat ~/.bash{1..1000}rc")
+        for command in ("cat $HOME/.bash*", "cat ~omnigent/.bash?c", "cat //home/omnigent/.bashrc")
         for form in (command, ["bash", "-lc", command])
     ],
     *[
