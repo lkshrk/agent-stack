@@ -414,6 +414,8 @@ def path_guard(
             return False
         if not path.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")):
             return False
+        if "/../" in path and any(name in path for name in startup):
+            return True
         pattern = _glob_regex(re.sub(r"/+", "/", path), home, dotglob)
         targets = [f"{home}/{name}" for name in startup]
         if any(re.fullmatch(pattern, target) for target in targets):
