@@ -348,8 +348,10 @@ def _glob_regex(word: str, home: str, dotglob: bool, segment_start: bool = True)
     while i < len(word):
         if word.startswith("$HOME", i):
             out.append(re.escape(home)); i += 5; segment_start = False; continue
-        if word.startswith("${HOME}", i):
-            out.append(re.escape(home)); i += 7; segment_start = False; continue
+        if word.startswith("${HOME", i):
+            close = word.find("}", i + 6)
+            if close >= 0:
+                out.append(re.escape(home)); i = close + 1; segment_start = False; continue
         if i == 0 and word.startswith("~") and (len(word) == 1 or word[1] == "/" or word.startswith("~" + posixpath.basename(home))):
             end = 1 + len(posixpath.basename(home)) if word.startswith("~" + posixpath.basename(home)) else 1
             out.append(re.escape(home)); i = end; segment_start = False; continue
@@ -412,6 +414,10 @@ def path_guard(
     def startup_path(path: str, dotglob: bool = False) -> bool:
         if not startup or not home:
             return False
+        if "${HOME" in path and any(name in path for name in startup):
+            return True
+        if path.startswith("~/{") and any(name in path for name in startup):
+            return True
         if not path.startswith(("/", "~", "$HOME", "${HOME}", '"$HOME"', "{")):
             return False
         if "/../" in path and any(name in path for name in startup):
