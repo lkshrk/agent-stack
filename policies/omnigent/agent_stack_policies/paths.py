@@ -467,6 +467,8 @@ def path_guard(
 
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
         dotglob = dotglob_enabled(command)
+        if re.search(r"(?:~(?:omnigent)?|\$HOME|\$\{HOME\})/[^\s;|]*\(", command):
+            return _deny("startup file target with zsh grouping is not readable or writable")
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for literal in (False, True):
