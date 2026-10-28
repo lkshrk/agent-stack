@@ -469,8 +469,14 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             while argv and (argv[0] in {"if", "then", "elif", "while", "until", "do", "!", "{", "("} or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[0])):
                 argv.pop(0)
             if argv and os.path.basename(argv[0]) == "command":
-                options = "".join(arg[1:] for arg in argv[1:] if arg.startswith("-") and arg != "--")
-                if "v" in options or "V" in options:
+                options = []
+                for arg in argv[1:]:
+                    if arg == "--":
+                        break
+                    if not arg.startswith("-") or arg == "-":
+                        break
+                    options.append(arg[1:])
+                if options and all(set(option) <= {"p", "v", "V"} for option in options) and any("v" in option or "V" in option for option in options):
                     continue
             if "parallel" in resolved.wrappers:
                 return deny("parallel is not available; run commands directly")
