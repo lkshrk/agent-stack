@@ -41,7 +41,7 @@ _PUSH_SHORT = {"v": "verbose", "q": "quiet", "d": "delete", "n": "dry-run", "f":
 _IMPLICIT_SOURCES = frozenset({"HEAD", "@"})
 _STDIN_ARGUMENTS = frozenset({"xargs"})
 # The resolver doesn't unwrap these, and each can start a shell or hand it a command string.
-_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt"})
+_SHELL_LAUNCHERS = frozenset({"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt", "strace", "ltrace", "gdb", "valgrind"})
 # GNU xargs getopt: options with a required value, and those with an optional attached value.
 _XARGS_REQUIRED = frozenset("aEILnsPd")
 _XARGS_OPTIONAL = frozenset("eil")
