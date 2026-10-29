@@ -81,6 +81,7 @@ class Command:
     nested: list[str] = field(default_factory=list)
     stdin_exec: bool = False
     body_arguments: list[str] = field(default_factory=list)
+    lookup: bool = False
 
     @property
     def name(self) -> str:
@@ -572,6 +573,16 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
     return args[start + positionals :]
 
 
+def _command_lookup(args: list[str]) -> bool:
+    """`command -v`/`-V` (with `-p`): its options before the first operand print a lookup instead of running it."""
+    options = []
+    for arg in args:
+        if arg == "--" or not arg.startswith("-") or arg == "-":
+            break
+        options.append(arg[1:])
+    return bool(options) and all(set(option) <= {"p", "v", "V"} for option in options) and any(set(option) & {"v", "V"} for option in options)
+
+
 def resolve(tokens: list[str]) -> Command:
     """The command a statement runs, through keywords, assignments and the wrappers above."""
     argv = list(tokens)
@@ -595,6 +606,8 @@ def resolve(tokens: list[str]) -> Command:
             if argv[1:]:
                 command.nested.append(" ".join(argv[1:]))
             break
+        if name == "command" and _command_lookup(argv[1:]):
+            command.lookup = True
         unwrapped = _unwrap(name, argv[1:], command.nested)
         if unwrapped is None:
             break
