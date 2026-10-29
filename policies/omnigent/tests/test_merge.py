@@ -456,15 +456,19 @@ class NoMergeTest(unittest.TestCase):
             "ld.so /usr/bin/gh pr merge 5",
             "taskset 1 capsh -- -c 'gh pr merge 5' command -v",
             "nice taskset 1 command -v capsh",
+            "strace -f -o /dev/null taskset 1 capsh -- -c 'gh pr merge 5'",
+            "ltrace -f taskset 1 capsh -- -c 'gh pr merge 5'",
+            "gdb -batch -ex run --args taskset 1 capsh -- -c 'gh pr merge 5'",
+            "valgrind taskset 1 capsh -- -c 'gh pr merge 5'",
         ):
             words = command.split("| ")[-1].split()
-            name = next((word.rsplit("/", 1)[-1] for word in words if word.rsplit("/", 1)[-1] in {"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt", "ld.so"}), words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1])
+            name = next((word.rsplit("/", 1)[-1] for word in words if word.rsplit("/", 1)[-1] in {"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt", "strace", "ltrace", "gdb", "valgrind", "ld.so"}), words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1])
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     decision = run(form)
                     self.assertEqual(decision["result"], "DENY")
                     self.assertIn(f"{name} is not allowed; run commands directly", decision["reason"])
-        for command in ("which capsh", "grep -r runuser docs", "rg sg src", "git log --grep chroot", "git grep -n taskset", '[ "$(uname -m)" = x86_64 ]', "test x86_64 = x86_64", "command -v bwrap", "command -V bwrap", "command -pv bwrap", "command -vp bwrap", "X=1 command -v bwrap", "if command -v bwrap >/dev/null; then echo y; fi", "env command -v bwrap", "time command -v bwrap", "command -v -- bwrap", "cd sg", "find . -name chroot", "docker build --platform linux/x86_64 .", "ls /usr/sbin/runuser"):
+        for command in ("which capsh", "grep -r runuser docs", "rg sg src", "git log --grep chroot", "git grep -n taskset", '[ "$(uname -m)" = x86_64 ]', "test x86_64 = x86_64", "command -v bwrap", "command -V bwrap", "command -pv bwrap", "command -vp bwrap", "X=1 command -v bwrap", "if command -v bwrap >/dev/null; then echo y; fi", "env command -v bwrap", "time command -v bwrap", "command -v -- bwrap", "which strace", "rg gdb docs", "cd sg", "find . -name chroot", "docker build --platform linux/x86_64 .", "ls /usr/sbin/runuser"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "ALLOW")
 
