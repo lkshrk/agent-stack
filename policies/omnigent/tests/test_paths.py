@@ -651,9 +651,43 @@ class ShellWriteScopeTest(unittest.TestCase):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "ALLOW")
 
+    def test_startup_check_matches_exact_paths_only(self):
+        guard = path_guard(startup_files=[".bashrc", ".profile"], startup_home="/home/omnigent")
+        for command in (
+            "echo x >> //home/omnigent/.bashrc",
+            "echo x >> /home//omnigent/.bashrc",
+            'echo x >> "$HOME"/.bashrc',
+            'echo x >> "$HOME/.bashrc"',
+            "echo x >> ${HOME%/}/.bashrc",
+            "echo x >> ${HOME:-/x}/.profile",
+            "echo x >> ~omnigent//.bashrc",
+            "echo x >> ~/x/../.bashrc",
+            "dd of=~/.bashrc",
+            "cat ~/.profile",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = guard(tool_call_event("Bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("startup file", decision["reason"])
+        for command in (
+            "echo x | tee -a ~/.bash*",
+            "echo x | tee -a ~/.bash{rc,x}",
+            "shopt -s dotglob; echo x | tee -a ~/*bashrc",
+            "echo x > '/tmp/report (1).txt'",
+            "cp a.txt '/tmp/copy (2).txt'",
+            "python3 -c 'print(open(\"/home/omnigent/notes.txt\").read())'",
+            "node -e \"require('/home/omnigent/proj/x.js')()\"",
+            'cat "$HOME/notes(1).md"',
+            "set -e; ls ~/*",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "ALLOW")
+
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        body = "homepage omnigent " * 500
+        body = "homepage omnigent ~/notes $HOME/x /home/omnigent/y " * 200
         for command in (f"cat <<'EOF' > docs/x.md\n{body}\nEOF", f"gh pr create --body '{body}'", "rg -g '" + "*.{" + ",".join(chr(97 + i) for i in range(20)) + "}' x"):
             with self.subTest(length=len(command)):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")

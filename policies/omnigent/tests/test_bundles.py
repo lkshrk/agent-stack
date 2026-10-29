@@ -326,6 +326,13 @@ CASES: list[Case] = [
             ("echo 'gh pr merge 5' | taskset 1 setarch x86_64", "DENY"),
             ("which capsh", "ALLOW"),
             ("rg sg src", "ALLOW"),
+            ("taskset 1 capsh -- -c 'gh pr merge 5' command -v", "DENY"),
+            ("echo x > '/tmp/report (1).txt'", "ALLOW"),
+            ("cp a.txt '/tmp/copy (2).txt'", "ALLOW"),
+            ("python3 -c 'print(open(\"/home/omnigent/notes.txt\").read())'", "ALLOW"),
+            ("node -e \"require('/home/omnigent/proj/x.js')()\"", "ALLOW"),
+            ('cat "$HOME/notes(1).md"', "ALLOW"),
+            ("set -e; ls ~/*", "ALLOW"),
             ("command -V bwrap", "ALLOW"),
             ("command -pv bwrap", "ALLOW"),
             ("X=1 command -v bwrap", "ALLOW"),
@@ -342,7 +349,12 @@ CASES: list[Case] = [
     ],
     *[
         Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, "DENY")
-        for command in ("cat //home/omnigent/.bashrc",)
+        for command in ("cat //home/omnigent/.bashrc", "tee -a ${HOME%/}/.bashrc", 'tee -a "$HOME"/.bashrc')
+        for form in (command, ["bash", "-lc", command])
+    ],
+    *[
+        Case("polly/agents/claude_code", "tool_call", "Bash", {"command": form}, "ALLOW")
+        for command in ("cat <<'EOF' > docs/x.md\n" + "see ~/notes and $HOME/x\n" * 400 + "EOF", "gh pr create --body '" + "use ~/bin and /home/omnigent/x " * 300 + "'")
         for form in (command, ["bash", "-lc", command])
     ],
     *[
