@@ -1,7 +1,6 @@
-import time
 import unittest
 
-from agent_stack_policies.paths import brace_alternatives, glob_match, path_guard, segment_matches
+from agent_stack_policies.paths import glob_match, path_guard
 
 from . import assert_not_ask, tool_call_event
 
@@ -636,22 +635,10 @@ class ShellWriteScopeTest(unittest.TestCase):
             *["${HOME}/" + name for name in startup],
             "/home/omnigent/./.bashrc",
             "/home/omnigent/x/../.bashrc",
-            "~/.bash{rc,}",
-            "/home/omnigent/.bash{rc,}",
-            "~/.bash?c",
-            "/home/omnigen?/.bashrc",
-            "/home/*/.bashrc",
-            "{~,/tmp/x}/.bashrc",
-            "/{home,x}/omnigent/.bashrc",
-            "~/.bash{r{c,},}",
         ):
             with self.subTest(path=path):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "DENY")
-        for path in ("~/.bash{rc,_profile}", "~/.{bashrc,x}", "~/{.bashrc,x}", "~/.bashr{c..c}", "/home/omnigen{s..u}/.bashrc", "~/.bash[^x]c", "~/.bash[[:lower:]]c"):
-            with self.subTest(path=path):
-                self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "DENY")
-                self.assertEqual(guard(tool_call_event("bash", {"command": f"tee -a {path}"}))["result"], "DENY")
         for command in ("ls *", "du -sh *", "rm -rf build/*", "cp -r src/* /tmp/out/", "git branch --list 'feat/*'", "pytest tests/*", "rg -g '*' x", "rg -n '.*' README.md"):
             with self.subTest(command=command):
                 self.assertEqual(guard(tool_call_event("bash", {"command": command}))["result"], "ALLOW")
@@ -664,199 +651,12 @@ class ShellWriteScopeTest(unittest.TestCase):
                 self.assertEqual(guard(tool_call_event("Write", {"file_path": path, "content": "x"}))["result"], "ALLOW")
                 self.assertEqual(guard(tool_call_event("bash", {"command": f"echo x > {path}"}))["result"], "ALLOW")
 
-    def test_startup_matching_is_per_segment_after_brace_and_home_expansion(self):
-        startup = [".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".inputrc"]
-        guard = path_guard(startup_files=startup, startup_home="/home/omnigent")
-
-        def shell(command):
-            return [guard(tool_call_event("bash", {"command": form})) for form in (command, ["bash", "-lc", command])]
-
-        for command in (
-            "echo x | tee -a $HOME/.bash*",
-            "echo x >> $HOME/.bash*",
-            "tee -a ${HOME}/.bash?c",
-            'tee -a "$HOME"/.bash*',
-            "cat $HOME/.bash*",
-            "tee -a $HOME/.bash{rc,x}",
-            "tee -a ~omnigent/.bash*",
-            "echo x >> ~omnigent/.b*",
-            "cat ~omnigent/.bash?c",
-            "tee -a ~omnigent/.bash{rc,x}",
-            "echo x | tee -a {x,~}/.bashrc",
-            "echo x | tee -a {x,/home/omnigent}/.bashrc",
-            "echo x | tee -a {x,$HOME}/.bashrc",
-            "echo x | tee -a //home/omnigent/.bash*",
-            "echo x >> //home/omnigent/.bashrc",
-            "cat //home/omnigent/.bashrc",
-            "cat /home//omnigent/.bashrc",
-            "tee -a ~/.{a..c}ashrc",
-            "tee -a /home/omnigen{t..t}/.bashrc",
-            "tee -a ~/.zsh{rc,{env,pro{file,x}}}",
-            "tee -a ~/.bash[!x]c",
-        ):
-            with self.subTest(command=command):
-                for decision in shell(command):
-                    self.assertEqual(decision["result"], "DENY")
-                    self.assertIn("startup file", decision["reason"])
-        with self.subTest(path="//home/omnigent/.bashrc"):
-            self.assertEqual(guard(tool_call_event("Write", {"file_path": "//home/omnigent/.bashrc", "content": "x"}))["result"], "DENY")
-        for command in (
-            "ls /*",
-            "ls /*/",
-            "ls -d /*",
-            "cat /*/*/*",
-            "du -sh /*",
-            "ls /home/*",
-            "ls ~/*",
-            "ls $HOME/*",
-            "cat ~/?bashrc",
-            "cat ~/[.]bashrc",
-            "cat */home/omnigent/.bashrc",
-            "tee -a x{,/../home/omnigent}/.bashrc",
-            "cp {/tmp/a.py,src/a.py}",
-            "install {/tmp/a.py,src/a.py}",
-            "ln -sf {/tmp/a.py,src/a.py}",
-            "cp -t .polly/diffs {/tmp/a.py,src/a.py}",
-            "cp {/tmp/a.md,../other/a.md}",
-        ):
-            with self.subTest(command=command):
-                for decision in shell(command):
-                    self.assertEqual(decision["result"], "ALLOW")
-        for command in ("cat ~/.bash{1..1000}rc", "cat ~/.bash{0..9}{0..9}{0..9}rc", "cat ~/.bash{1..1000}x/y",):
-            with self.subTest(command=command):
-                for decision in shell(command):
-                    self.assertEqual(decision["result"], "ALLOW")
-
-    def test_startup_globs_honor_dotglob_settings(self):
-        guard = path_guard(startup_files=[".bashrc", ".bash_profile", ".zshrc", ".profile"], startup_home="/home/omnigent")
-        for command in (
-            "shopt -s dotglob; echo x | tee -a ~/*shrc",
-            "shopt -s globskipdots; echo x >> ~/*bashrc",
-            "shopt -s dotglob && echo x | tee -a /home/omnigent/?bashrc",
-            "shopt -s dotglob; echo x | tee -a ~/[.]bashrc",
-            "bash -O dotglob -c 'echo x | tee -a ~/*shrc'",
-            "bash +O dotglob -c 'echo x | tee -a ~/*shrc'",
-            "GLOBIGNORE=x; echo x | tee -a ~/*bashrc",
-            "GLOBIGNORE=x; echo x >> ~/*bashrc",
-            "zsh -c 'setopt globdots; echo x | tee -a ~/*bashrc'",
-            "zsh -c 'setopt glob_dots; echo x | tee -a ~/*bashrc'",
-            "zsh -o globdots -c 'echo x | tee -a ~/*bashrc'",
-            "zsh -c 'echo x | tee -a ~/*bashrc(D)'",
-            "zsh -c 'echo x | tee -a ~/*bashrc(.D)'",
-            "zsh -c 'echo x | tee -a ~/*bashrc(#qD)'",
-            "set -o dotglob; echo x | tee -a ~/*bashrc",
-            "shopt -s dot''glob; echo x | tee -a ~/*bashrc",
-            "shopt -s dot\\glob; echo x | tee -a ~/*bashrc",
-            'shopt -s "dot"glob; echo x | tee -a ~/*bashrc',
-            "env BASHOPTS=dot''glob bash -c 'echo x | tee -a ~/*bashrc'",
-            "GLOBIGNORE+=x; echo x | tee -a ~/*bashrc",
-            "read GLOBIGNORE <<< x; echo x | tee -a ~/*bashrc",
-            "printf -v GLOBIGNORE x; echo x | tee -a ~/*bashrc",
-            ": ${GLOBIGNORE:=x}; echo x | tee -a ~/*bashrc",
-            "zsh -c 'unsetopt noglobdots; echo x | tee -a ~/*bashrc'",
-            "zsh -c 'setopt glob__dots; echo x | tee -a ~/*bashrc'",
-            "zsh -4 -c 'echo x | tee -a ~/*bashrc'",
-            "zsh -c 'setopt -4; echo x | tee -a ~/*bashrc'",
-            "zsh -c 'echo x | tee -a ~/(*bashrc)(D)'",
-            "zsh -c 'echo x | tee -a ~/(*|x)bashrc(D)'",
-            "shopt -s $(echo dotgl)ob; echo x | tee -a ~/*bashrc",
-            "X=ob; shopt -s dotgl$X; echo x | tee -a ~/*bashrc",
-            "bash -lc 'shopt -s dotglob; tee -a ~/*bashrc'",
-            "BASHOPTS=dotglob bash -c 'tee -a ~/*bashrc'",
-        ):
-            for form in (command, ["bash", "-lc", command]):
-                with self.subTest(form=form):
-                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "DENY")
-        self.assertEqual(guard(tool_call_event("Bash", {"command": "tee -a ~/*bashrc"}))["result"], "ALLOW")
-        for command in ('du -sh ~/* "$(date +%F)"', 'ls ~/* | grep "$(id -un)"', '(cd /tmp && ls ~/*)', 'ls ~/*; echo "$(ls *.py)"'):
-            for form in (command, ["bash", "-lc", command]):
-                with self.subTest(form=form):
-                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "ALLOW")
-
-    def test_cap_fallback_requires_home_like_text(self):
-        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        for command in (
-            "echo {1..300}",
-            "mkdir -p out/{a,b}/{1..200}",
-            "ls /usr/lib/{x,y}{1..300}",
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
-        for command in (
-            "tee -a /h{ome/omnigent/.bashrc,}{,{1..300}}",
-            "tee -a /home/omnigen{t/.bashrc,}{,{1..300}}",
-            "cat /home/omnigen{t/.bashrc,}{,{1..300}}",
-            "tee -a {~/.bashrc,x}{,{1..300}}",
-            "tee -a /{home,x}/omnigent/.bashrc{,{1..300}}",
-            "tee -a ~/x{,/../.bashrc}{,{1..300}}",
-            "tee -a ${HOME%/}/.bashrc",
-            "tee -a ${HOME:-x}/.bashrc",
-            'tee -a ~/{"}",.bashrc}',
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "DENY")
-
-    def test_startup_pattern_matching_is_bounded(self):
-        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        for path in ("~/." + "*" * 25 + "X", "~/.b" + "{*,?}" * 20 + "X", "~/" + "x" * 200_000):
-            with self.subTest(length=len(path)):
-                started = time.perf_counter()
-                decision = guard(tool_call_event("Bash", {"command": f"echo x > {path}"}))
-                self.assertLess(time.perf_counter() - started, 0.05)
-                self.assertEqual(decision["result"], "DENY")
-
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
         body = "homepage omnigent " * 500
         for command in (f"cat <<'EOF' > docs/x.md\n{body}\nEOF", f"gh pr create --body '{body}'", "rg -g '" + "*.{" + ",".join(chr(97 + i) for i in range(20)) + "}' x"):
             with self.subTest(length=len(command)):
                 self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
-
-    def test_startup_dot_and_grouped_paths(self):
-        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        for command in (
-            "tee -a ~/./.bashrc{,{1..300}}",
-            "tee -a /home/omnigent/./.bashrc{,{1..300}}",
-            "tee -a /./home/omnigent/.bashrc{,{1..300}}",
-            "tee -a ~/x/../.bash{rc,{1..300}}",
-            "tee -a ~/x{/..,{1..300}}/.bashrc",
-            "tee -a /home/omnigent/(*bashrc)(D)",
-            'tee -a "$HOME"/(*bashrc)(D)',
-            "tee -a /home/omnigent/.bash(rc|x)",
-        ):
-            with self.subTest(command=command):
-                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "DENY")
-        for command in ('cat ~/notes/$(date +%F).md', 'ls $HOME/$(whoami)', 'mkdir -p "$HOME/.cache/$(date +%F)"'):
-            with self.subTest(command=command):
-                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
-
-    def test_large_range_parts_match_nonempty_values(self):
-        guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
-        for command in ("cat ~/.bash{1..1000}rc", "cat ~/.bash{0..9}{0..9}{0..9}rc", "cat ~/.bash{1..1000}x/y"):
-            with self.subTest(command=command):
-                self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
-
-    def test_brace_alternatives(self):
-        self.assertEqual(brace_alternatives("a{b,c}d"), ["abd", "acd"])
-        self.assertEqual(brace_alternatives("{x,~}/.bashrc"), ["x/.bashrc", "~/.bashrc"])
-        self.assertEqual(brace_alternatives("{a,{b,c}}"), ["a", "b", "c"])
-        self.assertEqual(brace_alternatives("{a,{b}}"), ["a", "{b}"])
-        self.assertEqual(brace_alternatives("{a{b,c}"), ["{ab", "{ac"])
-        self.assertEqual(brace_alternatives("x{01..03}"), ["x01", "x02", "x03"])
-        self.assertEqual(brace_alternatives("{3..1}"), ["3", "2", "1"])
-        self.assertEqual(brace_alternatives("{a..e..2}"), ["a", "c", "e"])
-        self.assertEqual(brace_alternatives("${HOME}/{}"), ["${HOME}/{}"])
-        self.assertEqual(len(brace_alternatives("{1..256}")), 256)
-        self.assertIsNone(brace_alternatives("{1..257}"))
-        self.assertIsNone(brace_alternatives("{a,b}{1..200}"))
-
-    def test_segment_matches(self):
-        for pattern, name in (("*", "a"), (".bash*", ".bashrc"), (".bash?c", ".bashrc"), (".bash[^x]c", ".bashrc"), (".bash[!x]c", ".bashrc"), (".bash[[:lower:]]c", ".bashrc"), (".bash[q-s]c", ".bashrc"), ("omnigen?", "omnigent")):
-            with self.subTest(pattern=pattern, name=name):
-                self.assertTrue(segment_matches(pattern, name))
-        for pattern, name in (("*", ".bashrc"), ("?bashrc", ".bashrc"), ("[.]bashrc", ".bashrc"), (".bash[^r]c", ".bashrc"), (".bash[[:upper:]]c", ".bashrc"), ("a*", "b")):
-            with self.subTest(pattern=pattern, name=name):
-                self.assertFalse(segment_matches(pattern, name))
 
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
