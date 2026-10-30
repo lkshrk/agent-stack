@@ -51,6 +51,10 @@ runs:
           type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
           type=raw,value=latest,enable=${{ inputs.version != '' }}
           type=sha,format=short
+    - name: Require the upstream base to set no image config the flattened runner drops
+      if: inputs.image == 'omnigent-host'
+      shell: bash
+      run: images/omnigent-host/ci/upstream-config.sh
     - name: Test the image before publishing it
       if: startsWith(inputs.image, 'omnigent-')
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

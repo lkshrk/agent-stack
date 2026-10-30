@@ -33,6 +33,10 @@ runs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ inputs.token }}
+    - name: Require the upstream base to set no image config the flattened runner drops
+      if: inputs.image == 'omnigent-host'
+      shell: bash
+      run: images/omnigent-host/ci/upstream-config.sh
     - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
