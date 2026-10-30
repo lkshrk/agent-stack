@@ -339,6 +339,8 @@ def _check_push(args: list[str], protected: frozenset[str]) -> str | None:
     if options & _REF_FLAGS:
         return f"pushing tags or all refs is not allowed; {_PR_HINT}"
     for refspec in refspecs:
+        if refspec == ":" or not push_destination(refspec):
+            return f"git push refspec {refspec!r} has no destination; {_PUSH_HINT}"
         resolved = _HEADS_PREFIX.sub("", push_destination(refspec))
         if resolved in protected:
             return f"push to protected branch {resolved} is not allowed; {_PR_HINT}"
