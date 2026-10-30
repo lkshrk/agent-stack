@@ -731,17 +731,19 @@ class ShellWriteScopeTest(unittest.TestCase):
             path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent"),
             path_guard(allow_only=["docs/**", "/tmp/**"], deny=[WORKFLOWS, "**/.env*"]),
         )
-        for command in (
-            "echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)),
-            "echo x" + "".join(f" > docs/a{i}.md" for i in range(1_000)),
-            "env -a x echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)),
-        ):
-            for guard in guards:
-                with self.subTest(command=command[:30], guard=guards.index(guard)):
-                    _walk_cached.cache_clear()
-                    started = time.perf_counter()
-                    self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
-                    self.assertLess(time.perf_counter() - started, 0.05)
+        for count, expected in ((500, "ALLOW"), (2_000, "DENY")):
+            for command in (
+                "echo x" + "".join(f" > /tmp/a{i}" for i in range(count)),
+                "echo x" + "".join(f" > docs/a{i}.md" for i in range(count)),
+                "env -a x echo x" + "".join(f" > /tmp/a{i}" for i in range(count)),
+                "; ".join(f"echo x > docs/a{i}.md" for i in range(count // 4)),
+            ):
+                for guard in guards:
+                    with self.subTest(command=command[:30], count=count, guard=guards.index(guard)):
+                        _walk_cached.cache_clear()
+                        started = time.perf_counter()
+                        self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], expected)
+                        self.assertLess(time.perf_counter() - started, 0.05)
 
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")

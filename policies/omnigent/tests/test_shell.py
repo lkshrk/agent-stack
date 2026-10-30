@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from agent_stack_policies._shell import NESTED_LIMIT, OpaqueCommand, parse, resolve, shell_command, shell_name, walk
+from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT, OpaqueCommand, has_quoted_operator, parse, resolve, shell_command, shell_name, walk
 
 
 def argv(command):
@@ -290,7 +290,7 @@ class FindExecTest(unittest.TestCase):
 
 class OperatorWordTest(unittest.TestCase):
     def test_unquoted_operators_end_every_statement(self):
-        for command in ("find . ; claude -p hi", "find . -name x;claude -p hi", "nice find . ; claude -p hi", r"find . -exec ls {} \; ; claude -p hi", "find . & claude -p hi", "find . || claude -p hi"):
+        for command in ("find . ; claude -p hi", "find . -name x;claude -p hi", "nice find . ; claude -p hi", r"find . -exec ls {} \; ; claude -p hi", "find . & claude -p hi", "find . || claude -p hi", "find . && claude -p hi", "find . -maxdepth 0\nclaude -p hi"):
             with self.subTest(command=command):
                 self.assertEqual(parse(command)[-1], ["claude", "-p", "hi"])
 
@@ -309,6 +309,14 @@ class OperatorWordTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(parse(command), statements)
 
+    def test_quoted_operator_readings(self):
+        for command in ("echo ';' x", r"echo \| x", "echo x $'\\x3b' y", 'echo $"|" x', "echo ''\\& x"):
+            with self.subTest(command=command):
+                self.assertTrue(has_quoted_operator(command))
+        for command in ("echo x; y", "echo 'a;b'", "find . -name x", "echo 'x' | wc"):
+            with self.subTest(command=command):
+                self.assertFalse(has_quoted_operator(command))
+
     def test_joined_bodies_read_operators_again(self):
         self.assertIn(["claude", "-p", "hi"], walk("eval echo ';' claude -p hi"))
         self.assertIn(["claude", "-p", "hi"], walk("watch echo ';' claude -p hi"))
@@ -322,6 +330,7 @@ class FindRunTest(unittest.TestCase):
             r"find . -exec ls {} + -exec claude -p hi \;": (["ls", "{}"], ["claude -p hi"]),
             r"find . -exec claude + -p hi \;": (["claude", "+", "-p", "hi"], []),
             r"find . -exec echo {}+ \;": (["echo", "{}+"], []),
+            r"find . -exec env -u + claude -p hi \;": (["claude", "-p", "hi"], []),
             "find . -execdir rg x {} +": (["rg", "x", "{}"], []),
         }
         for command, (first, rest) in cases.items():
@@ -336,14 +345,36 @@ class FindRunTest(unittest.TestCase):
                 with self.assertRaises(OpaqueCommand):
                     walk(command)
 
-    def test_nested_command_limit(self):
+    def test_statement_limit(self):
         runs = lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n))
-        self.assertEqual(len(walk(runs(NESTED_LIMIT + 1))), NESTED_LIMIT + 1)
-        for count in (NESTED_LIMIT + 2, 2_000):
-            with self.subTest(count=count):
+        bodies = lambda n: "mise exec " + " ".join(f"-c 'echo {i}'" for i in range(n))
+        statements = lambda n: "; ".join(["true"] * n)
+        groups = lambda n: "; ".join(["(true)"] * n)
+        for build, size in ((runs, STATEMENT_LIMIT), (bodies, STATEMENT_LIMIT - 1), (statements, STATEMENT_LIMIT), (groups, STATEMENT_LIMIT // 2)):
+            with self.subTest(build=build, size=size):
+                self.assertEqual(len(walk(build(size))), STATEMENT_LIMIT)
+                with self.assertRaisesRegex(OpaqueCommand, "more than 128 statements"):
+                    walk(build(size + 1))
+
+    def test_word_limit(self):
+        self.assertEqual(len(walk("echo " + " ".join(["x"] * (WORD_LIMIT - 1)))[0]), WORD_LIMIT)
+        for command in ("echo " + " ".join(["x"] * WORD_LIMIT), "echo x; echo " + " ".join(["x"] * (WORD_LIMIT - 2)), "echo " + " ".join(["x"] * 500) + "; sh -c 'echo " + " ".join(["x"] * 600) + "'"):
+            with self.subTest(command=command[:40]):
+                with self.assertRaisesRegex(OpaqueCommand, "1024 words"):
+                    walk(command)
+
+    def test_large_inputs_fail_fast(self):
+        inputs = {
+            "2000 find runs": "find . " + " ".join(f"-exec echo {i} \\;" for i in range(2_000)),
+            "2000 find {} + runs": "find . " + " ".join("-exec ls {} +" for _ in range(2_000)),
+            "2000 statements": "; ".join(f"echo x > /tmp/f{i}" for i in range(2_000)),
+            "2000 targets": "echo x" + "".join(f" > /tmp/a{i}" for i in range(2_000)),
+        }
+        for label, command in inputs.items():
+            with self.subTest(input=label):
                 started = time.perf_counter()
                 with self.assertRaises(OpaqueCommand):
-                    walk(runs(count))
+                    walk(command)
                 self.assertLess(time.perf_counter() - started, 0.05)
 
     def test_walk_results_are_independent_copies(self):
@@ -389,6 +420,26 @@ class WrapperOptionTest(unittest.TestCase):
         for command, nested in cases.items():
             with self.subTest(command=command):
                 self.assertEqual(resolve(parse(command)[0]).nested, nested)
+
+    def test_unknown_or_ambiguous_long_options_are_opaque(self):
+        for command in (
+            "ionice --cl 3 claude -p hi",
+            "env --frobnicate claude -p hi",
+            "env --=x claude -p hi",
+            "nice --x 5 claude -p hi",
+            "flock --no /tmp/l claude -p hi",
+            "watch --c claude -p hi",
+            "su --s 'claude -p hi' root",
+            "timeout --ver 5 claude -p hi",
+            "ionice --clas 3 claude -p hi",
+            "nice env --unknown claude -p hi",
+        ):
+            with self.subTest(command=command):
+                with self.assertRaisesRegex(OpaqueCommand, "long options"):
+                    walk(command)
+        for command in ("ionice --class 3 ls", "ionice --classd 7 ls", "env --ignore-env ls", "timeout --foreground 5 ls", "sudo --user root ls", "git --no-pager log"):
+            with self.subTest(command=command):
+                walk(command)
 
     def test_argv0_suppresses_only_the_lookup(self):
         self.assertTrue(resolve(parse("command -v capsh")[0]).lookup)
