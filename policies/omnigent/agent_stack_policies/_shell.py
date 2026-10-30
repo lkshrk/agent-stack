@@ -448,12 +448,18 @@ def parse(command: str, literal_operators: bool = False, split_operators: bool =
     return statements
 
 
+class _UnknownOption(Exception):
+    pass
+
+
 def _long(name: str, longs: frozenset[str]) -> str:
-    """The long option a unique `--` abbreviation stands for, as getopt_long reads it; otherwise `name` itself."""
-    if name in longs:
+    """The long option a unique `--` abbreviation stands for, as getopt_long reads it; raises _UnknownOption for an unknown or ambiguous one when `longs` is known."""
+    if not longs or name in longs:
         return name
     matches = [option for option in longs if option.startswith(name)]
-    return matches[0] if len(matches) == 1 else name
+    if len(matches) != 1:
+        raise _UnknownOption(name)
+    return matches[0]
 
 
 def _scan(
@@ -622,6 +628,7 @@ def _unwrap(name: str, args: list[str], command: Command) -> list[str] | None:
         return _mise_exec(rest[1:], nested) if rest[:1] in (["exec"], ["x"]) else None
     if name == "env":
         start, found = _scan(args, _ENV_VALUES, _LONG_OPTIONS["env"], _ENV_SPLIT)
+        command.argv0 = command.argv0 or any(option in ("-a", "--argv0") for option, _ in found)
         if found and found[-1][0] in _ENV_SPLIT:
             try:
                 return ["env", *shlex.split(found[-1][1]), *args[start:]]
@@ -711,11 +718,13 @@ def resolve(tokens: list[str]) -> Command:
             if argv[1:]:
                 command.nested.append(" ".join(argv[1:]))
             break
-        if name == "env" and any(option in ("-a", "--argv0") for option, _ in _scan(argv[1:], _ENV_VALUES, _LONG_OPTIONS["env"], _ENV_SPLIT)[1]):
-            command.argv0 = True
         if name == "command" and not command.argv0 and _command_lookup(argv[1:]):
             command.lookup = True
-        unwrapped = _unwrap(name, argv[1:], command)
+        try:
+            unwrapped = _unwrap(name, argv[1:], command)
+        except _UnknownOption as error:
+            command.problem = f"{name} {error} is not one of its long options or abbreviates more than one; spell the option out"
+            break
         if unwrapped is None:
             break
         command.wrappers.append(name)
