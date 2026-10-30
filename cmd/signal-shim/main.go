@@ -41,6 +41,7 @@ func main() {
 type shim struct {
 	upstream string
 	http     *http.Client
+	polls    pollStore
 }
 
 func (s *shim) routes() http.Handler {
@@ -119,7 +120,7 @@ func (s *shim) events(w http.ResponseWriter, r *http.Request) {
 		case data := <-msgs:
 			// signal-cli-rest-api relays the daemon's notification params ({"envelope":…,"account":…}) unchanged.
 			_, _ = io.WriteString(w, "data: ")
-			_, _ = w.Write(compact(data))
+			_, _ = w.Write(compact(s.withPollVoteText(data)))
 			_, _ = io.WriteString(w, "\n\n")
 			flusher.Flush()
 		}
@@ -163,6 +164,10 @@ func (s *shim) rpc(w http.ResponseWriter, r *http.Request) {
 		result, err = s.typing(r.Context(), params)
 	case "sendReaction":
 		result, err = s.reaction(r.Context(), params)
+	case "sendPollCreate":
+		result, err = s.pollCreate(r.Context(), params)
+	case "sendPollTerminate":
+		result, err = s.pollTerminate(r.Context(), params)
 	case "getAttachment":
 		result, err = s.attachment(r.Context(), params)
 	case "getContact":
