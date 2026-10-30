@@ -148,7 +148,7 @@ _TOO_LONG = f"a command longer than {CHARACTER_LIMIT} characters {_SPLIT}"
 _AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one's command is ambiguous; split it up"
 
 
-_HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|\\?([^\s;&|<>()'\"]+))")
+_HEREDOC = re.compile(r"""<<(-?)[ \t]*((?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s;&|<>()'"\\])+)""")
 
 
 def _heredocs(line: str) -> list[tuple[str, bool, bool]]:
@@ -174,8 +174,8 @@ def _heredocs(line: str) -> list[tuple[str, bool, bool]]:
             arithmetic = line.count("((", 0, i) > line.count("))", 0, i)
             match = _HEREDOC.match(line, i)
             if match and not arithmetic:
-                quoted = match.group(2) is not None or match.group(3) is not None or "\\" in match.group()
-                docs.append((next(g for g in match.groups()[1:] if g is not None), match.group(1) == "-", quoted))
+                word = match.group(2)
+                docs.append((shlex.split(word)[0], match.group(1) == "-", bool(_QUOTE_OR_ESCAPE.search(word))))
                 i = match.end()
                 continue
         i += 1
@@ -806,7 +806,7 @@ def substituted(token: str) -> bool:
 
 
 _BODY_STOPS = {
-    None: re.compile(r"[\\$`'\"#()\n]"),
+    None: re.compile(r"[\\$`'\"#()}\n]"),
     '"': re.compile(r'[\\$`"]'),
     "'": re.compile(r"'"),
     "$'": re.compile(r"[\\']"),
@@ -825,15 +825,18 @@ class _Frame:
     line_start: int = 0
     line: list[str] = field(default_factory=list)
     comment: int | None = None
+    braces: int = 0
 
 
 def _bodies(text: str, quotes: bool = True) -> list[str]:
-    """`$(…)` and backtick bodies that bash runs: none inside single quotes, `$'…'`, comments or quoted heredocs, or after a backslash; with `quotes` off (an unquoted heredoc body) quote characters are literal."""
-    bodies, frames, i = [], [_Frame(0)], 0
+    """`$(…)` and backtick bodies that bash runs: none inside single quotes, `$'…'`, comments or quoted heredocs, or after a backslash; with `quotes` off (an unquoted heredoc body) quotes and `$'` are literal; a `#` after escaped whitespace or inside `${…}` starts no comment."""
+    bodies, frames, i, escape_end = [], [_Frame(0)], 0, -1
+    text_mode = not quotes
     while i < len(text):
         frame = frames[-1]
         quote = frame.quote
-        stops = _BODY_STOPS["text" if quote is None and not quotes and len(frames) == 1 else quote]
+        in_text = text_mode and len(frames) == 1
+        stops = _BODY_STOPS["text" if quote is None and in_text else quote]
         found = stops.search(text, i)
         if not found:
             break
@@ -843,6 +846,7 @@ def _bodies(text: str, quotes: bool = True) -> list[str]:
             i += 1
         elif ch == "\\":
             i += 2
+            escape_end = i
         elif quote == "$'":
             frame.quote = None
             i += 1
@@ -858,8 +862,11 @@ def _bodies(text: str, quotes: bool = True) -> list[str]:
                 bodies.append(_BACKTICK_ESCAPE.sub(r"\1", text[i + 1 : j]))
             i = j + 1
         elif ch == "$":
-            if quote is None and text.startswith("$'", i):
+            if quote is None and not in_text and text.startswith("$'", i):
                 frame.quote = "$'"
+                i += 1
+            elif quote is None and not in_text and text.startswith("${", i):
+                frame.braces += 1
                 i += 1
             i += 1
         elif quote == '"':
@@ -869,12 +876,15 @@ def _bodies(text: str, quotes: bool = True) -> list[str]:
             frame.quote = ch
             i += 1
         elif ch == "#":
-            if i == 0 or text[i - 1] in " \t\n;&|(":
+            if (i == 0 or text[i - 1] in " \t\n;&|(") and escape_end != i and not frame.braces:
                 frame.comment = i if frame.comment is None else frame.comment
                 end = text.find("\n", i)
                 i = len(text) if end < 0 else end
             else:
                 i += 1
+        elif ch == "}":
+            frame.braces -= 1 if frame.braces else 0
+            i += 1
         elif ch == "(":
             frame.depth += 1
             i += 1
