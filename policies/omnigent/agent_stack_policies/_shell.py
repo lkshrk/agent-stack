@@ -104,6 +104,7 @@ _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": 
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 STATEMENT_LIMIT = 160
 WORD_LIMIT = 1024
+CHARACTER_LIMIT = 16_384
 OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
 _FD = re.compile(r"^\d+$")
@@ -140,9 +141,10 @@ class OpaqueCommand(ValueError):
 
 
 _UNCLOSED_HEREDOC = "a heredoc without its delimiter line hides what runs after it; close it"
-_SPLIT = "is not checked; split it up into several commands, or put a long script in a file under the workspace and run that"
+_SPLIT = "is not checked; split it up into several commands, or put a long script in a file under the workspace and run that (write a large file with the Write tool, which this limit doesn't apply to)"
 _TOO_MANY_STATEMENTS = f"a command with more than {STATEMENT_LIMIT} statements, groups and nested commands (each find -exec run, -c body and $(…) body counts) {_SPLIT}"
 _TOO_MANY_WORDS = f"a command with more than {WORD_LIMIT} words across its statements and nested commands {_SPLIT}"
+_TOO_LONG = f"a command longer than {CHARACTER_LIMIT} characters {_SPLIT}"
 _AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one's command is ambiguous; split it up"
 
 
@@ -966,13 +968,15 @@ def _walk(command: str, literal_operators: bool, split_operators: bool, result: 
 @lru_cache(maxsize=64)
 def _walk_cached(command: str, literal_operators: bool, split_operators: bool) -> tuple[tuple[tuple[str, ...], ...], tuple | None]:
     try:
+        if len(command) > CHARACTER_LIMIT:
+            raise OpaqueCommand(_TOO_LONG)
         return tuple(tuple(tokens) for tokens in _walk(command, literal_operators, split_operators, [], [0])), None
     except ValueError as error:
         return (), (type(error), error.args)
 
 
 def walk(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
-    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand above STATEMENT_LIMIT statements or WORD_LIMIT words, for an ambiguous find run and for a wrapper long option it can't resolve."""
+    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand above CHARACTER_LIMIT characters, STATEMENT_LIMIT statements or WORD_LIMIT words, for an ambiguous find run and for a wrapper long option it can't resolve."""
     statements, error = _walk_cached(command, literal_operators, split_operators)
     if error is not None:
         raise error[0](*error[1])
