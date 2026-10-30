@@ -353,14 +353,14 @@ class FindRunTest(unittest.TestCase):
         for build, size in ((runs, STATEMENT_LIMIT), (bodies, STATEMENT_LIMIT - 1), (statements, STATEMENT_LIMIT), (groups, STATEMENT_LIMIT // 2)):
             with self.subTest(build=build, size=size):
                 self.assertEqual(len(walk(build(size))), STATEMENT_LIMIT)
-                with self.assertRaisesRegex(OpaqueCommand, "more than 128 statements"):
+                with self.assertRaisesRegex(OpaqueCommand, f"more than {STATEMENT_LIMIT} statements"):
                     walk(build(size + 1))
 
     def test_word_limit(self):
         self.assertEqual(len(walk("echo " + " ".join(["x"] * (WORD_LIMIT - 1)))[0]), WORD_LIMIT)
-        for command in ("echo " + " ".join(["x"] * WORD_LIMIT), "echo x; echo " + " ".join(["x"] * (WORD_LIMIT - 2)), "echo " + " ".join(["x"] * 500) + "; sh -c 'echo " + " ".join(["x"] * 600) + "'"):
+        for command in ("echo " + " ".join(["x"] * WORD_LIMIT), "echo x; echo " + " ".join(["x"] * (WORD_LIMIT - 2)), "echo " + " ".join(["x"] * (WORD_LIMIT // 2)) + "; sh -c 'echo " + " ".join(["x"] * (WORD_LIMIT // 2)) + "'"):
             with self.subTest(command=command[:40]):
-                with self.assertRaisesRegex(OpaqueCommand, "1024 words"):
+                with self.assertRaisesRegex(OpaqueCommand, f"more than {WORD_LIMIT} words"):
                     walk(command)
 
     def test_large_inputs_fail_fast(self):

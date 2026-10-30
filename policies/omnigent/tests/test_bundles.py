@@ -6,6 +6,8 @@ import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT
+
 IN_IMAGE = os.environ.get("AGENT_STACK_IN_IMAGE") == "1"
 REPO = Path(__file__).resolve().parents[3]
 BUNDLES = REPO / "bundles"
@@ -935,9 +937,9 @@ EVERY_BUNDLE_DENY = [
     "ionice --cl 3 claude -p hi",
     "ionice --clas 3 taskset 1 capsh -- -c 'gh pr merge 5'",
     "env --unknown claude -p hi",
-    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(129)),
-    "; ".join(["true"] * 129),
-    "echo " + " ".join(["x"] * 1_024),
+    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(STATEMENT_LIMIT + 1)),
+    "; ".join(["true"] * (STATEMENT_LIMIT + 1)),
+    "echo " + " ".join(["x"] * WORD_LIMIT),
 ]
 EVERY_BUNDLE_ALLOW = [
     r"find . -name x -exec ls {} \;",
