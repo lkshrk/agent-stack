@@ -1,0 +1,91 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "gate": "gate:split",
+  "design": "Split into three slices.",
+  "risk": {
+    "class": "medium",
+    "force_gate_plan": false
+  },
+  "children": [
+    {
+      "key": "a",
+      "title": "Child a",
+      "description": "Implement part a.",
+      "files": [
+        "src/a.py"
+      ],
+      "independent_test": "pytest tests/test_a.py",
+      "criteria": [
+        {
+          "id": "a-1",
+          "ears": "WHEN input a arrives THE SYSTEM SHALL handle a"
+        }
+      ],
+      "blocked_by": []
+    },
+    {
+      "key": "b",
+      "title": "Child b",
+      "description": "Implement part b.",
+      "files": [
+        "src/b.py",
+        "src/a.py"
+      ],
+      "independent_test": "pytest tests/test_b.py",
+      "criteria": [
+        {
+          "id": "b-1",
+          "ears": "WHEN input b arrives THE SYSTEM SHALL handle b"
+        }
+      ],
+      "blocked_by": [
+        "a"
+      ]
+    },
+    {
+      "key": "c",
+      "title": "Child c",
+      "description": "Implement part c.",
+      "files": [
+        "src/c.py"
+      ],
+      "independent_test": "pytest tests/test_c.py",
+      "criteria": [
+        {
+          "id": "c-1",
+          "ears": "WHEN input c arrives THE SYSTEM SHALL handle c"
+        }
+      ],
+      "blocked_by": []
+    }
+  ],
+  "critic": {
+    "rounds": 2,
+    "coverage": [
+      {
+        "criterion": "a-1",
+        "child": "a"
+      },
+      {
+        "criterion": "b-1",
+        "child": "b"
+      },
+      {
+        "criterion": "c-1",
+        "child": "c"
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "id": "gap-1",
+      "class": "cosmetic",
+      "question": "Name the child 'orders-api' or 'api'?",
+      "stub": "Named it 'api'.",
+      "location": "src/a.py"
+    }
+  ],
+  "assumptions": [
+    "gap-1: the child key follows the directory name"
+  ]
+}

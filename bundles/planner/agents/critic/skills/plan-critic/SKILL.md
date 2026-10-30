@@ -17,13 +17,14 @@ design, and never send back a corrected plan.
    response as `text`. Never validate through the shell.
 
    Anything but `valid: true` is a failure. Each entry in `errors` is one
-   failed threshold. The validator enforces: status, design, risk class and
-   `force_gate_plan`, 1 to 8 children, keys unique, every child's title,
+   failed threshold. The validator enforces: status, `gate`, design, risk
+   class and `force_gate_plan`, 1 to 8 children, keys unique, every child's title,
    description, files and Independent Test present, criteria IDs unique,
    of the form `<child-key>-<n>` and in EARS form, `blocked_by` keys known
    and acyclic, parallel children with disjoint files, `critic.rounds` 1 to
-   3, every child criterion in `critic.coverage`, and no placeholders
-   anywhere.
+   3, every child criterion in `critic.coverage`, no placeholders
+   anywhere, no gaps unless the result is `BLOCKED` (the planner never stubs),
+   and empty `assumptions` for `DONE`.
 2. **Coverage map.** Build your own map from the root criteria in the
    message and the draft's children: one entry per child criterion,
    `{"criterion": "<child-key>-<n>", "child": "<key>", "root": "<root
@@ -40,6 +41,8 @@ design, and never send back a corrected plan.
 4. **Gate.** `risk.force_gate_plan` is true when the plan includes a schema
    migration, auth or security, infra or deploy changes, a public API change
    or work across more than one repository.
+5. **No assumptions.** A choice the design makes without evidence from the
+   issue, code or vault fails; it belongs in `gaps` of a `BLOCKED` result.
 
 ## Findings
 

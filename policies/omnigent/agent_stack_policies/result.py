@@ -12,6 +12,10 @@ STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED")
 BLOCK_CLASSES = ("decision", "permission", "dependency", "environment")
 RISK_CLASSES = ("low", "medium", "high")
 SEVERITIES = ("critical", "high", "medium", "low")
+GATES = ("gate:plan", "gate:split", "gate:pr")
+STUB_CLASSES = ("cosmetic", "internal")
+GAP_CLASSES = (*STUB_CLASSES, "behaviour", "data", "security", "public_api", "cost")
+NO_STUB = {"planner": "a plan", "security": "a security review", "documenter": "a documenter result outside delta mode"}
 MAX_CHILDREN = 8
 MAX_ERRORS_SHOWN = 5
 MAX_DEPTH = 64
@@ -20,6 +24,9 @@ _OPENER = re.compile(r"```json[ \t]*\r?\n", re.IGNORECASE)
 _CLOSER = re.compile(r"\s*```")
 _EARS = re.compile(r"^WHEN .+ THE SYSTEM SHALL .+")
 _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
+_GAP_ID = re.compile(r"gap-[1-9][0-9]*")
+_GAP_REF = re.compile(r"(gap-[1-9][0-9]*)(?![\w-])")
+_LOCATION = re.compile(r"[^\s:]+:[1-9][0-9]*")
 
 
 def extract_result(text: str) -> dict | None:
@@ -245,15 +252,15 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
     for i, item in enumerate(stale):
         if not isinstance(item, dict) or not _text(item.get("file")) or not _text(item.get("reason")):
             errors.append(f"stale[{i}] needs file and reason")
-    gaps = result.get("gaps", [])
-    if not isinstance(gaps, list):
-        errors.append("gaps must be a list")
-        gaps = []
-    for i, item in enumerate(gaps):
+    doc_gaps = result.get("doc_gaps", [])
+    if not isinstance(doc_gaps, list):
+        errors.append("doc_gaps must be a list")
+        doc_gaps = []
+    for i, item in enumerate(doc_gaps):
         if not isinstance(item, dict) or not _text(item.get("file")) or not _text(item.get("reason")):
-            errors.append(f"gaps[{i}] needs file and reason")
-    if gaps and result.get("status") != "DONE_WITH_CONCERNS":
-        errors.append("gaps require status DONE_WITH_CONCERNS")
+            errors.append(f"doc_gaps[{i}] needs file and reason")
+    if doc_gaps and result.get("status") != "DONE_WITH_CONCERNS":
+        errors.append("doc_gaps require status DONE_WITH_CONCERNS")
     pr = result.get("pr")
     if pr is not None and not isinstance(pr, str):
         errors.append("pr must be a string or null")
@@ -261,18 +268,95 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
         errors.append("pr is required in delta mode with changed files")
 
 
+def _check_gate(result: dict, errors: list[str]) -> None:
+    gate = result.get("gate")
+    if (gate is not None or result.get("status") != "BLOCKED") and gate not in GATES:
+        errors.append(f"gate must be one of {'|'.join(GATES)}, echoing the issue's gate label")
+
+
+def _check_gaps(result: dict, kind: str, may_stub: bool, errors: list[str]) -> set[str]:
+    gaps = result.get("gaps", [])
+    if not isinstance(gaps, list):
+        errors.append("gaps must be a list")
+        return set()
+    if gaps and result.get("status") == "DONE":
+        errors.append("gaps must be empty for DONE: a gap makes the result DONE_WITH_CONCERNS at best")
+    ids: set[str] = set()
+    waiting: list[str] = []
+    for i, gap in enumerate(gaps):
+        where = f"gaps[{i}]"
+        if not isinstance(gap, dict):
+            errors.append(f"{where} must be an object")
+            continue
+        gid = gap.get("id")
+        if not isinstance(gid, str) or not _GAP_ID.fullmatch(gid):
+            errors.append(f"{where}.id must be gap-<n>, e.g. gap-1")
+        elif gid in ids:
+            errors.append(f"gap id {gid!r} is duplicated")
+        else:
+            ids.add(gid)
+            where = gid
+        if not _text(gap.get("question")):
+            errors.append(f"{where}.question must be a non-empty string")
+        gap_class = gap.get("class")
+        if gap_class not in GAP_CLASSES:
+            errors.append(f"{where}.class must be one of {'|'.join(GAP_CLASSES)}")
+        elif gap_class in STUB_CLASSES and may_stub:
+            stub = gap.get("stub")
+            if not _text(stub):
+                errors.append(f"{where}.stub must say what was stubbed")
+            elif where in ids and not re.search(rf"(?<![\w-]){re.escape(where)}(?![\w-])", stub):
+                errors.append(f"{where}.stub must quote the visible note naming {where}")
+            location = gap.get("location")
+            if not isinstance(location, str) or not _LOCATION.fullmatch(location):
+                errors.append(f"{where}.location must be path:line")
+        else:
+            waiting.append(where)
+            reason = f"of class {gap_class}" if may_stub or gap_class not in STUB_CLASSES else f"in {NO_STUB[kind]}"
+            for field in ("stub", "location"):
+                if gap.get(field) is not None:
+                    errors.append(f"{where}.{field} must be null: a gap {reason} waits for the owner and is never stubbed")
+    blocked = result.get("blocked")
+    decided = result.get("status") == "BLOCKED" and isinstance(blocked, dict) and blocked.get("class") == "decision"
+    if waiting and not decided:
+        errors.append(f"gaps {waiting} wait for the owner: status must be BLOCKED with blocked.class decision")
+    return ids
+
+
+def _check_assumptions(result: dict, gap_ids: set[str], errors: list[str]) -> None:
+    assumptions = result.get("assumptions", [])
+    if not isinstance(assumptions, list) or not all(_text(a) for a in assumptions):
+        errors.append("assumptions must be a list of non-empty strings")
+        return
+    if result.get("status") == "DONE":
+        if assumptions:
+            errors.append("assumptions must be empty for DONE: record each as a gap or return BLOCKED")
+        return
+    for i, assumption in enumerate(assumptions):
+        ref = _GAP_REF.match(assumption)
+        if not ref or ref.group(1) not in gap_ids:
+            errors.append(f"assumptions[{i}] must start with a gap id from gaps, e.g. 'gap-1: ...'")
+
+
 _CHECKS = {"planner": _check_planner, "security": _check_security, "documenter": _check_documenter}
 
 
 def validate_result(kind: str, result: dict) -> list[str]:
-    if kind not in _CHECKS:
+    if not isinstance(kind, str) or kind not in _CHECKS:
         return [f"unknown kind {kind!r}"]
+    if not isinstance(result, dict):
+        return ["result must be a JSON object"]
     if _too_deep(result):
         return [f"result nests deeper than {MAX_DEPTH} levels"]
     errors = _placeholders(result)
     status = result.get("status")
     if status not in STATUSES:
         errors.append(f"status must be one of {'|'.join(STATUSES)}")
+        return errors
+    if kind == "planner":
+        _check_gate(result, errors)
+    may_stub = kind == "documenter" and result.get("mode") == "delta"
+    _check_assumptions(result, _check_gaps(result, kind, may_stub, errors), errors)
     if status == "BLOCKED":
         blocked = result.get("blocked")
         blocked = blocked if isinstance(blocked, dict) else {}
@@ -280,7 +364,7 @@ def validate_result(kind: str, result: dict) -> list[str]:
             errors.append(f"blocked.class must be one of {'|'.join(BLOCK_CLASSES)}")
         if not _text(blocked.get("question")):
             errors.append("blocked.question must be a non-empty string")
-    elif status in STATUSES:
+    else:
         _CHECKS[kind](result, errors)
     return errors
 

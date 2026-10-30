@@ -33,7 +33,9 @@ Every decision is resolved here, before decomposition. For each one, either:
   you would pick.
 
 Never carry a decision forward as a child, a placeholder, `TBD` or
-`[NEEDS CLARIFICATION: …]`. Any of those fails the critic.
+`[NEEDS CLARIFICATION: …]`, and never as an unstated assumption. Record
+each open one as a gap under the planner prompt's no-assumptions rule.
+The planner only asks: any gap means `BLOCKED`, under every gate.
 
 ## Risk
 

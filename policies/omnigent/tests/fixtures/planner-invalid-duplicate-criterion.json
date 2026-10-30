@@ -1,5 +1,6 @@
 {
   "status": "DONE",
+  "gate": "gate:split",
   "design": "Split into three slices.",
   "risk": {
     "class": "medium",

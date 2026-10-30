@@ -1,0 +1,13 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "mode": "audit",
+  "changed_files": [],
+  "stale": [],
+  "gaps": [
+    {
+      "file": "docs/setup.md",
+      "reason": "ORDERS_QUEUE is read in backend/app/settings.py and documented nowhere."
+    }
+  ],
+  "pr": null
+}

@@ -34,6 +34,9 @@ prompt: |
   redirection except `2>/dev/null` and `2>&1`. Committing, pushing and commenting on or approving a
   PR are denied.
 
+  Never guess: an unknown the code and the contract don't answer goes back
+  to polly as an open question in your result.
+
   Always return a clear, structured result with your findings.
   Note anything that did not fit the task.
 

@@ -1,0 +1,16 @@
+{
+  "status": "BLOCKED",
+  "verdict": "pass",
+  "findings": [],
+  "blocked": {
+    "class": "decision",
+    "question": "gap-1: may the webhook call any https host, or only the allowlisted partner hosts?"
+  },
+  "gaps": [
+    {
+      "id": "gap-1",
+      "class": "security",
+      "question": "May the webhook call any https host, or only the allowlisted partner hosts?"
+    }
+  ]
+}

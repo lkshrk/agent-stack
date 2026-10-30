@@ -8,7 +8,7 @@
       "reason": "Documents --port; the CLI now reads PORT from the environment."
     }
   ],
-  "gaps": [
+  "doc_gaps": [
     {
       "file": "docs/setup.md",
       "reason": "ORDERS_QUEUE is read in backend/app/settings.py and documented nowhere."

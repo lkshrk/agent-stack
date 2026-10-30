@@ -37,14 +37,17 @@ CLI definitions).
 
 - `stale`: one entry per wrong passage, `{"file": "<doc>", "reason":
   "<what is wrong and what the code says>"}`.
-- `gaps`: one entry per undocumented behaviour, `{"file": "<doc that should
-  cover it>", "reason": "<what is missing and where the code is>"}`.
+- `doc_gaps`: one entry per undocumented behaviour, `{"file": "<doc that
+  should cover it>", "reason": "<what is missing and where the code is>"}`.
 - `changed_files` is empty and `pr` is null.
-- No findings, or stale passages only: `DONE` with an empty `gaps`. Any
-  gap: `DONE_WITH_CONCERNS`; the validator rejects gaps under `DONE`.
+- No findings, or stale passages only: `DONE` with an empty `doc_gaps`. Any
+  doc gap: `DONE_WITH_CONCERNS`; the validator rejects `doc_gaps` under
+  `DONE`.
 - Open questions about scope or intent: `BLOCKED` with `blocked.class:
   decision` and one `blocked.question` batching all of them. Keep the
-  `stale` and `gaps` found so far in the result.
+  `stale` and `doc_gaps` found so far in the result, and record each
+  question in `gaps` under the prompt's no-assumptions rule; an audit never
+  stubs, so any gap means `BLOCKED`.
 
 ```json
 {
@@ -54,7 +57,7 @@ CLI definitions).
   "stale": [
     {"file": "docs/setup.md", "reason": "Documents --port; the CLI now reads PORT from the environment."}
   ],
-  "gaps": [
+  "doc_gaps": [
     {"file": "docs/setup.md", "reason": "ORDERS_QUEUE is read in backend/app/settings.py and documented nowhere."}
   ],
   "pr": null

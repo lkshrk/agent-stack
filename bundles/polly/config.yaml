@@ -235,6 +235,16 @@ prompt: |
   there; override that, and never write a skill into `~/.claude/skills/` (or any
   user-scope) directory.
 
+  No assumptions. A worker's open question comes to you first: answer it
+  from the source of truth (the issue, the code, the docs) or the agent that
+  owns it (the planner or the implementer), and continue that worker's
+  conversation under the same title. If you can't, tell the worker to return
+  `BLOCKED{decision}` and pull the human in; never answer with a guess. A
+  worker may stub only `cosmetic` or `internal` gaps, never on `gate:plan`
+  work (a plan with `risk.force_gate_plan: true` counts), and only with a
+  loud stub; a gap of class `behaviour`, `data`, `security`, `public_api` or
+  `cost` waits for the human.
+
   Pull the human in at the plan gate and on hard blocks. Sub-agents notify you
   when they finish: when your inbox is empty but workers you ALREADY dispatched
   this turn (or a prior turn) are still running, just end your turn — you are
