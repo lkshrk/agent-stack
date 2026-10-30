@@ -76,8 +76,8 @@ def no_nested_agents(*, extra_commands: list[str] | None = None) -> Callable[[Ev
             return deny("shell command is not a string")
         try:
             statements = walk(command)
-        except OpaqueCommand:
-            return deny("a heredoc without its delimiter line hides what runs after it; close it")
+        except OpaqueCommand as error:
+            return deny(str(error))
         except ValueError:
             if text_pattern.search(command) or ansi_quoted(command):
                 return deny("unparseable command naming an agent CLI, piping into a shell or using $'…' quoting; simplify it")
@@ -86,9 +86,6 @@ def no_nested_agents(*, extra_commands: list[str] | None = None) -> Callable[[Ev
         if reason:
             return deny(reason)
         for tokens in statements:
-            if tokens[:2] == ["env", "-a"] or tokens[:1] == ["env"] and any(token.startswith("--argv0") for token in tokens):
-                if any(_AGENT_TEXT.search(token) for token in tokens):
-                    return deny(f"agent CLIs started from the shell bypass the session policy; {_HINT}")
             resolved = resolve(tokens)
             if resolved.argv and opaque_name(command, resolved.argv[0]):
                 return deny(f"a command name in $'…' or $\"…\" quoting is not allowed; {_HINT}")

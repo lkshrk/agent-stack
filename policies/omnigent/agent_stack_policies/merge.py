@@ -457,8 +457,8 @@ def no_merge(*, protected_branches: list[str] | None = None) -> Callable[[Event]
             return deny("shell command is not a string")
         try:
             statements = walk(command)
-        except OpaqueCommand:
-            return deny("a heredoc without its delimiter line hides what runs after it; close it")
+        except OpaqueCommand as error:
+            return deny(str(error))
         except ValueError:
             if "merge" in command or "push" in command or ansi_quoted(command):
                 return deny("unparseable merge or push command; simplify the command")

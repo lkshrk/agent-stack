@@ -2,6 +2,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 _OPERATOR_CHARS = frozenset(";&|")
 _PUNCTUATION = frozenset(";&|()<>")
@@ -25,7 +26,46 @@ _SUDO_VALUES = {
 }
 _XARGS_VALUES = {
     "-I", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "--max-args", "--max-procs", "--max-lines",
-    "--max-chars", "--delimiter", "--eof", "--arg-file", "--process-slot-var",
+    "--max-chars", "--delimiter", "--arg-file", "--process-slot-var",
+}
+_ENV_VALUES = frozenset({"-a", "--argv0", "-u", "--unset", "-C", "--chdir", "-S", "--split-string"})
+_ENV_SPLIT = frozenset({"-S", "--split-string"})
+_OPTIONAL_LETTERS = {"xargs": "iel"}
+_SU_COMMANDS = frozenset({"-c", "--command", "--session-command"})
+_WATCH_VALUES = frozenset({"-n", "--interval", "-q", "--equexit"})
+# every long option of the installed wrappers (their --help), so a unique abbreviation resolves as getopt_long does
+_LONG_OPTIONS = {
+    "env": frozenset({
+        "--argv0", "--ignore-environment", "--null", "--unset", "--chdir", "--split-string", "--block-signal",
+        "--default-signal", "--ignore-signal", "--list-signal-handling", "--debug", "--help", "--version",
+    }),
+    "timeout": frozenset({"--foreground", "--kill-after", "--preserve-status", "--signal", "--verbose", "--help", "--version"}),
+    "nice": frozenset({"--adjustment", "--help", "--version"}),
+    "nohup": frozenset({"--help", "--version"}),
+    "stdbuf": frozenset({"--input", "--output", "--error", "--help", "--version"}),
+    "ionice": frozenset({"--class", "--classdata", "--pid", "--pgid", "--ignore", "--uid", "--help", "--version"}),
+    "setsid": frozenset({"--ctty", "--fork", "--wait", "--help", "--version"}),
+    "flock": frozenset({
+        "--shared", "--exclusive", "--unlock", "--nonblock", "--timeout", "--wait", "--conflict-exit-code", "--close",
+        "--command", "--no-fork", "--fcntl", "--verbose", "--help", "--version",
+    }),
+    "script": frozenset({
+        "--log-in", "--log-out", "--log-io", "--log-timing", "--timing", "--logging-format", "--append", "--command",
+        "--return", "--flush", "--force", "--echo", "--output-limit", "--quiet", "--help", "--version",
+    }),
+    "su": frozenset({
+        "--preserve-environment", "--whitelist-environment", "--group", "--supp-group", "--login", "--command",
+        "--session-command", "--fast", "--shell", "--pty", "--no-pty", "--help", "--version",
+    }),
+    "watch": frozenset({
+        "--beep", "--color", "--no-color", "--differences", "--errexit", "--chgexit", "--equexit", "--interval",
+        "--precise", "--no-rerun", "--no-title", "--no-wrap", "--exec", "--help", "--version",
+    }),
+    "xargs": frozenset({
+        "--null", "--arg-file", "--delimiter", "--eof", "--replace", "--max-lines", "--max-args", "--open-tty",
+        "--max-procs", "--interactive", "--process-slot-var", "--no-run-if-empty", "--max-chars", "--show-limits",
+        "--verbose", "--exit", "--help", "--version",
+    }),
 }
 _PARALLEL_VALUES = {
     "-j", "--jobs", "-S", "--sshlogin", "--joblog", "--delay", "--timeout", "-N", "-n",
@@ -63,12 +103,16 @@ _PYTHON_SPEC = re.compile(r"[@=<>!~\[]")
 _LAUNCH_OPTIONS = frozenset({"-p", "--package", "-c", "--call"})
 _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": {"exec", "x"}, "bun": {"x"}}
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
+NESTED_LIMIT = 64
 OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
 _FD = re.compile(r"^\d+$")
 _QUOTED_DOLLAR = re.compile(r"\$['\"]")
 _LITERAL_OPERATOR = re.compile(r"(?<![^\s;&|()])(?:'[<>&|;()]+'|\"[<>&|;()]+\"|\\[<>&|;()])(?=$|[\s;&|()])")
 LITERAL_OPERATOR = "__agent_stack_literal_operator__"
+_QUOTE_OR_ESCAPE = re.compile(r"[\\'\"]")
+_WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:\\.|[^"\\])*"|[^ \t\r\n;&|()<>'"\\])+""", re.S)
+_QUOTED_OPERATOR_WORD = re.compile(r"""(?:\\[;&|()<>]|'[;&|()<>]*'|"[;&|()<>]*")+""")
 
 
 @dataclass
@@ -83,6 +127,7 @@ class Command:
     body_arguments: list[str] = field(default_factory=list)
     lookup: bool = False
     argv0: bool = False
+    problem: str | None = None
 
     @property
     def name(self) -> str:
@@ -90,7 +135,12 @@ class Command:
 
 
 class OpaqueCommand(ValueError):
-    """Input whose statements can't be known, such as a heredoc without its delimiter line; every gate denies it."""
+    """Input whose statements can't be known, such as a heredoc without its delimiter line; every gate denies it with this message."""
+
+
+_UNCLOSED_HEREDOC = "a heredoc without its delimiter line hides what runs after it; close it"
+_TOO_MANY_NESTED = f"a statement with more than {NESTED_LIMIT} nested commands (such as find -exec runs) is not checked; split it up"
+_AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one's command is ambiguous; split it up"
 
 
 _HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|\\?([^\s;&|<>()'\"]+))")
@@ -131,7 +181,7 @@ def _skip_heredocs(text: str, pos: int, docs: list[tuple[str, bool]]) -> int:
     for delimiter, strip in docs:
         while True:
             if pos >= len(text):
-                raise OpaqueCommand(f"heredoc without its {delimiter} line")
+                raise OpaqueCommand(_UNCLOSED_HEREDOC)
             end = text.find("\n", pos)
             end = len(text) if end < 0 else end
             line = text[pos:end]
@@ -182,6 +232,8 @@ def _substitution_char(command: str, i: int, current: list[str], frames: list[li
 
 def _lines(command: str) -> list[str]:
     """Logical lines: newlines inside quotes and after a backslash join, `#` comments drop, and heredoc bodies are text, not commands."""
+    if "\n" not in command and "#" not in command and "<<" not in command:
+        return [command]
     lines, current, quote, escaped, i = [], [], None, False, 0
     frames: list[list] = []
     parens: list[bool] = []
@@ -237,7 +289,7 @@ def _lines(command: str) -> list[str]:
     line = "".join(current)
     lines.append(line)
     if (quote is None or frames) and _heredocs(line if not frames else "".join(current[frames[-1][2] :])):
-        raise OpaqueCommand("heredoc without a body")
+        raise OpaqueCommand(_UNCLOSED_HEREDOC)
     return lines
 
 
@@ -318,6 +370,8 @@ def has_opaque_word(tokens: list[str]) -> bool:
 
 def decode_ansi(command: str) -> str:
     """Rewrite `$'…'` as the single-quoted decoded value, `$"…"` as `"…"` and `\\$`/`` \\` `` inside double quotes as `$`/`` ` ``, so the lexer sees the words bash runs."""
+    if "$'" not in command and '"' not in command:
+        return command
     out, i, quote = [], 0, None
     while i < len(command):
         ch = command[i]
@@ -349,19 +403,41 @@ def decode_ansi(command: str) -> str:
     return "".join(out)
 
 
+def _quoted_operators(line: str) -> tuple[str, dict[str, str]]:
+    """The line with each quoted or escaped word of operator characters (`\\;`, `';'`, `"|"`) replaced by a placeholder, and the placeholders' values."""
+    if not _QUOTE_OR_ESCAPE.search(line):
+        return line, {}
+    mark = "\ue000" * (max((len(run) for run in re.findall("\ue000+", line)), default=0) + 1)
+    out, values, last = [], {}, 0
+    for word in _WORD.finditer(line):
+        if _QUOTED_OPERATOR_WORD.fullmatch(word.group()):
+            value = re.sub(r"\\(.)|['\"]", r"\1", word.group())
+            if set(value) & _OPERATOR_CHARS:
+                placeholder = f"{mark}{len(values)}{mark}"
+                values[placeholder] = value
+                out.append(line[last : word.start()])
+                out.append(placeholder)
+                last = word.end()
+    out.append(line[last:])
+    return "".join(out), values
+
+
 def parse(command: str, literal_operators: bool = False) -> list[list[str]]:
-    """Statements as token lists; with `literal_operators`, a quoted or escaped operator word becomes LITERAL_OPERATOR."""
+    """Statements as token lists; only an unquoted `;`, `&` or `|` separates them, and with `literal_operators` a quoted or escaped operator word becomes LITERAL_OPERATOR."""
     statements: list[list[str]] = []
     for line in [decode_ansi(raw) for raw in _lines(command)]:
         if literal_operators:
             line = _LITERAL_OPERATOR.sub(LITERAL_OPERATOR, line)
+        line, literal = _quoted_operators(line)
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
         current: list[str] = []
         for token in lexer:
             chars = set(token)
-            if chars <= _PUNCTUATION and chars & _OPERATOR_CHARS and not (token == ";" and current[:1] == ["find"]):
+            if token in literal:
+                current.append(literal[token])
+            elif chars <= _PUNCTUATION and chars & _OPERATOR_CHARS:
                 if current:
                     statements.append(current)
                 current = []
@@ -372,8 +448,22 @@ def parse(command: str, literal_operators: bool = False) -> list[list[str]]:
     return statements
 
 
-def _scan(args: list[str], values: frozenset[str]) -> tuple[int, list[tuple[str, str]]]:
-    """getopt-style: index of the first operand and the (option, value) pairs for `values`."""
+def _long(name: str, longs: frozenset[str]) -> str:
+    """The long option a unique `--` abbreviation stands for, as getopt_long reads it; otherwise `name` itself."""
+    if name in longs:
+        return name
+    matches = [option for option in longs if option.startswith(name)]
+    return matches[0] if len(matches) == 1 else name
+
+
+def _scan(
+    args: list[str],
+    values: frozenset[str],
+    longs: frozenset[str] = frozenset(),
+    stop: frozenset[str] = frozenset(),
+    optional: str = "",
+) -> tuple[int, list[tuple[str, str]]]:
+    """getopt-style: index of the first operand (or just after a `stop` option's value) and the (option, value) pairs for `values`; an `optional` letter takes the rest of its cluster."""
     found = []
     i = 0
     while i < len(args):
@@ -385,29 +475,36 @@ def _scan(args: list[str], values: frozenset[str]) -> tuple[int, list[tuple[str,
         following = args[i + 1] if i + 1 < len(args) else ""
         if arg.startswith("--"):
             name, eq, value = arg.partition("=")
+            name = _long(name, longs)
             if name in values:
                 found.append((name, value if eq else following))
                 i += 1 if eq else 2
+                if name in stop:
+                    return i, found
                 continue
             i += 1
             continue
         i += 1
         for k in range(1, len(arg)):
+            if arg[k] in optional:
+                break
             if "-" + arg[k] in values:
                 rest = arg[k + 1 :]
                 found.append(("-" + arg[k], rest or following))
                 i += 0 if rest else 1
+                if "-" + arg[k] in stop:
+                    return i, found
                 break
     return i, found
 
 
-def _command_options(args: list[str], options: frozenset[str]) -> list[str]:
+def _command_options(args: list[str], options: frozenset[str], longs: frozenset[str] = frozenset()) -> list[str]:
     out = []
     for i, arg in enumerate(args):
         following = args[i + 1] if i + 1 < len(args) else ""
         if arg.startswith("--"):
             name, eq, value = arg.partition("=")
-            if name in options:
+            if _long(name, longs) in options:
                 out.append(value if eq else following)
         elif arg.startswith("-") and len(arg) > 1:
             for k in range(1, len(arg)):
@@ -502,8 +599,9 @@ def _shell_inputs(args: list[str], nested: list[str], body_arguments: list[str] 
     return True
 
 
-def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
+def _unwrap(name: str, args: list[str], command: Command) -> list[str] | None:
     """The command a wrapper runs, or None when `name` is not a wrapper."""
+    nested = command.nested
     if name in ("npx", "bunx", "pnpx"):
         return _launch(args, nested)
     if name in _LAUNCH_SUBCOMMANDS and args[:1] and args[0] in _LAUNCH_SUBCOMMANDS[name]:
@@ -523,27 +621,29 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
         rest = args[start:]
         return _mise_exec(rest[1:], nested) if rest[:1] in (["exec"], ["x"]) else None
     if name == "env":
-        start, found = _scan(args, frozenset({"-a", "--argv0", "-u", "--unset", "-C", "--chdir", "-S", "--split-string"}))
-        operands = args[start:]
-        for option, value in found:
-            if option in ("-S", "--split-string"):
-                try:
-                    return shlex.split(value) + operands
-                except ValueError:
-                    nested.append(value)
-        return operands
+        start, found = _scan(args, _ENV_VALUES, _LONG_OPTIONS["env"], _ENV_SPLIT)
+        if found and found[-1][0] in _ENV_SPLIT:
+            try:
+                return ["env", *shlex.split(found[-1][1]), *args[start:]]
+            except ValueError:
+                nested.append(found[-1][1])
+                return ["env", *args[start:]]
+        return args[start:]
     if name == "flock":
-        start, _ = _scan(args, frozenset({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}))
+        start, _ = _scan(args, frozenset({"-w", "--wait", "--timeout", "-E", "--conflict-exit-code"}), _LONG_OPTIONS["flock"])
         operands = args[start + 1 :]
         if operands[:1] and operands[0] in ("-c", "--command"):
             nested.extend(operands[1:2])
             return []
         return operands
     if name in ("script", "su"):
-        nested.extend(_command_options(args, frozenset({"-c", "--command"})))
-        return []
+        longs = _LONG_OPTIONS[name]
+        commands = _command_options(args, _SU_COMMANDS if name == "su" else frozenset({"-c", "--command"}), longs)
+        nested.extend(commands)
+        shells = _command_options(args, frozenset({"-s", "--shell"}), longs) if name == "su" else []
+        return [shells[-1], *(["-c", commands[-1]] if commands else [])] if shells else []
     if name == "watch":
-        start, _ = _scan(args, frozenset({"-n", "--interval"}))
+        start, _ = _scan(args, _WATCH_VALUES, _LONG_OPTIONS["watch"])
         if args[start:]:
             nested.append(" ".join(args[start:]))
         return []
@@ -551,11 +651,14 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
         starts = [i for i, a in enumerate(args) if a in _FIND_EXEC]
         if not starts:
             return None
-        runs = []
-        for position, i in enumerate(starts):
-            limit = starts[position + 1] if position + 1 < len(starts) else len(args)
-            end = next((j for j in range(i + 1, limit) if args[j] in (";", "+", "\;")), limit)
-            runs.append(args[i + 1 : end])
+        ends, end = [len(args)] * (len(args) + 1), len(args)
+        for j in range(len(args) - 1, -1, -1):
+            if args[j] in (";", LITERAL_OPERATOR) or (args[j] == "+" and j and args[j - 1] == "{}"):
+                end = j
+            ends[j] = end
+        if any(ends[i + 1] > following for i, following in zip(starts, starts[1:])):
+            command.problem = _AMBIGUOUS_FIND
+        runs = [args[i + 1 : ends[i + 1]] for i in starts]
         nested.extend(shlex.join(run) for run in runs[1:] if run)
         return runs[0]
     if name == "parallel":
@@ -571,7 +674,7 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
     if name not in _WRAPPERS:
         return None
     values, positionals = _WRAPPERS[name]
-    start, _ = _scan(args, values)
+    start, _ = _scan(args, values, _LONG_OPTIONS.get(name, frozenset()), optional=_OPTIONAL_LETTERS.get(name, ""))
     return args[start + positionals :]
 
 
@@ -608,12 +711,11 @@ def resolve(tokens: list[str]) -> Command:
             if argv[1:]:
                 command.nested.append(" ".join(argv[1:]))
             break
-        if name == "env" and any(option in {"-a", "--argv0"} for option, _ in _scan(argv[1:], frozenset({"-a", "--argv0"}))[1]):
+        if name == "env" and any(option in ("-a", "--argv0") for option, _ in _scan(argv[1:], _ENV_VALUES, _LONG_OPTIONS["env"], _ENV_SPLIT)[1]):
             command.argv0 = True
-            command.nested.append(" ".join(argv[1:]))
         if name == "command" and not command.argv0 and _command_lookup(argv[1:]):
             command.lookup = True
-        unwrapped = _unwrap(name, argv[1:], command.nested)
+        unwrapped = _unwrap(name, argv[1:], command)
         if unwrapped is None:
             break
         command.wrappers.append(name)
@@ -702,7 +804,7 @@ def _rough(text: str) -> list[list[str]]:
 
 def _walk_quietly(command: str, literal_operators: bool = False) -> list[list[str]]:
     try:
-        return walk(command, literal_operators)
+        return _walk(command, literal_operators)
     except OpaqueCommand:
         raise
     except ValueError:
@@ -728,19 +830,39 @@ def _groups(tokens: list[str]) -> list[list[str]]:
     return [s for s in segments if s]
 
 
-def walk(command: str, literal_operators: bool = False) -> list[list[str]]:
-    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly."""
+def _walk(command: str, literal_operators: bool) -> list[list[str]]:
     result: list[list[str]] = []
     for tokens in parse(command, literal_operators):
         for unit in [tokens, *_groups(tokens)]:
             result.append(unit)
-            nested = resolve(unit).nested
+            resolved = resolve(unit)
+            if resolved.problem:
+                raise OpaqueCommand(resolved.problem)
+            nested = resolved.nested
+            if len(nested) > NESTED_LIMIT:
+                raise OpaqueCommand(_TOO_MANY_NESTED)
             extra = _nested_command(unit)
             for body in dict.fromkeys([*nested, *([extra] if extra is not None else [])]):
-                result.extend(walk(body, literal_operators))
+                result.extend(_walk(body, literal_operators))
     for body in _bodies(command):
         result.extend(_walk_quietly(body, literal_operators))
     return result
+
+
+@lru_cache(maxsize=64)
+def _walk_cached(command: str, literal_operators: bool) -> tuple[tuple[tuple[str, ...], ...], tuple | None]:
+    try:
+        return tuple(tuple(tokens) for tokens in _walk(command, literal_operators)), None
+    except ValueError as error:
+        return (), (type(error), error.args)
+
+
+def walk(command: str, literal_operators: bool = False) -> list[list[str]]:
+    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand for a statement with more than NESTED_LIMIT nested commands or an ambiguous find run."""
+    statements, error = _walk_cached(command, literal_operators)
+    if error is not None:
+        raise error[0](*error[1])
+    return [list(tokens) for tokens in statements]
 
 
 _REF_NAMESPACES = frozenset({"refs", "heads", "tags", "remotes", "notes"})
