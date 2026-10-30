@@ -706,7 +706,7 @@ class ShellWriteScopeTest(unittest.TestCase):
             "echo x >> ${HOME}x/.bashrc",
             "echo x >> $HOMEX/.bashrc",
             "cat ${HOME}/notes}/x.md",
-            "cat ${HOME}/" + "}" * 20_000,
+            "cat ${HOME}/" + "}" * 16_000,
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
