@@ -25,7 +25,10 @@ for root in sys.argv[1:]:
             elif head[:2] == b"MZ" and name.endswith((".dll", ".exe", ".node")):
                 print(path)
 EOF
-)
+) || {
+  echo "FAIL the native binary scanner exited with an error"
+  exit 1
+}
 
 if [[ -z $foreign ]]; then
   echo "ok   the npm trees hold only linux-x64 native binaries"
