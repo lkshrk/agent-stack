@@ -1,6 +1,6 @@
 model:
   provider: custom:litellm
-  default: auto
+  default: smart-auto
 
 # The legacy list form, because hermes-webui reads named providers only from custom_providers.
 custom_providers:
