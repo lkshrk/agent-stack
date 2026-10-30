@@ -460,6 +460,12 @@ class NoMergeTest(unittest.TestCase):
             "ltrace -f taskset 1 capsh -- -c 'gh pr merge 5'",
             "gdb -batch -ex run --args taskset 1 capsh -- -c 'gh pr merge 5'",
             "valgrind taskset 1 capsh -- -c 'gh pr merge 5'",
+            "env -a x command -v capsh -- -c 'gh pr merge 5'",
+            "env --argv0=x command -V taskset 1 capsh -- -c 'gh pr merge 5'",
+            "env -a x taskset 1 capsh -- -c 'gh pr merge 5'",
+            "find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+            "find . -exec ls {} \; -o -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+            "find . \( -exec command -v {} \; , -exec taskset 1 capsh -- -c 'gh pr merge 5' \; \)",
         ):
             words = command.split("| ")[-1].split()
             name = next((word.rsplit("/", 1)[-1] for word in words if word.rsplit("/", 1)[-1] in {"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt", "strace", "ltrace", "gdb", "valgrind", "ld.so"}), words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1])

@@ -664,6 +664,10 @@ class ShellWriteScopeTest(unittest.TestCase):
             "echo x >> ~/x/../.bashrc",
             "dd of=~/.bashrc",
             "cat ~/.profile",
+            "echo x >> ${HOME:-${X}}/.bashrc",
+            'echo x >> ${HOME:-"}"}/.bashrc',
+            "echo x >> ${HOME:-\\}}/.bashrc",
+            "cat ${HOME:-${X}}/.bashrc",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):

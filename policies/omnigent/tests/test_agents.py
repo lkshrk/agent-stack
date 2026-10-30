@@ -46,6 +46,7 @@ DENIED = [
     "env X=1 codex exec x",
     "env -i PATH=/usr/bin codex exec x",
     "env -S 'claude -p x'",
+"env -a x claude -p x",
     "FOO=1 claude -p x",
     "command claude -p x",
     "exec claude -p x",
