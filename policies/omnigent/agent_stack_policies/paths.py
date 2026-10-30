@@ -37,20 +37,30 @@ _VALUE_FLAGS = {
     "tee": frozenset(),
 }
 _OPTIONAL_VALUE_LETTERS = {"sed": "i"}
-_HOME_VARIABLE = re.compile(r"\"?\$HOME\b\"?")
+HOME_READINGS = 64
 
 
-def _expand_home(path: str, home: str) -> str:
-    out, i = [], 0
-    while i < len(path):
-        if path.startswith("$HOME", i):
-            out.append(home); i += 5; continue
-        if path.startswith("${HOME", i):
-            close = path.rfind("}", i + 6)
-            if close >= 0:
-                out.append(home); i = close + 1; continue
-        out.append(path[i]); i += 1
-    return "".join(out)
+def _home_readings(path: str, home: str) -> list[str] | None:
+    """`path` with `$HOME` and each `${HOME…}` replaced by `home`, once for every `}` that may close the `${HOME…}` (the quotes that would pick one are gone from a token); None above HOME_READINGS readings."""
+    states, done = [([], 0)], []
+    while states:
+        pieces, i = states.pop()
+        plain, braced = path.find("$HOME", i), path.find("${HOME", i)
+        if plain < 0 and braced < 0:
+            done.append("".join(pieces) + path[i:])
+            continue
+        start = braced if plain < 0 or 0 <= braced < plain else plain
+        head = [*pieces, path[i:start], home]
+        if start == plain:
+            states.append((head, start + 5))
+            continue
+        closes = [c + 1 for c in range(start + 6, len(path)) if path[c] == "}"]
+        states.extend((head, after) for after in closes)
+        if not closes:
+            done.append("".join(pieces) + path[i:])
+        if len(states) + len(done) > HOME_READINGS:
+            return None
+    return done
 
 
 def _short_cluster(arg: str, values: frozenset[str], optional: str, following: str | None) -> tuple[dict[str, str], bool]:
@@ -161,23 +171,30 @@ def _compile(pattern: str) -> re.Pattern:
     return re.compile("".join(out))
 
 
-def glob_match(path: str, pattern: str) -> bool:
+@lru_cache(maxsize=256)
+def _compile_any(patterns: tuple[str, ...]) -> re.Pattern:
+    return re.compile("|".join(f"(?:{_compile(_normalise(p)).pattern})" for p in patterns) or "(?!)")
+
+
+def _match_at_any_depth(path: str, regex: re.Pattern) -> bool:
     path = _normalise(path)
-    regex = _compile(_normalise(pattern))
     starts = [0] + [i + 1 for i, ch in enumerate(path) if ch == "/"]
     return any(regex.fullmatch(path, start) for start in starts)
 
 
+def glob_match(path: str, pattern: str) -> bool:
+    return _match_at_any_depth(path, _compile(_normalise(pattern)))
+
+
 def _matches_any(path: str, patterns: list[str]) -> bool:
-    return any(glob_match(path, p) for p in patterns)
+    return _match_at_any_depth(path, _compile_any(tuple(patterns)))
 
 
 def matches_allowed(path: str, patterns: list[str]) -> bool:
     """A relative path matches from the checkout root; an absolute one at any depth, since the event carries no session cwd."""
     if path.startswith("/"):
         return _matches_any(path, patterns)
-    path = _normalise(path)
-    return any(_compile(_normalise(p)).fullmatch(path) for p in patterns)
+    return _compile_any(tuple(patterns)).fullmatch(_normalise(path)) is not None
 
 
 def forbidden_matcher(deny: list[str] | None, exempt: list[str] | None) -> Callable[[str], bool]:
@@ -230,13 +247,17 @@ def path_guard(
     home = startup_home.rstrip("/") if startup_home else None
 
     startup_targets = frozenset(f"{home}/{name}" for name in startup) if home else frozenset()
+    startup_names = frozenset(posixpath.basename(name) for name in startup)
+    home_parts = frozenset(home.split("/")) if home else frozenset()
     tilde = re.compile(rf"^~(?:{re.escape(posixpath.basename(home))})?(?=/|$)") if home else None
 
     def startup_path(path: str) -> bool:
-        if not startup_targets:
+        if not startup_targets or not (any(name in path for name in startup_names) or startup_names & home_parts):
             return False
-        expanded = _expand_home(tilde.sub(lambda _: home, path), home)
-        return posixpath.normpath(re.sub(r"/+", "/", expanded)) in startup_targets
+        readings = _home_readings(tilde.sub(lambda _: home, path), home)
+        if readings is None:
+            return True
+        return any(posixpath.normpath(re.sub(r"/+", "/", reading)) in startup_targets for reading in readings)
 
     def relative_startup_template(path: str) -> bool:
         return bool(startup) and not path.startswith(("/", "~", "$HOME", "${HOME}")) and posixpath.normpath(path) in startup
@@ -278,13 +299,15 @@ def path_guard(
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
         for literal in (False, True):
-            for tokens in walk(command, literal_operators=literal):
+            try:
+                statements = walk(command, literal_operators=literal)
+            except OpaqueCommand as error:
+                return _deny(str(error))
+            except ValueError:
+                return _deny("unparseable shell command while a write scope or startup files are set")
+            for tokens in statements:
                 targets += shell_write_targets(tokens)
         for raw in targets:
-            if any(resolve(tokens).argv0 for tokens in walk(command)):
-                nested = " ".join(resolve(tokens).nested for tokens in walk(command) if resolve(tokens).argv0)
-                if "/etc/" in nested:
-                    return _deny("shell write to /etc/x leaves the checkout; write a relative path or under /tmp")
             if startup_path(raw):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
@@ -303,8 +326,8 @@ def path_guard(
             return _deny("shell command is not a string")
         try:
             statements = walk(command)
-        except OpaqueCommand:
-            return _deny("a heredoc without its delimiter line hides what runs after it; close it")
+        except OpaqueCommand as error:
+            return _deny(str(error))
         except ValueError:
             if has_denied or allowed_only is not None:
                 return _deny("unparseable shell command while forbidden or allowed paths are set")
