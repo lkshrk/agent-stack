@@ -438,6 +438,21 @@ class FindRunTest(unittest.TestCase):
                 with self.subTest(command=command):
                     self.assertIn(["claude", "-p", "hi"], walk(command))
 
+    def test_top_level_statements_after_comment_lookalikes(self):
+        for command in (
+            "echo a\\ #b; claude -p hi",
+            "echo a\\\t#b; claude -p hi",
+            "echo ${x-a #b}; claude -p hi",
+            "echo ${x:-a #b}; claude -p hi",
+            "echo ${x:- #}; claude -p hi",
+            "cat <<'EO'F\nx\nEOF\nclaude -p hi\nEO",
+        ):
+            with self.subTest(command=command):
+                self.assertIn(["claude", "-p", "hi"], walk(command))
+        for command in ("echo hi # x; claude -p hi", "echo ${#x} # x; claude -p hi", "echo a \\\n# x; claude -p hi"):
+            with self.subTest(command=command):
+                self.assertNotIn(["claude", "-p", "hi"], walk(command))
+
     def test_partly_quoted_delimiter_is_the_whole_dequoted_word(self):
         self.assertEqual(walk("cat <<'EO'F\nclaude -p hi\nEOF\nls"), [["cat", "<<", "EOF"], ["ls"]])
 

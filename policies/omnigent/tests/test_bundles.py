@@ -971,6 +971,13 @@ R1_FORMS = (
     "cat <<'EO'F\nx\nEOF\necho {}\nEO",
     "cat <<EOF\nit costs $'\n{}\n'\nEOF",
 )
+R1_TOP_LEVEL = (
+    "echo a\\ #b; {}",
+    "echo a\\\t#b; {}",
+    "echo ${{x-a #b}}; {}",
+    "echo ${{x:-a #b}}; {}",
+    "cat <<'EO'F\nx\nEOF\n{}\nEO",
+)
 R1_PAYLOADS = ("gh pr merge 5", "claude -p hi", "touch /opt/x", "cat /agent-secrets/github/review")
 PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-review", "planner")
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
@@ -1043,12 +1050,12 @@ class StatementAndWrapperTest(unittest.TestCase):
                     self.assertEqual(bare, "DENY", (agent, payload))
                 if bare != "DENY":
                     continue
-                for form in R1_FORMS:
-                    for substitution in (f"$({payload})", f"`{payload}`"):
-                        command = form.format(substitution)
-                        for shape in (command, ["bash", "-lc", command]):
-                            with self.subTest(agent=agent, form=str(shape)[:80]):
-                                self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": shape}, "")), "DENY")
+                commands = [form.format(s) for form in R1_FORMS for s in (f"$({payload})", f"`{payload}`")]
+                commands += [form.format(payload) for form in R1_TOP_LEVEL]
+                for command in commands:
+                    for shape in (command, ["bash", "-lc", command]):
+                        with self.subTest(agent=agent, form=str(shape)[:80]):
+                            self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": shape}, "")), "DENY")
 
     def test_quoted_spans_are_text_and_real_substitutions_are_checked(self):
         for command, expected in QUOTED_SPAN_ROWS.items():
