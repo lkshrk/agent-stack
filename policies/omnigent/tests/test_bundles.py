@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import time
 import unittest
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -329,9 +330,8 @@ CASES: list[Case] = [
             ("taskset 1 capsh -- -c 'gh pr merge 5' command -v", "DENY"),
             ("strace -f -o /dev/null taskset 1 capsh -- -c 'gh pr merge 5'", "DENY"),
             ("env -a x command -v capsh -- -c 'gh pr merge 5'", "DENY"),
-            ("find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;", "DENY"),
-            ("find . -o -exec claude -p hi \;", "DENY"),
-            ("env -a x tee -a /etc/x", "DENY"),
+            (r"find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;", "DENY"),
+            (r"find . -o -exec claude -p hi \;", "DENY"),
             ("which strace", "ALLOW"),
             ("rg gdb docs", "ALLOW"),
             ("echo x > '/tmp/report (1).txt'", "ALLOW"),
@@ -850,6 +850,150 @@ CASES += [
         (["bash", "-lc", "rg -n x src >&2"], "DENY"),
     )
 ]
+
+
+SHELL_AGENTS = (
+    ("documenter", "Bash"),
+    ("planner", "sys_os_shell"),
+    ("planner/agents/critic", "Bash"),
+    ("polly", "sys_os_shell"),
+    ("polly/agents/claude_code", "Bash"),
+    ("polly/agents/codex", "shell"),
+    ("security-review", "Bash"),
+)
+EVERY_BUNDLE_DENY = [
+    "find . -name x ; claude -p hi",
+    "find . -name x;claude -p hi",
+    "find . ; codex exec hi",
+    "find . ; omp -p hi",
+    "find . ; opencode run hi",
+    "find . ; npx @anthropic-ai/claude-code -p hi",
+    "find . ; taskset 1 capsh -- -c 'gh pr merge 5'",
+    r"find . -exec ls {} \; ; taskset 1 capsh -- -c 'gh pr merge 5'",
+    "find . -exec ls {} ';' ; claude -p hi",
+    "find . ; xargs sh",
+    "find . ; parallel ::: x",
+    "find . ; strace ls",
+    "find ; claude -p hi",
+    "bash -c 'find . ; claude -p hi'",
+    "find . -exec ls {} + ; claude -p hi",
+    "nice find . ; claude -p hi",
+    "find . && claude -p hi",
+    r"find . -exec ls {} \; -o -exec claude -p hi \;",
+    r"find . -exec ls {} \; , -exec claude -p hi \;",
+    "find . -exec ls {} ';' -exec claude -p hi ';'",
+    r"find . -exec ls {} + -exec claude -p hi \;",
+    r"find . -execdir ls {} \; -okdir claude -p hi \;",
+    r"find . -exec xargs sh \;",
+    r"find . -exec claude + -p hi \;",
+    r"find . -name -exec -exec claude -p hi \;",
+    r"find . -exec claude -exec -p hi \;",
+    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(2_000)),
+    "env -a x claude -p hi",
+    "env --argv0 x claude -p hi",
+    "env --arg x claude -p hi",
+    "env -ia x claude -p hi",
+    "env -S '-a x' claude -p hi",
+    "env -S claude -p hi",
+    "nice env -a x claude -p hi",
+    "env -a x command -v capsh -- -c 'gh pr merge 5'",
+    "env --arg x command -V taskset 1 capsh -- -c 'gh pr merge 5'",
+    "watch -q 2 claude -p hi",
+    "watch --equexit 2 claude -p hi",
+    "watch --equ 2 claude -p hi",
+    "su --session-command 'claude -p hi' root",
+    "su --session-command='claude -p hi'",
+    "timeout --sig KILL 5 claude -p hi",
+    "script -q /dev/null --comm 'claude -p hi'",
+]
+EVERY_BUNDLE_ALLOW = [
+    r"find . -name x -exec ls {} \;",
+    "find . -exec grep -l x {} +",
+    r"find . -name '*.py' -exec grep -n TODO {} \;",
+    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(64)),
+    "echo ';' claude -p hi",
+]
+SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
+
+
+def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, bool, float, object]]:
+    """(policy, whether this package decides it, seconds, decision) for every policy that fires."""
+    from omnigent.policies.function import resolve_function_policy
+    from omnigent.policies.types import EvaluationContext
+    from omnigent.runtime.policies.engine import _dispatch_policy
+    from omnigent.spec import load
+    from omnigent.spec.types import Phase
+
+    from agent_stack_policies._shell import _walk_cached
+
+    _walk_cached.cache_clear()
+    ctx = EvaluationContext(
+        phase=Phase(case.phase), content={"name": case.tool, "arguments": case.data}, tool_name=case.tool, session_state={}, turn_final=None
+    )
+    out = []
+    for policy_spec in agent_policies(load(agent_dir, expand_env=False)) + server_policies():
+        if not _fires(policy_spec, case):
+            continue
+        handler = resolve_function_policy(policy_spec)
+        own = policy_spec.function.path.startswith("agent_stack_policies.") and "handler" not in (policy_spec.function.arguments or {})
+        started = time.perf_counter()
+        decision = asyncio.run(_dispatch_policy(handler, ctx, {}))
+        out.append((policy_spec.name, own, time.perf_counter() - started, decision))
+    return out
+
+
+@unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+class StatementAndWrapperTest(unittest.TestCase):
+    def test_every_bundle(self):
+        for agent, tool in SHELL_AGENTS:
+            for command, expected in [*((c, "DENY") for c in EVERY_BUNDLE_DENY), *((c, "ALLOW") for c in EVERY_BUNDLE_ALLOW)]:
+                for form in (command, ["bash", "-lc", command]):
+                    with self.subTest(agent=agent, form=str(form)[:120]):
+                        self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": form}, "")), expected)
+
+    def test_scoped_writes(self):
+        rows = {
+            "find . ; tee -a /etc/x < /dev/null": ("DENY", "DENY", "ALLOW"),
+            "find . ; git commit -am x": ("DENY", "DENY", "ALLOW"),
+            "watch -q 2 tee -a /etc/x": ("DENY", "DENY", "ALLOW"),
+            "env -a x tee -a /etc/x": ("DENY", "DENY", "ALLOW"),
+            "env -a x tee -a /tmp/ok": ("ALLOW", "ALLOW", "ALLOW"),
+            "env -a x tee -a docs/a.md": ("ALLOW", "DENY", "ALLOW"),
+            "env -a x rg claude": ("ALLOW", "ALLOW", "ALLOW"),
+            "echo x '|' tee src/a.py": ("DENY", "DENY", "ALLOW"),
+        }
+        for command, expected in rows.items():
+            for (agent, tool), want in zip((*SCOPED_AGENTS, ("polly/agents/claude_code", "Bash")), expected):
+                for form in (command, ["bash", "-lc", command]):
+                    with self.subTest(agent=agent, form=form):
+                        self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": form}, "")), want)
+
+    def test_env_argv0_matches_plain_env(self):
+        for agent, tool in SHELL_AGENTS:
+            for argv0, plain in (("env -a x git commit -m x", "env git commit -m x"), ("env -a x tee -a docs/a.md", "env tee -a docs/a.md")):
+                with self.subTest(agent=agent, command=argv0):
+                    self.assertEqual(
+                        verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": argv0}, "")),
+                        verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": plain}, "")),
+                    )
+
+    def test_package_policies_stay_within_50ms(self):
+        inputs = {
+            "2000 find runs": ("find . " + " ".join(f"-exec echo {i} \\;" for i in range(2_000)), "DENY"),
+            "2000 find runs with an agent": ("find . " + " ".join(f"-exec claude -p {i} \\;" for i in range(2_000)), "DENY"),
+            "64 find runs": ("find . " + " ".join(f"-exec echo {i} \\;" for i in range(64)), "ALLOW"),
+            "1000 redirect targets": ("echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)), None),
+        }
+        for agent, tool in SHELL_AGENTS:
+            for label, (command, expected) in inputs.items():
+                with self.subTest(agent=agent, input=label):
+                    case = Case(agent, "tool_call", tool, {"command": command}, "")
+                    timings = [timed_results(BUNDLES / agent, case) for _ in range(3)]
+                    own = min(sum(seconds for _, mine, seconds, _ in run if mine) for run in timings)
+                    self.assertLess(own, 0.05)
+                    if expected:
+                        actions = [decision.action.name for _, _, _, decision in timings[0]]
+                        self.assertEqual("DENY" if "DENY" in actions else "ALLOW", expected)
 
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
