@@ -176,18 +176,24 @@ def _compile_any(patterns: tuple[str, ...]) -> re.Pattern:
     return re.compile("|".join(f"(?:{_compile(_normalise(p)).pattern})" for p in patterns) or "(?!)")
 
 
-def _match_at_any_depth(path: str, regex: re.Pattern) -> bool:
-    path = _normalise(path)
-    starts = [0] + [i + 1 for i, ch in enumerate(path) if ch == "/"]
-    return any(regex.fullmatch(path, start) for start in starts)
+@lru_cache(maxsize=256)
+def _compile_any_depth(patterns: tuple[str, ...]) -> re.Pattern:
+    """`patterns` matched from the start or after any `/`, in one regex pass; a leading `**/` adds nothing there."""
+    rooted = []
+    for pattern in patterns:
+        pattern = _normalise(pattern)
+        while pattern.startswith("**/"):
+            pattern = pattern[3:]
+        rooted.append(f"(?:{_compile(pattern).pattern})")
+    return re.compile("(?s:.*/)?(?:" + "|".join(rooted) + ")" if rooted else "(?!)")
 
 
 def glob_match(path: str, pattern: str) -> bool:
-    return _match_at_any_depth(path, _compile(_normalise(pattern)))
+    return _compile_any_depth((pattern,)).fullmatch(_normalise(path)) is not None
 
 
 def _matches_any(path: str, patterns: list[str]) -> bool:
-    return _match_at_any_depth(path, _compile_any(tuple(patterns)))
+    return _compile_any_depth(tuple(patterns)).fullmatch(_normalise(path)) is not None
 
 
 def matches_allowed(path: str, patterns: list[str]) -> bool:
