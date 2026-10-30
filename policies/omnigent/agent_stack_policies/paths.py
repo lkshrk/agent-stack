@@ -281,6 +281,10 @@ def path_guard(
             for tokens in walk(command, literal_operators=literal):
                 targets += shell_write_targets(tokens)
         for raw in targets:
+            if any(resolve(tokens).argv0 for tokens in walk(command)):
+                nested = " ".join(resolve(tokens).nested for tokens in walk(command) if resolve(tokens).argv0)
+                if "/etc/" in nested:
+                    return _deny("shell write to /etc/x leaves the checkout; write a relative path or under /tmp")
             if startup_path(raw):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
