@@ -45,11 +45,14 @@ RUN mise install \
  && rm -rf /opt/mise/cache /root/.cache /root/go /root/.npm \
  && chmod -R a+rX /opt/mise
 
-RUN npm install -g --prefix /usr/local --no-fund --no-audit \
+RUN --mount=type=bind,source=images/omnigent-host/build,target=/build-tools \
+    npm install -g --prefix /usr/local --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
       "@oh-my-pi/pi-coding-agent@${OMP_VERSION}" \
-      "context-mode@${CONTEXT_MODE_VERSION}"
+      "context-mode@${CONTEXT_MODE_VERSION}" \
+ && /build-tools/prune-native-platforms /usr/local/lib/node_modules \
+ && rm -rf /root/.npm
 
 RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
  && curl -fsSL "https://github.com/rtk-ai/rtk/releases/download/${RTK_VERSION}/rtk-x86_64-unknown-linux-musl.tar.gz" -o rtk.tgz \
