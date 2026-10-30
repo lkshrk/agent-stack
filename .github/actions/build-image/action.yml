@@ -1,5 +1,5 @@
 name: build-image
-description: Build one image from images/<image>/Dockerfile and push it to GHCR outside pull requests
+description: Build one image from images/<image>/Dockerfile, run its test stage if it has one, and push it to GHCR outside pull requests
 
 inputs:
   image:
@@ -47,6 +47,19 @@ runs:
           type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
           type=raw,value=latest,enable=${{ inputs.version != '' }}
           type=sha,format=short
+    - name: Test the image before publishing it
+      if: startsWith(inputs.image, 'omnigent-')
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: images/${{ inputs.image }}/Dockerfile
+        platforms: linux/amd64
+        target: test
+        push: false
+        outputs: type=cacheonly
+        build-args: |
+          AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
+        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
     - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       id: build
       with:
@@ -58,8 +71,7 @@ runs:
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
           AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
-        cache-from: type=gha,scope=${{ inputs.image }}
-        cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
     - name: Create h-cloud deployment token
       if: inputs.version != '' && inputs.app != ''
       id: deploy-token
@@ -81,3 +93,22 @@ runs:
         jq -n --arg app "$APP" --arg image "$IMAGE" --arg tag "${VERSION#v}@${DIGEST}" \
           '{event_type: "image-update", client_payload: {app: $app, image: $image, tag: $tag}}' \
           | gh api --method POST repos/lkshrk/h-cloud/dispatches --input -
+    - name: Write the GHCR build cache
+      id: cache
+      if: github.event_name != 'pull_request'
+      continue-on-error: true
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: images/${{ inputs.image }}/Dockerfile
+        platforms: linux/amd64
+        target: ${{ startsWith(inputs.image, 'omnigent-') && 'test' || '' }}
+        push: false
+        outputs: type=cacheonly
+        build-args: |
+          AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
+        cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache,mode=max
+    - name: Warn that the build cache was not written
+      if: github.event_name != 'pull_request' && steps.cache.outcome == 'failure'
+      shell: bash
+      run: echo "::warning title=Build cache not written::ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache was not updated; later builds of ${{ inputs.image }} start cold."

@@ -10,7 +10,7 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 | `hermes/` | Hermes with its managed configuration from `config/hermes/`, git and the vault tooling |
 | `hermes-webui/` | Hermes web UI; pins the same Hermes image as `hermes/` (checked in CI) |
 
-Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside both images with `AGENT_STACK_IN_IMAGE=1`.
+Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside both images with `AGENT_STACK_IN_IMAGE=1`, in each Dockerfile's `test` stage (`docker buildx build --target test`); the default target is the published image without it.
 
 ## Runner pin in the server image
 
