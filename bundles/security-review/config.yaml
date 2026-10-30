@@ -78,6 +78,14 @@ tools:
 guardrails:
   ask_timeout: 300
   policies:
+    no_secret_reads:
+      type: function
+      function:
+        # Best-effort; the review token's read-only scope is the real boundary.
+        path: agent_stack_policies.secret_files.no_secret_reads
+        arguments:
+          secret_dir: /agent-secrets
+          token_file: /agent-secrets/github/review
     read_only_os:
       type: function
       function:
@@ -102,14 +110,6 @@ guardrails:
           arguments:
             read_all: true
             write_repos: []
-    no_secret_reads:
-      type: function
-      function:
-        # Best-effort; the review token's read-only scope is the real boundary.
-        path: agent_stack_policies.secret_files.no_secret_reads
-        arguments:
-          secret_dir: /agent-secrets
-          token_file: /agent-secrets/github/review
     no_write_tools:
       type: function
       function:

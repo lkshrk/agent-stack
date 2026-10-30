@@ -46,6 +46,13 @@ os_env:
 guardrails:
   ask_timeout: 300
   policies:
+    read_only_shell:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.readonly.read_only_shell
+        arguments:
+          extra_commands: [gh]
     blast_radius:
       type: function
       on: [tool_call]
@@ -66,13 +73,6 @@ guardrails:
           arguments:
             read_all: true
             write_repos: []
-    read_only_shell:
-      type: function
-      on: [tool_call]
-      function:
-        path: agent_stack_policies.readonly.read_only_shell
-        arguments:
-          extra_commands: [gh]
     read_only_os:
       type: function
       on: [tool_call]
