@@ -33,6 +33,8 @@ ENV MISE_DATA_DIR=/opt/mise \
     MISE_GLOBAL_CONFIG_FILE=/etc/mise/config.toml \
     MISE_YES=1
 ENV PATH="/opt/mise/shims:/opt/agent/bin:${PATH}"
+# codebase-memory-mcp refuses a store under the world-writable HOME emptyDir that Omnigent mounts.
+ENV CBM_CACHE_DIR=/tmp/codebase-memory-mcp
 
 RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-x64" -o /usr/local/bin/mise \
  && chmod 0755 /usr/local/bin/mise
