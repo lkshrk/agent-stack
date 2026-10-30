@@ -37,7 +37,20 @@ _VALUE_FLAGS = {
     "tee": frozenset(),
 }
 _OPTIONAL_VALUE_LETTERS = {"sed": "i"}
-_HOME_VARIABLE = re.compile(r"\"?\$(?:HOME\b|\{HOME[^}]*\})\"?")
+_HOME_VARIABLE = re.compile(r"\"?\$HOME\b\"?")
+
+
+def _expand_home(path: str, home: str) -> str:
+    out, i = [], 0
+    while i < len(path):
+        if path.startswith("$HOME", i):
+            out.append(home); i += 5; continue
+        if path.startswith("${HOME", i):
+            close = path.rfind("}", i + 6)
+            if close >= 0:
+                out.append(home); i = close + 1; continue
+        out.append(path[i]); i += 1
+    return "".join(out)
 
 
 def _short_cluster(arg: str, values: frozenset[str], optional: str, following: str | None) -> tuple[dict[str, str], bool]:
@@ -222,7 +235,7 @@ def path_guard(
     def startup_path(path: str) -> bool:
         if not startup_targets:
             return False
-        expanded = _HOME_VARIABLE.sub(lambda _: home, tilde.sub(lambda _: home, path))
+        expanded = _expand_home(tilde.sub(lambda _: home, path), home)
         return posixpath.normpath(re.sub(r"/+", "/", expanded)) in startup_targets
 
     def relative_startup_template(path: str) -> bool:

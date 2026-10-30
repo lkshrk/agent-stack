@@ -82,6 +82,7 @@ class Command:
     stdin_exec: bool = False
     body_arguments: list[str] = field(default_factory=list)
     lookup: bool = False
+    argv0: bool = False
 
     @property
     def name(self) -> str:
@@ -360,7 +361,7 @@ def parse(command: str, literal_operators: bool = False) -> list[list[str]]:
         current: list[str] = []
         for token in lexer:
             chars = set(token)
-            if chars <= _PUNCTUATION and chars & _OPERATOR_CHARS:
+            if chars <= _PUNCTUATION and chars & _OPERATOR_CHARS and not (token == ";" and current[:1] == ["find"]):
                 if current:
                     statements.append(current)
                 current = []
@@ -522,7 +523,7 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
         rest = args[start:]
         return _mise_exec(rest[1:], nested) if rest[:1] in (["exec"], ["x"]) else None
     if name == "env":
-        start, found = _scan(args, frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}))
+        start, found = _scan(args, frozenset({"-a", "--argv0", "-u", "--unset", "-C", "--chdir", "-S", "--split-string"}))
         operands = args[start:]
         for option, value in found:
             if option in ("-S", "--split-string"):
@@ -551,8 +552,9 @@ def _unwrap(name: str, args: list[str], nested: list[str]) -> list[str] | None:
         if not starts:
             return None
         runs = []
-        for i in starts:
-            end = next((j for j in range(i + 1, len(args)) if args[j] in (";", "+")), len(args))
+        for position, i in enumerate(starts):
+            limit = starts[position + 1] if position + 1 < len(starts) else len(args)
+            end = next((j for j in range(i + 1, limit) if args[j] in (";", "+", "\;")), limit)
             runs.append(args[i + 1 : end])
         nested.extend(shlex.join(run) for run in runs[1:] if run)
         return runs[0]
@@ -606,7 +608,10 @@ def resolve(tokens: list[str]) -> Command:
             if argv[1:]:
                 command.nested.append(" ".join(argv[1:]))
             break
-        if name == "command" and _command_lookup(argv[1:]):
+        if name == "env" and any(option in {"-a", "--argv0"} for option, _ in _scan(argv[1:], frozenset({"-a", "--argv0"}))[1]):
+            command.argv0 = True
+            command.nested.append(" ".join(argv[1:]))
+        if name == "command" and not command.argv0 and _command_lookup(argv[1:]):
             command.lookup = True
         unwrapped = _unwrap(name, argv[1:], command.nested)
         if unwrapped is None:
