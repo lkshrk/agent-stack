@@ -141,6 +141,7 @@ class OpaqueCommand(ValueError):
 
 
 _UNCLOSED_HEREDOC = "a heredoc without its delimiter line hides what runs after it; close it"
+_DOLLAR_QUOTED_DELIMITER = "a heredoc delimiter with $'…' or $\"…\" quoting is not read; quote it as 'EOF' instead"
 _SPLIT = "is not checked; split it up into several commands, or put a long script in a file under the workspace and run that (write a large file with the Write tool, which this limit doesn't apply to)"
 _TOO_MANY_STATEMENTS = f"a command with more than {STATEMENT_LIMIT} statements, groups and nested commands (each find -exec run, -c body and $(…) body counts) {_SPLIT}"
 _TOO_MANY_WORDS = f"a command with more than {WORD_LIMIT} words across its statements and nested commands {_SPLIT}"
@@ -152,7 +153,7 @@ _HEREDOC = re.compile(r"""<<(-?)[ \t]*((?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s;&|<
 
 
 def _heredocs(line: str) -> list[tuple[str, bool, bool]]:
-    """(delimiter, strip leading tabs, quoted delimiter) for each unquoted `<<WORD`/`<<-WORD` in a line, in order; `<<<` is a here-string."""
+    """(delimiter, strip leading tabs, quoted delimiter) for each unquoted `<<WORD`/`<<-WORD` in a line, in order; `<<<` is a here-string; raises OpaqueCommand for a `$'…'` or `$"…"` delimiter."""
     docs, quote, i = [], None, 0
     while i < len(line):
         ch = line[i]
@@ -175,6 +176,8 @@ def _heredocs(line: str) -> list[tuple[str, bool, bool]]:
             match = _HEREDOC.match(line, i)
             if match and not arithmetic:
                 word = match.group(2)
+                if "$'" in word or '$"' in word:
+                    raise OpaqueCommand(_DOLLAR_QUOTED_DELIMITER)
                 docs.append((shlex.split(word)[0], match.group(1) == "-", bool(_QUOTE_OR_ESCAPE.search(word))))
                 i = match.end()
                 continue
