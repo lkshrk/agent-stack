@@ -36,9 +36,6 @@ sandbox:
     resources:
       requests: {cpu: "1", memory: 4Gi, ephemeral-storage: 4Gi}
       limits: {cpu: "4", memory: 12Gi, ephemeral-storage: 24Gi}
-    secret_mounts:
-      - secret_name: agent-github-tokens
-        mount_path: /agent-secrets/github
 
 policy_modules: [agent_stack_policies]
 
