@@ -55,6 +55,7 @@ Fill every section of `templates/issue.md` in the issue description, keeping any
 - `## Verify`: the exact commands, in a fenced block.
 - `## Design excerpt`: a link to the design document and section, or `none` for a small fix.
 - `none` is allowed in Interfaces in/out, Constraints and Out of scope.
+- Screenshots or logs that clarify the issue: attach or embed them as in `docs/attachments.md`.
 
 An issue too large for one worktree session is split into child issues, each with its own valid
 description; the parent keeps the shared context.

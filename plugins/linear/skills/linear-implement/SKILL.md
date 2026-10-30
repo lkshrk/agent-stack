@@ -40,6 +40,7 @@ the human. Do not start with an open question.
 - `## Files` is the expected touch set; touching other files is fine when needed, but say so in the
   handoff.
 - Run every command in `## Verify` and the repository's own checks.
+- Attach or link verification evidence such as screenshots as in `docs/attachments.md`.
 
 ## 4. Review Rounds
 
