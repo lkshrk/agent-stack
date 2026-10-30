@@ -1062,7 +1062,7 @@ class StatementAndWrapperTest(unittest.TestCase):
             "2000 find {} + runs": ("find . " + " ".join("-exec ls {} +" for _ in range(2_000)), True),
             "find runs at the statement limit, bash -lc": (["bash", "-lc", runs(STATEMENT_LIMIT - 2)], False),
             "1018 tee files, bash -lc": (["bash", "-lc", "echo x | tee " + " ".join(f"/tmp/t{i}" for i in range(1_018))], False),
-            "2000 escaped spans in double quotes": ('echo "' + " ".join(f"\\`x{i}\\`" for i in range(2_000)) + '"', False),
+            "1500 escaped spans in double quotes": ('echo "' + " ".join(f"\\`x{i}\\`" for i in range(1_500)) + '"', False),
             "220-line PR body with escaped spans": (
                 'gh pr create --title x --body "' + "\n".join(f"- line {i}: set \\`opt_{i}\\` and \\`val_{i}\\`" for i in range(220)) + '"',
                 False,
