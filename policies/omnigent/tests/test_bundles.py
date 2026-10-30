@@ -905,19 +905,53 @@ EVERY_BUNDLE_DENY = [
     "su --session-command='claude -p hi'",
     "timeout --sig KILL 5 claude -p hi",
     "script -q /dev/null --comm 'claude -p hi'",
+    "find . -maxdepth 0; taskset 1 capsh -- -c 'gh pr merge 5'",
+    "find . -maxdepth 0; claude -p hi",
+    r"nice find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"command find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"/usr/bin/find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"X=1 find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"env find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"time find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"timeout 5 find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"sudo find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"! find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"if find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \; ; then :; fi",
+    r"{ find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \; ; }",
+    r"find . -exec env -u + taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    r"find . -exec env -u + claude -p hi \;",
+    r"find . -exec echo {} + -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+    "env --argv command -v capsh -- -c 'gh pr merge 5'",
+    "env --chd /tmp taskset 1 capsh -- -c 'gh pr merge 5'",
+    "env --unse X taskset 1 capsh -- -c 'gh pr merge 5'",
+    "nice --adj 5 taskset 1 capsh -- -c 'gh pr merge 5'",
+    "stdbuf --out L taskset 1 capsh -- -c 'gh pr merge 5'",
+    "flock --time 5 /tmp/l taskset 1 capsh -- -c 'gh pr merge 5'",
+    "su --session-command \"taskset 1 capsh -- -c 'gh pr merge 5'\" omnigent",
+    "watch -q1 claude -p hi",
+    "find . -maxdepth 0\nclaude -p hi",
+    "find . -maxdepth 0 && taskset 1 capsh -- -c 'gh pr merge 5'",
+    "find . -maxdepth 0 || claude -p hi",
+    "ionice --cl 3 claude -p hi",
+    "ionice --clas 3 taskset 1 capsh -- -c 'gh pr merge 5'",
+    "env --unknown claude -p hi",
+    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(129)),
+    "; ".join(["true"] * 129),
+    "echo " + " ".join(["x"] * 1_024),
 ]
 EVERY_BUNDLE_ALLOW = [
     r"find . -name x -exec ls {} \;",
     "find . -exec grep -l x {} +",
     r"find . -name '*.py' -exec grep -n TODO {} \;",
-    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(64)),
+    "find . " + " ".join(f"-exec echo {i} \\;" for i in range(100)),
     "echo ';' claude -p hi",
 ]
+PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-review", "planner")
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
 
 
-def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, bool, float, object]]:
-    """(policy, whether this package decides it, seconds, decision) for every policy that fires."""
+def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, float, object]]:
+    """(policy, seconds, decision) for each policy that fires, up to the first DENY, where the engine stops."""
     from omnigent.policies.function import resolve_function_policy
     from omnigent.policies.types import EvaluationContext
     from omnigent.runtime.policies.engine import _dispatch_policy
@@ -935,10 +969,11 @@ def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, bool, float, o
         if not _fires(policy_spec, case):
             continue
         handler = resolve_function_policy(policy_spec)
-        own = policy_spec.function.path.startswith("agent_stack_policies.") and "handler" not in (policy_spec.function.arguments or {})
         started = time.perf_counter()
         decision = asyncio.run(_dispatch_policy(handler, ctx, {}))
-        out.append((policy_spec.name, own, time.perf_counter() - started, decision))
+        out.append((policy_spec.name, time.perf_counter() - started, decision))
+        if decision.action.name == "DENY":
+            break
     return out
 
 
@@ -961,6 +996,12 @@ class StatementAndWrapperTest(unittest.TestCase):
             "env -a x tee -a docs/a.md": ("ALLOW", "DENY", "ALLOW"),
             "env -a x rg claude": ("ALLOW", "ALLOW", "ALLOW"),
             "echo x '|' tee src/a.py": ("DENY", "DENY", "ALLOW"),
+            "find . -maxdepth 0; rm -rf src": ("DENY", "DENY", "ALLOW"),
+            r"command find . -maxdepth 0 -exec ls {} \; -exec tee -a /etc/x \;": ("DENY", "DENY", "ALLOW"),
+            "env -a x echo hi > /tmp/x": ("ALLOW", "ALLOW", "ALLOW"),
+            "env -a x ls; echo hi > /tmp/x": ("ALLOW", "ALLOW", "ALLOW"),
+            "env -a x tee -a /opt/x": ("DENY", "DENY", "ALLOW"),
+            "env -a x cp a /opt/x": ("DENY", "DENY", "ALLOW"),
         }
         for command, expected in rows.items():
             for (agent, tool), want in zip((*SCOPED_AGENTS, ("polly/agents/claude_code", "Bash")), expected):
@@ -977,23 +1018,34 @@ class StatementAndWrapperTest(unittest.TestCase):
                         verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": plain}, "")),
                     )
 
-    def test_package_policies_stay_within_50ms(self):
+    def test_probe_verdicts(self):
+        probes = json.loads((FIXTURES / "shell_probes.json").read_text())
+        for probe in probes:
+            for form, key in ((probe["command"], "string"), (["bash", "-lc", probe["command"]], "list")):
+                for agent, want in zip(PROBE_AGENTS, probe[key]):
+                    with self.subTest(agent=agent, form=str(form)[:120]):
+                        got = verdict(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": form}, ""))
+                        self.assertEqual(got[0], want)
+
+    def test_full_call_within_50ms(self):
+        runs = lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n))
         inputs = {
-            "2000 find runs": ("find . " + " ".join(f"-exec echo {i} \\;" for i in range(2_000)), "DENY"),
-            "2000 find runs with an agent": ("find . " + " ".join(f"-exec claude -p {i} \\;" for i in range(2_000)), "DENY"),
-            "64 find runs": ("find . " + " ".join(f"-exec echo {i} \\;" for i in range(64)), "ALLOW"),
-            "1000 redirect targets": ("echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)), None),
+            "80 redirect statements": ("; ".join(f"echo x > /tmp/f{i}" for i in range(80)), False),
+            "2000 redirect statements": ("; ".join(f"echo x > /tmp/f{i}" for i in range(2_000)), True),
+            "80 redirect targets": ("echo x" + "".join(f" > /tmp/a{i}" for i in range(80)), False),
+            "2000 redirect targets": ("echo x" + "".join(f" > /tmp/a{i}" for i in range(2_000)), True),
+            "80 find runs": (runs(80), False),
+            "2000 find runs": (runs(2_000), True),
+            "2000 find {} + runs": ("find . " + " ".join("-exec ls {} +" for _ in range(2_000)), True),
         }
         for agent, tool in SHELL_AGENTS:
-            for label, (command, expected) in inputs.items():
+            for label, (command, over_limit) in inputs.items():
                 with self.subTest(agent=agent, input=label):
                     case = Case(agent, "tool_call", tool, {"command": command}, "")
                     timings = [timed_results(BUNDLES / agent, case) for _ in range(3)]
-                    own = min(sum(seconds for _, mine, seconds, _ in run if mine) for run in timings)
-                    self.assertLess(own, 0.05)
-                    if expected:
-                        actions = [decision.action.name for _, _, _, decision in timings[0]]
-                        self.assertEqual("DENY" if "DENY" in actions else "ALLOW", expected)
+                    self.assertLess(min(sum(seconds for _, seconds, _ in run) for run in timings), 0.05)
+                    reasons = [decision.reason or "" for _, _, decision in timings[0]]
+                    self.assertEqual(any("is not checked; split it up" in reason for reason in reasons), over_limit)
 
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
