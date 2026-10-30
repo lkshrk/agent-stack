@@ -16,6 +16,10 @@ inputs:
     description: h-cloud app a release deploys this image to; empty to skip the deploy
     required: false
     default: ""
+  source-date-epoch:
+    description: Unix time to clamp the pushed image's file and config timestamps to, so unchanged layers keep their digest on a cache miss; empty to keep the build's own timestamps
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -66,11 +70,12 @@ runs:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        push: ${{ github.event_name != 'pull_request' }}
+        outputs: type=image,push=${{ github.event_name != 'pull_request' }}${{ inputs.source-date-epoch != '' && ',rewrite-timestamp=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
           AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
+          ${{ inputs.source-date-epoch != '' && format('SOURCE_DATE_EPOCH={0}', inputs.source-date-epoch) || '' }}
         cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
     - name: Create h-cloud deployment token
       if: inputs.version != '' && inputs.app != ''
