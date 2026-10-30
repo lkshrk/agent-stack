@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+env_file=/src/upstream.env
+if [[ ! -r $env_file ]] || ! grep -q '^PATH=' "$env_file"; then
+  echo "FAIL $env_file is unreadable or has no PATH line"
+  exit 1
+fi
+
 fail=0
 while IFS= read -r line; do
   key=${line%%=*} want=${line#*=}
@@ -25,7 +31,7 @@ while IFS= read -r line; do
     echo "FAIL $key: expected '$want', got '${!key}'"
     fail=1
   fi
-done </src/upstream.env
+done <"$env_file"
 
 ((fail)) || echo "ok   the image keeps the upstream base's environment"
 exit "$fail"
