@@ -9,7 +9,7 @@ render() {
       -e "s#\${OPENAI_BASE_URL}#${base}/v1#g" "$1" >"$2"
 }
 
-cp -a /opt/agent/claude-home/.claude "$HOME/"
+cp -a --remove-destination /opt/agent/claude-home/.claude "$HOME/"
 mkdir -p "$HOME/.codex"
 cp /opt/agent/codex-home/AGENTS.md "$HOME/.codex/AGENTS.md"
 cp /opt/agent/codex-home/security-review.config.toml "$HOME/.codex/security-review.config.toml"
