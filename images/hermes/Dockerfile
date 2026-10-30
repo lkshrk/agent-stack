@@ -30,6 +30,7 @@ RUN git clone --quiet --filter=blob:none --no-checkout https://github.com/volcen
  && /opt/hermes/.venv/bin/python -c "import httpx, psutil, packaging"
 
 COPY images/hermes/bin/ /opt/agent/bin/
+COPY --chmod=0644 images/hermes/profile.d/agent-path.sh /etc/profile.d/zz-agent-path.sh
 COPY images/hermes/gitconfig /etc/gitconfig.d/agent
 COPY --chmod=0644 config/hermes/config.yaml /etc/hermes/config.yaml
 COPY --chmod=0644 config/hermes/SOUL.md /opt/hermes-soul/SOUL.md
