@@ -102,7 +102,7 @@ _PYTHON_SPEC = re.compile(r"[@=<>!~\[]")
 _LAUNCH_OPTIONS = frozenset({"-p", "--package", "-c", "--call"})
 _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": {"exec", "x"}, "bun": {"x"}}
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-STATEMENT_LIMIT = 128
+STATEMENT_LIMIT = 160
 WORD_LIMIT = 1024
 OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
@@ -140,7 +140,9 @@ class OpaqueCommand(ValueError):
 
 
 _UNCLOSED_HEREDOC = "a heredoc without its delimiter line hides what runs after it; close it"
-_TOO_LARGE = f"a command with more than {STATEMENT_LIMIT} statements, groups and nested commands (such as find -exec runs) or more than {WORD_LIMIT} words is not checked; split it up"
+_SPLIT = "is not checked; split it up into several commands, or put a long script in a file under the workspace and run that"
+_TOO_MANY_STATEMENTS = f"a command with more than {STATEMENT_LIMIT} statements, groups and nested commands (each find -exec run, -c body and $(…) body counts) {_SPLIT}"
+_TOO_MANY_WORDS = f"a command with more than {WORD_LIMIT} words across its statements and nested commands {_SPLIT}"
 _AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one's command is ambiguous; split it up"
 
 
@@ -916,8 +918,10 @@ def _walk_quietly(command: str, literal_operators: bool, split_operators: bool, 
         for unit in _rough(command):
             result.append(unit)
             words[0] += len(unit)
-            if len(result) > STATEMENT_LIMIT or words[0] > WORD_LIMIT:
-                raise OpaqueCommand(_TOO_LARGE) from None
+            if len(result) > STATEMENT_LIMIT:
+                raise OpaqueCommand(_TOO_MANY_STATEMENTS) from None
+            if words[0] > WORD_LIMIT:
+                raise OpaqueCommand(_TOO_MANY_WORDS) from None
 
 
 def group_token(token: str) -> bool:
@@ -945,12 +949,12 @@ def _walk(command: str, literal_operators: bool, split_operators: bool, result: 
             result.append(unit)
             words[0] += len(unit)
             if words[0] > WORD_LIMIT:
-                raise OpaqueCommand(_TOO_LARGE)
+                raise OpaqueCommand(_TOO_MANY_WORDS)
             resolved = resolve(unit)
             if resolved.problem:
                 raise OpaqueCommand(resolved.problem)
             if len(result) + len(resolved.nested) > STATEMENT_LIMIT:
-                raise OpaqueCommand(_TOO_LARGE)
+                raise OpaqueCommand(_TOO_MANY_STATEMENTS)
             extra = _nested_command(unit)
             for body in dict.fromkeys([*resolved.nested, *([extra] if extra is not None else [])]):
                 _walk(body, literal_operators, split_operators, result, words)
