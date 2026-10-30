@@ -1,6 +1,11 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  extends: ['github>lkshrk/gh-ops//renovate/presets/app-library.json5', 'helpers:pinGitHubActionDigests', 'docker:pinDigests'],
+  extends: [
+    'github>lkshrk/gh-ops//renovate/presets/app-library.json5',
+    'github>lkshrk/gh-ops//renovate/presets/automerge-major.json5',
+    'helpers:pinGitHubActionDigests',
+    'docker:pinDigests',
+  ],
   postUpdateOptions: ['gomodTidy'],
   customManagers: [
     {
@@ -114,6 +119,11 @@
       matchDepNames: ['rtk-ai/rtk', 'DeusData/codebase-memory-mcp'],
       addLabels: ['checksum-update'],
       automerge: false,
+    },
+    {
+      description: 'Image inputs ship in the published images, so commit them as fixes to trigger a release',
+      matchFileNames: ['**/Dockerfile'],
+      semanticCommitType: 'fix',
     },
   ],
 }
