@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from agent_stack_policies._shell import parse, resolve, shell_command, shell_name, walk
+from agent_stack_policies._shell import NESTED_LIMIT, OpaqueCommand, parse, resolve, shell_command, shell_name, walk
 
 
 def argv(command):
@@ -286,6 +286,118 @@ class FindExecTest(unittest.TestCase):
         command = resolve(tokens)
         self.assertEqual(len(command.nested), 1_999)
         self.assertLess(time.perf_counter() - started, 0.05)
+
+
+class OperatorWordTest(unittest.TestCase):
+    def test_unquoted_operators_end_every_statement(self):
+        for command in ("find . ; claude -p hi", "find . -name x;claude -p hi", "nice find . ; claude -p hi", r"find . -exec ls {} \; ; claude -p hi", "find . & claude -p hi", "find . || claude -p hi"):
+            with self.subTest(command=command):
+                self.assertEqual(parse(command)[-1], ["claude", "-p", "hi"])
+
+    def test_quoted_and_escaped_operator_words_are_arguments(self):
+        cases = {
+            "echo ';' claude -p hi": [["echo", ";", "claude", "-p", "hi"]],
+            'echo ";;" x': [["echo", ";;", "x"]],
+            r"echo \; \| \&\& x": [["echo", ";", "|", "&&", "x"]],
+            "printf '%s' a '|' b": [["printf", "%s", "a", "|", "b"]],
+            "echo ''; ls": [["echo", ""], ["ls"]],
+            r"echo \;; ls": [["echo", ";"], ["ls"]],
+            "echo x';' | wc": [["echo", "x;"], ["wc"]],
+            "echo '' ';' x": [["echo", "", ";", "x"]],
+        }
+        for command, statements in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(parse(command), statements)
+
+    def test_joined_bodies_read_operators_again(self):
+        self.assertIn(["claude", "-p", "hi"], walk("eval echo ';' claude -p hi"))
+        self.assertIn(["claude", "-p", "hi"], walk("watch echo ';' claude -p hi"))
+
+
+class FindRunTest(unittest.TestCase):
+    def test_runs_end_at_semicolon_words_or_braces_plus(self):
+        cases = {
+            r"find . -exec ls {} \; -exec claude -p hi \;": (["ls", "{}"], ["claude -p hi"]),
+            "find . -exec ls {} ';' -o -exec claude -p hi \";\"": (["ls", "{}"], ["claude -p hi"]),
+            r"find . -exec ls {} + -exec claude -p hi \;": (["ls", "{}"], ["claude -p hi"]),
+            r"find . -exec claude + -p hi \;": (["claude", "+", "-p", "hi"], []),
+            r"find . -exec echo {}+ \;": (["echo", "{}+"], []),
+            "find . -execdir rg x {} +": (["rg", "x", "{}"], []),
+        }
+        for command, (first, rest) in cases.items():
+            with self.subTest(command=command):
+                resolved = resolve(parse(command)[0])
+                self.assertEqual(resolved.argv, first)
+                self.assertEqual(resolved.nested, rest)
+
+    def test_exec_word_inside_another_run_is_ambiguous(self):
+        for command in (r"find . -name -exec -exec claude -p hi \;", r"find . -exec claude -exec -p hi \;", r"find . -exec echo -exec claude -p hi \;"):
+            with self.subTest(command=command):
+                with self.assertRaises(OpaqueCommand):
+                    walk(command)
+
+    def test_nested_command_limit(self):
+        runs = lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n))
+        self.assertEqual(len(walk(runs(NESTED_LIMIT + 1))), NESTED_LIMIT + 1)
+        for count in (NESTED_LIMIT + 2, 2_000):
+            with self.subTest(count=count):
+                started = time.perf_counter()
+                with self.assertRaises(OpaqueCommand):
+                    walk(runs(count))
+                self.assertLess(time.perf_counter() - started, 0.05)
+
+    def test_walk_results_are_independent_copies(self):
+        first = walk("ls -l; echo x")
+        first[0].append("mutated")
+        self.assertEqual(walk("ls -l; echo x"), [["ls", "-l"], ["echo", "x"]])
+
+
+class WrapperOptionTest(unittest.TestCase):
+    def test_help_value_options_and_abbreviations(self):
+        cases = {
+            "env -a x claude -p hi": ["claude", "-p", "hi"],
+            "env --argv0=x claude -p hi": ["claude", "-p", "hi"],
+            "env --arg x claude -p hi": ["claude", "-p", "hi"],
+            "env -ia x claude -p hi": ["claude", "-p", "hi"],
+            "env -S '-a x' claude -p hi": ["claude", "-p", "hi"],
+            "env -S claude -p hi": ["claude", "-p", "hi"],
+            "env -u X -S 'Y=1 claude' -p hi": ["claude", "-p", "hi"],
+            "timeout --sig KILL 5 claude -p hi": ["claude", "-p", "hi"],
+            "nice --adj 5 claude -p hi": ["claude", "-p", "hi"],
+            "stdbuf --out L claude -p hi": ["claude", "-p", "hi"],
+            "ionice --classd 7 claude -p hi": ["claude", "-p", "hi"],
+            "flock --time 5 /tmp/l claude -p hi": ["claude", "-p", "hi"],
+            "xargs -iI claude -p hi": ["claude", "-p", "hi"],
+            "xargs --eof claude -p hi": ["claude", "-p", "hi"],
+            "su -s /usr/bin/claude root": ["/usr/bin/claude"],
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(argv(command), expected)
+
+    def test_watch_and_su_command_values(self):
+        cases = {
+            "watch -q 2 claude -p hi": ["claude -p hi"],
+            "watch --equexit 2 claude -p hi": ["claude -p hi"],
+            "watch --equ 2 -n 1 claude -p hi": ["claude -p hi"],
+            "watch -q2 claude -p hi": ["claude -p hi"],
+            "su --session-command 'claude -p hi' root": ["claude -p hi"],
+            "su --session-command='claude -p hi'": ["claude -p hi"],
+            "su --sess 'claude -p hi' root": ["claude -p hi"],
+            "script -q /dev/null --comm 'claude -p hi'": ["claude -p hi"],
+        }
+        for command, nested in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(resolve(parse(command)[0]).nested, nested)
+
+    def test_argv0_suppresses_only_the_lookup(self):
+        self.assertTrue(resolve(parse("command -v capsh")[0]).lookup)
+        for command in ("env -a x command -v capsh", "env --arg x command -v capsh", "env -S '-a x' command -v capsh"):
+            with self.subTest(command=command):
+                resolved = resolve(parse(command)[0])
+                self.assertFalse(resolved.lookup)
+                self.assertEqual(resolved.argv, ["capsh"])
+                self.assertEqual(resolved.nested, [])
 
 
 class ShellNameTest(unittest.TestCase):

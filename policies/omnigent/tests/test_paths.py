@@ -1,5 +1,7 @@
+import time
 import unittest
 
+from agent_stack_policies._shell import _walk_cached
 from agent_stack_policies.paths import glob_match, path_guard
 
 from . import assert_not_ask, tool_call_event
@@ -668,6 +670,16 @@ class ShellWriteScopeTest(unittest.TestCase):
             'echo x >> ${HOME:-"}"}/.bashrc',
             "echo x >> ${HOME:-\\}}/.bashrc",
             "cat ${HOME:-${X}}/.bashrc",
+            "echo x >> ${HOME}/x}/../.bashrc",
+            "mkdir -p ~/x} && echo x >> ${HOME}/x}/../.bashrc",
+            "echo x >> $HOME/x}/../.bashrc",
+            "echo x >> ${HOME:-'}'}/.bashrc",
+            'echo x >> "${HOME:-}}"/.bashrc',
+            "echo x >> ${HOME:-${X:-${Y}}}/.bashrc",
+            "echo x >> ${HOME}${X:-}/.bashrc",
+            "echo x >> /${HOME}/.bashrc",
+            "echo x >> ${HOME}/a}${HOME}/b}/../../.bashrc",
+            "cat ${HOME}/" + "}" * 100 + "/.bashrc",
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
@@ -684,10 +696,52 @@ class ShellWriteScopeTest(unittest.TestCase):
             "node -e \"require('/home/omnigent/proj/x.js')()\"",
             'cat "$HOME/notes(1).md"',
             "set -e; ls ~/*",
+            'du -sh ~/* "$(date +%F)"',
+            'ls ~/* | grep "$(id -un)"',
+            "(cd /tmp && ls ~/*)",
+            'ls ~/*; echo "$(ls *.py)"',
+            "cat ~/notes/$(date +%F).md",
+            "ls $HOME/$(whoami)",
+            'mkdir -p "$HOME/.cache/$(date +%F)"',
+            "echo x >> ${HOME}x/.bashrc",
+            "echo x >> $HOMEX/.bashrc",
+            "cat ${HOME}/notes}/x.md",
+            "cat ${HOME}/" + "}" * 20_000,
         ):
             for form in (command, ["bash", "-lc", command]):
                 with self.subTest(form=form):
                     self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], "ALLOW")
+
+    def test_env_argv0_writes_use_the_ordinary_scope_check(self):
+        guard = path_guard(allow_only=["docs/**"], startup_files=[".bashrc"], startup_home="/home/omnigent")
+        for command, expected in (
+            ("env -a x tee -a /etc/x", "DENY"),
+            ("env --argv0=x tee -a /etc/x", "DENY"),
+            ("env -a x tee -a /tmp/ok", "ALLOW"),
+            ("env -a x tee -a docs/a.md", "ALLOW"),
+            ("env -a x tee -a src/a.py", "DENY"),
+            ("env -a x rg claude", "ALLOW"),
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(guard(tool_call_event("Bash", {"command": form}))["result"], expected)
+
+    def test_many_write_targets_stay_linear(self):
+        guards = (
+            path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent"),
+            path_guard(allow_only=["docs/**", "/tmp/**"], deny=[WORKFLOWS, "**/.env*"]),
+        )
+        for command in (
+            "echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)),
+            "echo x" + "".join(f" > docs/a{i}.md" for i in range(1_000)),
+            "env -a x echo x" + "".join(f" > /tmp/a{i}" for i in range(1_000)),
+        ):
+            for guard in guards:
+                with self.subTest(command=command[:30], guard=guards.index(guard)):
+                    _walk_cached.cache_clear()
+                    started = time.perf_counter()
+                    self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], "ALLOW")
+                    self.assertLess(time.perf_counter() - started, 0.05)
 
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
