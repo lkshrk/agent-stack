@@ -488,6 +488,15 @@ class NoMergeTest(unittest.TestCase):
         self.assertDenied("git push origin HEAD:refs/heads/main")
         self.assertDenied("git push origin --delete main")
         self.assertDenied("git push origin :main")
+        for command in (
+            "git push origin :",
+            "git push -u origin :",
+            "git -C .worktrees/t1 push origin :",
+            "git push -o ci.skip origin :",
+            "bash -lc 'git push origin :'",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, "git push origin HEAD:<branch>")
 
     def test_no_merge_custom_protected_branches(self):
         self.assertDenied("git push origin release", protected_branches=["release"])
