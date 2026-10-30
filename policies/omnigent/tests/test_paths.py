@@ -4,7 +4,7 @@ from agent_stack_policies._shell import _walk_cached
 from agent_stack_policies.paths import glob_match, path_guard
 
 from . import assert_not_ask, tool_call_event
-from .scaling import CEILING, GROWTH_LIMIT, elapsed, growth
+from .scaling import CEILING, GROWTH_LIMIT, cpu, elapsed, growth
 
 WORKFLOWS = ".github/workflows/**"
 UNPARSEABLE = {"type": "tool_call", "target": "Write", "data": {"name": "Write", "arguments": "{bad"}}
@@ -758,7 +758,7 @@ class ShellWriteScopeTest(unittest.TestCase):
         for index, guard in enumerate(guards):
             for label, build in shapes.items():
                 with self.subTest(guard=index, shape=label):
-                    measure = lambda n: elapsed(lambda: guard(tool_call_event("Bash", {"command": build(n)})))
+                    measure = lambda n: cpu(lambda: guard(tool_call_event("Bash", {"command": build(n)})))
                     self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
     def test_large_non_home_commands_keep_their_verdict(self):

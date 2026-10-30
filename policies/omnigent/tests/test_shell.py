@@ -2,7 +2,7 @@ import unittest
 
 from agent_stack_policies._shell import CHARACTER_LIMIT, STATEMENT_LIMIT, WORD_LIMIT, OpaqueCommand, has_quoted_operator, parse, resolve, shell_command, shell_name, walk
 
-from .scaling import CEILING, GROWTH_LIMIT, elapsed, growth
+from .scaling import CEILING, GROWTH_LIMIT, cpu, elapsed, growth
 
 
 def argv(command):
@@ -283,7 +283,7 @@ class FindExecTest(unittest.TestCase):
         runs = lambda n: ["find", "."] + [word for i in range(n) for word in ("-exec", "echo", str(i), ";")]
         self.assertEqual(len(resolve(runs(2_000)).nested), 1_999)
         self.assertLess(elapsed(lambda: resolve(runs(2_000))), CEILING)
-        self.assertLess(growth(lambda n: elapsed(lambda: resolve(runs(n))), 250), GROWTH_LIMIT)
+        self.assertLess(growth(lambda n: cpu(lambda: resolve(runs(n))), 250), GROWTH_LIMIT)
 
 
 class OperatorWordTest(unittest.TestCase):
@@ -383,7 +383,7 @@ class FindRunTest(unittest.TestCase):
         }
         for label, build in shapes.items():
             with self.subTest(shape=label):
-                self.assertLess(growth(lambda n: elapsed(lambda: walk(build(n))), 100), GROWTH_LIMIT)
+                self.assertLess(growth(lambda n: cpu(lambda: walk(build(n))), 100), GROWTH_LIMIT)
 
     def test_walk_results_are_independent_copies(self):
         first = walk("ls -l; echo x")

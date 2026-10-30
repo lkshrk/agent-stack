@@ -996,8 +996,8 @@ PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-rev
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
 
 
-def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, float, object]]:
-    """(policy, seconds, decision) for each policy that fires, up to the first DENY, where the engine stops."""
+def timed_results(agent_dir: Path, case: Case, clock=time.perf_counter) -> list[tuple[str, float, object]]:
+    """(policy, seconds by `clock`, decision) for each policy that fires, up to the first DENY, where the engine stops."""
     from omnigent.policies.function import resolve_function_policy
     from omnigent.policies.types import EvaluationContext
     from omnigent.runtime.policies.engine import _dispatch_policy
@@ -1015,9 +1015,9 @@ def timed_results(agent_dir: Path, case: Case) -> list[tuple[str, float, object]
         if not _fires(policy_spec, case):
             continue
         handler = resolve_function_policy(policy_spec)
-        started = time.perf_counter()
+        started = clock()
         decision = asyncio.run(_dispatch_policy(handler, ctx, {}))
-        out.append((policy_spec.name, time.perf_counter() - started, decision))
+        out.append((policy_spec.name, clock() - started, decision))
         if decision.action.name == "DENY":
             break
     return out
@@ -1139,7 +1139,7 @@ class StatementAndWrapperTest(unittest.TestCase):
                 with self.subTest(agent=agent, shape=label):
                     def measure(n):
                         case = Case(agent, "tool_call", tool, {"command": build(n)}, "")
-                        return sum(seconds for _, seconds, _ in timed_results(BUNDLES / agent, case))
+                        return sum(seconds for _, seconds, _ in timed_results(BUNDLES / agent, case, time.process_time))
 
                     self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
