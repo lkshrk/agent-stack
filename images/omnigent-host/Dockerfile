@@ -106,8 +106,21 @@ COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+RUN install -d -m 0777 /home/omnigent
 USER 1000660000
-RUN fail=0; for t in images/omnigent-host/test/*.sh; do echo "== $t"; bash "$t" || fail=1; done; exit "$fail"
+RUN \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bashrc \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bash_profile \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bash_login \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bash_logout \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.profile \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.zshrc \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.zshenv \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.zprofile \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.zlogin \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.zlogout \
+    --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.inputrc \
+    fail=0; for t in images/omnigent-host/test/*.sh; do echo "== $t"; bash "$t" || fail=1; done; exit "$fail"
 
 # The default target is the published image, without the test stage.
 FROM image
