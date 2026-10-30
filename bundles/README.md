@@ -2,6 +2,8 @@
 
 Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this directory to `/agents/` in the server image, and the server starts with `--agent /agents/polly --agent /agents/planner`. `security-review` and `documenter` are in the image but not registered yet: security-review waits for per-bundle GitHub tokens (Plan 2 Task 11b), the documenter for read-only startup files and launch configs in runner pods (Tasks 11c and 11d).
 
+A bundle's `model` doesn't choose the model of a session started from the Omnigent UI: Omnigent 0.19.1 starts managed sessions on the harness `default_model` from `config/omnigent/config.yaml` (`anthropic-auto` or `openai-auto`), and a different model is selected in the session. Plan 3's session tool will pass each bundle's model explicitly.
+
 | Bundle | Contents |
 | --- | --- |
 | `polly/` | Orchestrator adapted from Omnigent's example. It writes only `.polly/registry.json`, `.polly/diffs/` and its own skills (denied outside them for the file and patch tools, best-effort for the shell), and runs no mutating git verbs or pushes. `config.yaml` holds its instructions and tools, `agents/claude_code` and `agents/codex` the workers, `skills/` the skills `cross-review`, `fanout` and `investigate` |
