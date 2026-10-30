@@ -419,6 +419,28 @@ class FindRunTest(unittest.TestCase):
             with self.subTest(case=label):
                 self.assertIn(["claude", "-p", "hi"], walk(command))
 
+    def test_substitutions_after_text_that_only_looks_like_a_comment_or_quote(self):
+        forms = (
+            "echo a\\ #b {}",
+            "echo a\\\t#b {}",
+            "echo ${{x-a #b}} {}",
+            "echo ${{x:-a #b}} {}",
+            "echo ${{x:- #}} {}",
+            "echo ${{#x}} {}",
+            "cat <<'EO'F\nx\nEOF\necho {}\nEO",
+            'cat <<E"O"F\nx\nEOF\necho {}\nEO',
+            "cat <<\\EO'F'\nx\nEOF\necho {}\nEO",
+            "cat <<EOF\nit costs $'\n{}\n'\nEOF",
+        )
+        for form in forms:
+            for substitution in ("$(claude -p hi)", "`claude -p hi`"):
+                command = form.format(substitution)
+                with self.subTest(command=command):
+                    self.assertIn(["claude", "-p", "hi"], walk(command))
+
+    def test_partly_quoted_delimiter_is_the_whole_dequoted_word(self):
+        self.assertEqual(walk("cat <<'EO'F\nclaude -p hi\nEOF\nls"), [["cat", "<<", "EOF"], ["ls"]])
+
     def test_rough_bodies_count_toward_the_limits(self):
         body = "echo it's; " + "; ".join(["true"] * STATEMENT_LIMIT)
         with self.assertRaisesRegex(OpaqueCommand, f"more than {STATEMENT_LIMIT} statements"):

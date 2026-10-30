@@ -962,6 +962,16 @@ QUOTED_SPAN_ROWS = {
     'git commit -m "`claude -p hi`"': ("DENY", "DENY", "DENY", "DENY"),
     "tmux new-session -d echo ';' claude -p hi": ("ALLOW", "ALLOW", "ALLOW", "ALLOW"),
 }
+R1_FORMS = (
+    "echo a\\ #b {}",
+    "echo a\\\t#b {}",
+    "echo ${{x-a #b}} {}",
+    "echo ${{x:-a #b}} {}",
+    "echo ${{x:- #}} {}",
+    "cat <<'EO'F\nx\nEOF\necho {}\nEO",
+    "cat <<EOF\nit costs $'\n{}\n'\nEOF",
+)
+R1_PAYLOADS = ("gh pr merge 5", "claude -p hi", "touch /opt/x", "cat /agent-secrets/github/review")
 PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-review", "planner")
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
 
@@ -1024,6 +1034,21 @@ class StatementAndWrapperTest(unittest.TestCase):
                 for form in (command, ["bash", "-lc", command]):
                     with self.subTest(agent=agent, form=form):
                         self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": form}, "")), want)
+
+    def test_substitutions_behind_comment_and_quote_lookalikes_are_denied(self):
+        for agent, tool in SHELL_AGENTS:
+            for payload in R1_PAYLOADS:
+                bare = verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": payload}, ""))
+                if payload in R1_PAYLOADS[:2]:
+                    self.assertEqual(bare, "DENY", (agent, payload))
+                if bare != "DENY":
+                    continue
+                for form in R1_FORMS:
+                    for substitution in (f"$({payload})", f"`{payload}`"):
+                        command = form.format(substitution)
+                        for shape in (command, ["bash", "-lc", command]):
+                            with self.subTest(agent=agent, form=str(shape)[:80]):
+                                self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": shape}, "")), "DENY")
 
     def test_quoted_spans_are_text_and_real_substitutions_are_checked(self):
         for command, expected in QUOTED_SPAN_ROWS.items():
