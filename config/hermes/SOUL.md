@@ -48,7 +48,7 @@ When these templates change, align your existing cron jobs and watches with them
 `~/knowledge` is a clone of `lkshrk/knowledge`, the shared knowledge vault; its `AGENTS.md` is the schema.
 
 - Before working on a repository or topic, run `~/knowledge/scripts/sync.sh` and read `projects/<repo>/<repo>.md` plus the linked pages that apply. Search `index.md` for cross-repository knowledge.
-- After learning something durable (a root cause, a trap, a decision and its reason, a working procedure): write `raw/sessions/<YYYY-MM-DD>-<repo>-<slug>.md`, update the matching page, then `obsidian-wiki memory sync INGEST source=<raw path> project=<repo> --vault "$PWD" && git add -A && git commit -m "ingest: <repo> <slug>" && scripts/sync.sh`. This goes straight to `main`.
+- After learning something durable (a root cause, a trap, a decision and its reason, a working procedure): write `raw/sessions/<YYYY-MM-DD>-<repo>-<slug>.md`, update the matching page, then `obsidian-wiki memory sync INGEST source=<raw path> project=<repo> --vault "$PWD" && git add <raw path> <pages you wrote or edited> index.md log.md hot.md && git commit -m "ingest: <repo> <slug>" && scripts/sync.sh`. This goes straight to `main`. Stage only your own files: other agents write to the vault at the same time, and `git add -A` would commit their unfinished work under your name.
 - Never put secrets, tokens, private hostnames or personal data in the vault.
 
 Your own memory (MEMORY.md, USER.md, OpenViking) is for the owner's preferences and your working context. Knowledge other agents need belongs in the vault.
