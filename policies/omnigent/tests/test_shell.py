@@ -453,6 +453,25 @@ class FindRunTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertNotIn(["claude", "-p", "hi"], walk(command))
 
+    def test_dollar_quoted_heredoc_delimiters_are_opaque(self):
+        for word in ("$'EOF'", '$"EOF"', "E$'O'F", 'E$"O"F', "$'E\\x4fF'", "$'E\\'F'", "$''EOF"):
+            for command in (f"cat <<{word}\nx\nEOF\nls", f'echo "$(cat <<{word}\nx\nEOF\n)"', f"cat <<EOF\n$(cat <<{word}\nx\nEOF\n)\nEOF"):
+                with self.subTest(command=command):
+                    with self.assertRaisesRegex(OpaqueCommand, "heredoc delimiter with"):
+                        walk(command)
+
+    def test_mixed_quote_delimiters_end_where_bash_ends(self):
+        ends = {
+            "'EO'F": "EOF", 'E"O"F': "EOF", "E\\OF": "EOF", "\\EOF": "EOF", "''EOF": "EOF", "EOF''": "EOF",
+            '"E\\"F"': 'E"F', '"E\\OF"': "E\\OF", "$EOF": "$EOF", "${X}EOF": "${X}EOF", "E\\\\F": "E\\F", "'E\\OF'": "E\\OF",
+        }
+        for word, end in ends.items():
+            command = f"cat <<{word}\nclaude -p hi\n{end}\nls"
+            with self.subTest(command=command):
+                statements = walk(command)
+                self.assertIn(["ls"], statements)
+                self.assertNotIn(["claude", "-p", "hi"], statements)
+
     def test_partly_quoted_delimiter_is_the_whole_dequoted_word(self):
         self.assertEqual(walk("cat <<'EO'F\nclaude -p hi\nEOF\nls"), [["cat", "<<", "EOF"], ["ls"]])
 

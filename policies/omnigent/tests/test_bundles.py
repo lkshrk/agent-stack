@@ -978,6 +978,17 @@ R1_TOP_LEVEL = (
     "echo ${{x:-a #b}}; {}",
     "cat <<'EO'F\nx\nEOF\n{}\nEO",
 )
+R2_FORMS = (
+    "cat <<$'EOF'\nx\nEOF\necho {}\n$EOF",
+    'cat <<$"EOF"\nx\nEOF\necho {}\n$EOF',
+    "cat <<E$'O'F\nx\nEOF\necho {}\nE$OF",
+    "cat <<$''EOF\nx\nEOF\necho {}\n$EOF",
+)
+R2_TOP_LEVEL = (
+    "cat <<$'EOF'\nx\nEOF\n{}\n$EOF",
+    "cat <<E$'O'F\nx\nEOF\n{}\nE$OF",
+    "cat <<$''EOF\nx\nEOF\n{}\n$EOF",
+)
 R1_PAYLOADS = ("gh pr merge 5", "claude -p hi", "touch /opt/x", "cat /agent-secrets/github/review")
 PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-review", "planner")
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
@@ -1050,8 +1061,8 @@ class StatementAndWrapperTest(unittest.TestCase):
                     self.assertEqual(bare, "DENY", (agent, payload))
                 if bare != "DENY":
                     continue
-                commands = [form.format(s) for form in R1_FORMS for s in (f"$({payload})", f"`{payload}`")]
-                commands += [form.format(payload) for form in R1_TOP_LEVEL]
+                commands = [form.format(s) for form in R1_FORMS + R2_FORMS for s in (f"$({payload})", f"`{payload}`")]
+                commands += [form.format(payload) for form in R1_TOP_LEVEL + R2_TOP_LEVEL]
                 for command in commands:
                     for shape in (command, ["bash", "-lc", command]):
                         with self.subTest(agent=agent, form=str(shape)[:80]):
