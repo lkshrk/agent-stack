@@ -241,6 +241,7 @@ def _lines(command: str) -> list[str]:
     if "\n" not in command and "#" not in command and "<<" not in command:
         return [command]
     lines, current, quote, escaped, i = [], [], None, False, 0
+    escaped_at, braces = None, 0
     frames: list[list] = []
     parens: list[bool] = []
     closed_substitution = False
@@ -251,7 +252,9 @@ def _lines(command: str) -> list[str]:
         ch = command[i]
         if escaped:
             escaped = False
+            escaped_at = len(current)
             if ch == "\n":
+                escaped_at = None
                 current.pop()
                 i += 1
                 continue
@@ -269,7 +272,13 @@ def _lines(command: str) -> list[str]:
             quote = "$'"
             i += 2
             continue
-        elif ch == "#" and (not current or current[-1] in " \t;&|(" or (current[-1] == ")" and not closed_substitution)):
+        elif command.startswith("${", i):
+            braces += 1
+        elif ch == "}" and braces:
+            braces -= 1
+        elif ch == "#" and not braces and escaped_at != len(current) - 1 and (
+            not current or current[-1] in " \t;&|(" or (current[-1] == ")" and not closed_substitution)
+        ):
             end = command.find("\n", i)
             i = len(command) if end < 0 else end
             continue
@@ -287,7 +296,7 @@ def _lines(command: str) -> list[str]:
         elif ch == "\n":
             line = "".join(current)
             lines.append(line)
-            current = []
+            current, escaped_at = [], None
             i = _skip_heredocs(command, i + 1, _heredocs(line))
             continue
         current.append(ch)
