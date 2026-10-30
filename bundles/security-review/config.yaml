@@ -81,7 +81,7 @@ guardrails:
     no_secret_reads:
       type: function
       function:
-        # Best-effort; the review token's read-only scope is the real boundary.
+        # Best-effort guardrail; no read-only review token is minted yet (Plan 2 Task 11b).
         path: agent_stack_policies.secret_files.no_secret_reads
         arguments:
           secret_dir: /agent-secrets
