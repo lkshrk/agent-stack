@@ -1,3 +1,4 @@
+import time
 import unittest
 
 from agent_stack_policies._shell import parse, resolve, shell_command, shell_name, walk
@@ -274,6 +275,17 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
     def test_hash_after_subshell_is_a_comment(self):
         self.assertEqual(parse("(true)# c; git push origin main"), [["(", "true", ")"]])
         self.assertEqual(parse("(true)# c\ngit push origin main")[-1], ["git", "push", "origin", "main"])
+
+
+class FindExecTest(unittest.TestCase):
+    def test_all_find_exec_runs_are_nested(self):
+        tokens = ["find", "."]
+        for i in range(80):
+            tokens += ["-exec", "echo", str(i), ";"]
+        started = time.perf_counter()
+        command = resolve(tokens)
+        self.assertEqual(len(command.nested), 79)
+        self.assertLess(time.perf_counter() - started, 0.05)
 
 
 class ShellNameTest(unittest.TestCase):
