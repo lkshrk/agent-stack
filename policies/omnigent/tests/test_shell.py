@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT, OpaqueCommand, has_quoted_operator, parse, resolve, shell_command, shell_name, walk
+from agent_stack_policies._shell import CHARACTER_LIMIT, STATEMENT_LIMIT, WORD_LIMIT, OpaqueCommand, has_quoted_operator, parse, resolve, shell_command, shell_name, walk
 
 
 def argv(command):
@@ -428,12 +428,27 @@ class FindRunTest(unittest.TestCase):
             walk(f'echo "$({words})"')
 
     def test_limit_reasons_say_how_to_recover(self):
-        for command, limit in (("; ".join(["true"] * (STATEMENT_LIMIT + 1)), "statements"), ("echo " + " ".join(["x"] * WORD_LIMIT), "words")):
+        for command, limit in (
+            ("; ".join(["true"] * (STATEMENT_LIMIT + 1)), "statements"),
+            ("echo " + " ".join(["x"] * WORD_LIMIT), "words"),
+            ("echo " + "x" * CHARACTER_LIMIT, "characters"),
+        ):
             with self.subTest(limit=limit):
                 with self.assertRaises(OpaqueCommand) as caught:
                     walk(command)
                 self.assertIn(limit, str(caught.exception))
                 self.assertIn("put a long script in a file under the workspace", str(caught.exception))
+                self.assertIn("Write tool", str(caught.exception))
+
+    def test_character_limit(self):
+        at_limit = "echo " + "x" * (CHARACTER_LIMIT - 5)
+        self.assertEqual(walk(at_limit), [["echo", "x" * (CHARACTER_LIMIT - 5)]])
+        for command in (at_limit + "x", "cat > docs/a.md <<'EOF'\n" + "line\n" * (CHARACTER_LIMIT // 5) + "EOF", "echo '" + "a b " * 50_000 + "'"):
+            with self.subTest(command=command[:30]):
+                started = time.perf_counter()
+                with self.assertRaisesRegex(OpaqueCommand, f"longer than {CHARACTER_LIMIT} characters"):
+                    walk(command)
+                self.assertLess(time.perf_counter() - started, 0.005)
 
 
 class WrapperOptionTest(unittest.TestCase):
