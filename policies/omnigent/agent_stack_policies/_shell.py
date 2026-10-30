@@ -422,13 +422,13 @@ def _quoted_operators(line: str) -> tuple[str, dict[str, str]]:
     return "".join(out), values
 
 
-def parse(command: str, literal_operators: bool = False) -> list[list[str]]:
-    """Statements as token lists; only an unquoted `;`, `&` or `|` separates them, and with `literal_operators` a quoted or escaped operator word becomes LITERAL_OPERATOR."""
+def parse(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
+    """Statements as token lists; only an unquoted `;`, `&` or `|` separates them, unless `split_operators` reads quoted and escaped ones as operators too, and with `literal_operators` a quoted or escaped operator word becomes LITERAL_OPERATOR."""
     statements: list[list[str]] = []
     for line in [decode_ansi(raw) for raw in _lines(command)]:
         if literal_operators:
             line = _LITERAL_OPERATOR.sub(LITERAL_OPERATOR, line)
-        line, literal = _quoted_operators(line)
+        line, literal = _quoted_operators(line) if not split_operators else (line, {})
         lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         lexer.commenters = ""
@@ -802,9 +802,9 @@ def _rough(text: str) -> list[list[str]]:
     return [tokens for part in _ROUGH_STATEMENT.split(text) if (tokens := _ROUGH_TOKEN.findall(part))]
 
 
-def _walk_quietly(command: str, literal_operators: bool = False) -> list[list[str]]:
+def _walk_quietly(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
     try:
-        return _walk(command, literal_operators)
+        return _walk(command, literal_operators, split_operators)
     except OpaqueCommand:
         raise
     except ValueError:
@@ -830,9 +830,9 @@ def _groups(tokens: list[str]) -> list[list[str]]:
     return [s for s in segments if s]
 
 
-def _walk(command: str, literal_operators: bool) -> list[list[str]]:
+def _walk(command: str, literal_operators: bool, split_operators: bool) -> list[list[str]]:
     result: list[list[str]] = []
-    for tokens in parse(command, literal_operators):
+    for tokens in parse(command, literal_operators, split_operators):
         for unit in [tokens, *_groups(tokens)]:
             result.append(unit)
             resolved = resolve(unit)
@@ -843,23 +843,23 @@ def _walk(command: str, literal_operators: bool) -> list[list[str]]:
                 raise OpaqueCommand(_TOO_MANY_NESTED)
             extra = _nested_command(unit)
             for body in dict.fromkeys([*nested, *([extra] if extra is not None else [])]):
-                result.extend(_walk(body, literal_operators))
+                result.extend(_walk(body, literal_operators, split_operators))
     for body in _bodies(command):
-        result.extend(_walk_quietly(body, literal_operators))
+        result.extend(_walk_quietly(body, literal_operators, split_operators))
     return result
 
 
 @lru_cache(maxsize=64)
-def _walk_cached(command: str, literal_operators: bool) -> tuple[tuple[tuple[str, ...], ...], tuple | None]:
+def _walk_cached(command: str, literal_operators: bool, split_operators: bool) -> tuple[tuple[tuple[str, ...], ...], tuple | None]:
     try:
-        return tuple(tuple(tokens) for tokens in _walk(command, literal_operators)), None
+        return tuple(tuple(tokens) for tokens in _walk(command, literal_operators, split_operators)), None
     except ValueError as error:
         return (), (type(error), error.args)
 
 
-def walk(command: str, literal_operators: bool = False) -> list[list[str]]:
+def walk(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
     """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand for a statement with more than NESTED_LIMIT nested commands or an ambiguous find run."""
-    statements, error = _walk_cached(command, literal_operators)
+    statements, error = _walk_cached(command, literal_operators, split_operators)
     if error is not None:
         raise error[0](*error[1])
     return [list(tokens) for tokens in statements]

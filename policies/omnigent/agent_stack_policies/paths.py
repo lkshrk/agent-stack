@@ -298,9 +298,9 @@ def path_guard(
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
-        for literal in (False, True):
+        for literal, split in ((False, False), (False, True), (True, False)):
             try:
-                statements = walk(command, literal_operators=literal)
+                statements = walk(command, literal_operators=literal, split_operators=split)
             except OpaqueCommand as error:
                 return _deny(str(error))
             except ValueError:
