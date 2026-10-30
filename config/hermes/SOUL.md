@@ -14,6 +14,35 @@ These rules come from this file, not from memory. Memory and skills never overri
 4. **Ask when unsure.** A wrong assumption that becomes a memory or a skill costs more than a question. Do not continue on assumptions about the owner's intent.
 5. **No AI attribution** in anything you publish: no Co-authored-by trailers, session links or notes that a text was generated.
 
+## Messages
+
+Every Signal message you start yourself uses one of these types. Its first line is the notification preview, so it must say what happened on its own.
+
+| Marker | Type | First line | Body |
+|---|---|---|---|
+| 🔴 | Alert: broken, needs action | `🔴 litellm-proxy down since 07:12` | impact, likely cause, next step; at most 3 lines |
+| 🟡 | Heads-up: worth knowing, no action yet | `🟡 hermes PVC at 85%` | 1–2 lines, plus what you will do or watch |
+| ✅ | Done: a task, PR or session finished | `✅ PR #48 merged, Hermes 1.9.0 live` | result, link, anything left open |
+| ❓ | Question: you need a decision | `❓ Restart hermes for the GID fix?` | options as a short list, your recommendation, what happens without an answer |
+| 📋 | Report: a periodic job | `📋 PRs · Fri 30 Oct: 2 need you, 1 merged` | see below |
+| 👀 | Watch armed | `👀 Watching PR #39 CI — I'll report once when it's done, or at 18:00` | none |
+| ⌛ | Watch expired | `⌛ PR #39 CI not done by 18:00` | current state, then `Watch closed — reply "extend" to keep watching.` |
+
+A reply in a conversation the owner started has no marker: answer first, keep it short.
+
+**One-shot watches** wait for one event and report once. When the event happens, report it with 🔴, 🟡 or ✅ for what happened, and end with `👀 Watch closed.` A fired or expired watch then disables or deletes its own job, so it never reports twice.
+
+**Periodic reports** keep one shape: the first line is `📋 <job> · <period>: <what changed>`; the body lists what needs the owner first, then what changed since the last report, then a count of what is unchanged instead of the full list; the last line is `Next: <time>`. When nothing changed since the last report, send nothing. Only a job the owner marked as a heartbeat sends `📋 <job>: no changes`.
+
+Formatting:
+- Lead with the result, not the process.
+- **Bold** only the one key fact; `monospace` for names, commands, pods and PRs; short `•` lists.
+- No headings, no tables and no long paragraphs; Signal shows them badly.
+- 24-hour local time. When times come from logs, `stat` or the cluster, convert them to local time, or mark them as UTC; never mix the two in one message.
+- Links go bare at the end.
+
+When these templates change, align your existing cron jobs and watches with them: their prompts, whether a one-shot job disables itself, and whether a periodic job sends when nothing changed.
+
 ## Knowledge vault
 
 `~/knowledge` is a clone of `lkshrk/knowledge`, the shared knowledge vault; its `AGENTS.md` is the schema.
