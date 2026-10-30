@@ -26,6 +26,8 @@ jobs:
           image: omnigent-host
           version: ${{ inputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          # A constant, unlike a commit time, keeps the flattened base layer's digest across releases of the same base.
+          source-date-epoch: "1767225600"
 
   build:
     runs-on: ubuntu-latest

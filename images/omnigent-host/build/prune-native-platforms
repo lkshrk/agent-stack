@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Build-time only: removes prebuilt native binaries for platforms other than linux-x64 from the npm trees in "$@".
+set -euo pipefail
+
+find "$@" -type d \( \
+     -path '*/bin/napi-v*/darwin' -o -path '*/bin/napi-v*/win32' -o -path '*/bin/napi-v*/linux/arm64' \
+  -o -path '*/prebuilds/darwin-*' -o -path '*/prebuilds/win32-*' -o -path '*/prebuilds/linux-arm*' \
+  -o -path '*/prebuilds/android-*' -o -path '*/native/darwin' -o -path '*/native/win32' \
+  \) -prune -exec rm -rf {} +

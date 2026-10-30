@@ -16,6 +16,10 @@ inputs:
     description: h-cloud app a release deploys this image to; empty to skip the deploy
     required: false
     default: ""
+  source-date-epoch:
+    description: Unix time to clamp the pushed image's file and config timestamps to, so unchanged layers keep their digest on a cache miss; empty to keep the build's own timestamps
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -47,6 +51,10 @@ runs:
           type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
           type=raw,value=latest,enable=${{ inputs.version != '' }}
           type=sha,format=short
+    - name: Require the upstream base to set no image config the flattened runner drops
+      if: inputs.image == 'omnigent-host'
+      shell: bash
+      run: images/omnigent-host/ci/upstream-config.sh
     - name: Test the image before publishing it
       if: startsWith(inputs.image, 'omnigent-')
       uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -66,11 +74,12 @@ runs:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        push: ${{ github.event_name != 'pull_request' }}
+        outputs: type=image,push=${{ github.event_name != 'pull_request' }}${{ inputs.source-date-epoch != '' && ',rewrite-timestamp=true' || '' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
           AGENT_STACK_VERSION=${{ inputs.image == 'omnigent-server' && steps.version.outputs.semver || '' }}
+          ${{ inputs.source-date-epoch != '' && format('SOURCE_DATE_EPOCH={0}', inputs.source-date-epoch) || '' }}
         cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
     - name: Create h-cloud deployment token
       if: inputs.version != '' && inputs.app != ''
