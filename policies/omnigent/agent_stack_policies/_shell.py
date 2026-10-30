@@ -103,7 +103,8 @@ _PYTHON_SPEC = re.compile(r"[@=<>!~\[]")
 _LAUNCH_OPTIONS = frozenset({"-p", "--package", "-c", "--call"})
 _LAUNCH_SUBCOMMANDS = {"pnpm": {"dlx", "exec"}, "yarn": {"dlx", "exec"}, "npm": {"exec", "x"}, "bun": {"x"}}
 _FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
-NESTED_LIMIT = 64
+STATEMENT_LIMIT = 128
+WORD_LIMIT = 1024
 OPAQUE_EXPANSION = re.compile(r"\$\{[^}]*[:\[@!]")
 _DECODING_EXPANSION = re.compile(r"\$\{[^}]*@[PE]")
 _FD = re.compile(r"^\d+$")
@@ -111,6 +112,7 @@ _QUOTED_DOLLAR = re.compile(r"\$['\"]")
 _LITERAL_OPERATOR = re.compile(r"(?<![^\s;&|()])(?:'[<>&|;()]+'|\"[<>&|;()]+\"|\\[<>&|;()])(?=$|[\s;&|()])")
 LITERAL_OPERATOR = "__agent_stack_literal_operator__"
 _QUOTE_OR_ESCAPE = re.compile(r"[\\'\"]")
+_QUOTED_OPERATOR_CHAR = re.compile(r"[\\'\"][;&|()<>]")
 _WORD = re.compile(r"""(?:\\.|'[^']*'|"(?:\\.|[^"\\])*"|[^ \t\r\n;&|()<>'"\\])+""", re.S)
 _QUOTED_OPERATOR_WORD = re.compile(r"""(?:\\[;&|()<>]|'[;&|()<>]*'|"[;&|()<>]*")+""")
 
@@ -139,7 +141,7 @@ class OpaqueCommand(ValueError):
 
 
 _UNCLOSED_HEREDOC = "a heredoc without its delimiter line hides what runs after it; close it"
-_TOO_MANY_NESTED = f"a statement with more than {NESTED_LIMIT} nested commands (such as find -exec runs) is not checked; split it up"
+_TOO_LARGE = f"a command with more than {STATEMENT_LIMIT} statements, groups and nested commands (such as find -exec runs) or more than {WORD_LIMIT} words is not checked; split it up"
 _AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one's command is ambiguous; split it up"
 
 
@@ -420,6 +422,11 @@ def _quoted_operators(line: str) -> tuple[str, dict[str, str]]:
                 last = word.end()
     out.append(line[last:])
     return "".join(out), values
+
+
+def has_quoted_operator(command: str) -> bool:
+    """Whether some quoted or escaped word of operator characters may appear, so the `literal_operators` and `split_operators` readings can differ from the plain one."""
+    return _QUOTED_OPERATOR_CHAR.search(decode_ansi(command)) is not None
 
 
 def parse(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
@@ -811,13 +818,15 @@ def _rough(text: str) -> list[list[str]]:
     return [tokens for part in _ROUGH_STATEMENT.split(text) if (tokens := _ROUGH_TOKEN.findall(part))]
 
 
-def _walk_quietly(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
+def _walk_quietly(command: str, literal_operators: bool, split_operators: bool, result: list[list[str]], words: list[int]) -> None:
+    start = len(result)
     try:
-        return _walk(command, literal_operators, split_operators)
+        _walk(command, literal_operators, split_operators, result, words)
     except OpaqueCommand:
         raise
     except ValueError:
-        return _rough(command)
+        del result[start:]
+        result.extend(_rough(command))
 
 
 def group_token(token: str) -> bool:
@@ -839,35 +848,36 @@ def _groups(tokens: list[str]) -> list[list[str]]:
     return [s for s in segments if s]
 
 
-def _walk(command: str, literal_operators: bool, split_operators: bool) -> list[list[str]]:
-    result: list[list[str]] = []
+def _walk(command: str, literal_operators: bool, split_operators: bool, result: list[list[str]], words: list[int]) -> list[list[str]]:
     for tokens in parse(command, literal_operators, split_operators):
         for unit in [tokens, *_groups(tokens)]:
             result.append(unit)
+            words[0] += len(unit)
+            if words[0] > WORD_LIMIT:
+                raise OpaqueCommand(_TOO_LARGE)
             resolved = resolve(unit)
             if resolved.problem:
                 raise OpaqueCommand(resolved.problem)
-            nested = resolved.nested
-            if len(nested) > NESTED_LIMIT:
-                raise OpaqueCommand(_TOO_MANY_NESTED)
+            if len(result) + len(resolved.nested) > STATEMENT_LIMIT:
+                raise OpaqueCommand(_TOO_LARGE)
             extra = _nested_command(unit)
-            for body in dict.fromkeys([*nested, *([extra] if extra is not None else [])]):
-                result.extend(_walk(body, literal_operators, split_operators))
+            for body in dict.fromkeys([*resolved.nested, *([extra] if extra is not None else [])]):
+                _walk(body, literal_operators, split_operators, result, words)
     for body in _bodies(command):
-        result.extend(_walk_quietly(body, literal_operators, split_operators))
+        _walk_quietly(body, literal_operators, split_operators, result, words)
     return result
 
 
 @lru_cache(maxsize=64)
 def _walk_cached(command: str, literal_operators: bool, split_operators: bool) -> tuple[tuple[tuple[str, ...], ...], tuple | None]:
     try:
-        return tuple(tuple(tokens) for tokens in _walk(command, literal_operators, split_operators)), None
+        return tuple(tuple(tokens) for tokens in _walk(command, literal_operators, split_operators, [], [0])), None
     except ValueError as error:
         return (), (type(error), error.args)
 
 
 def walk(command: str, literal_operators: bool = False, split_operators: bool = False) -> list[list[str]]:
-    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand for a statement with more than NESTED_LIMIT nested commands or an ambiguous find run."""
+    """Every statement, segment and nested body; raises ValueError on an unparseable top level or `-c` body, splits an unparseable `$(...)` body roughly, and raises OpaqueCommand above STATEMENT_LIMIT statements or WORD_LIMIT words, for an ambiguous find run and for a wrapper long option it can't resolve."""
     statements, error = _walk_cached(command, literal_operators, split_operators)
     if error is not None:
         raise error[0](*error[1])

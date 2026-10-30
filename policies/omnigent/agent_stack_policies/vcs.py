@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
-from ._shell import DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
+from ._shell import OpaqueCommand, DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
 
 _VCS = frozenset({"git", "gh"})
@@ -201,6 +201,8 @@ def docs_vcs(
             return _deny("redirecting git or gh output is not allowed; only `2>&1` or `2>/dev/null` alone")
         try:
             statements = walk(command)
+        except OpaqueCommand as error:
+            return _deny(str(error))
         except ValueError:
             return _deny("unparseable shell command; simplify it")
         reason = shell_shape_problem(statements)

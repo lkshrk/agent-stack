@@ -4,7 +4,7 @@ import shlex
 from collections.abc import Callable
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import SHELLS, Command, shell_name, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
+from ._shell import OpaqueCommand, SHELLS, Command, shell_name, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
 from .vcs import _BRANCH_LIST_FLAGS, _GIT_UNSAFE_FLAGS
 
@@ -208,6 +208,8 @@ def read_only_shell(
             return deny(f"arithmetic, subscript, substring, transformation and indirect expansions are not allowed; {_HINT}")
         try:
             statements = walk(command)
+        except OpaqueCommand as error:
+            return deny(str(error))
         except ValueError:
             return deny("unparseable shell command; simplify it")
         shape = shell_shape_problem(statements)
@@ -246,6 +248,8 @@ def git_verbs(*, extra_verbs: list[str] | None = None) -> Callable[[Event], Deci
             return deny("shell command is not a string")
         try:
             statements = walk(command)
+        except OpaqueCommand as error:
+            return deny(str(error))
         except ValueError:
             return deny("unparseable shell command; simplify it")
         if opaque(command):

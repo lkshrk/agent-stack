@@ -5,7 +5,7 @@ from collections.abc import Callable
 from fnmatch import fnmatchcase
 
 from ._event import Decision, Event, deny, tool_call
-from ._shell import _nested_command, resolve, shell_command, walk
+from ._shell import OpaqueCommand, _nested_command, resolve, shell_command, walk
 from .merge import _gh_words
 from .paths import SHELL_TOOLS
 
@@ -89,6 +89,8 @@ def no_secret_reads(*, secret_dir: str, token_file: str) -> Callable[[Event], De
             return deny(hint)
         try:
             statements = walk(command)
+        except OpaqueCommand as error:
+            return deny(str(error))
         except ValueError:
             if mentioned:
                 return deny(hint)

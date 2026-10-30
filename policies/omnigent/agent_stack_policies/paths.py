@@ -6,7 +6,7 @@ from functools import lru_cache
 
 from ._event import Decision, Event, allow, tool_call, tool_name
 from ._event import deny as _deny
-from ._shell import OpaqueCommand, resolve, shell_command, shell_shape_problem, strip_redirects, walk
+from ._shell import OpaqueCommand, has_quoted_operator, resolve, shell_command, shell_shape_problem, strip_redirects, walk
 
 PATCH_TOOLS = frozenset({"apply_patch"})
 WRITE_TOOLS = frozenset(
@@ -298,7 +298,8 @@ def path_guard(
     def check_scope(command: str, scope: list[str] | None) -> Decision | None:
         fused = [re.sub(r"['\"]", "", t) for t in _FUSED_REDIRECT_TARGET.findall(command)]
         targets = [t for t in fused if t and not t.isdigit() and t != "-"]
-        for literal, split in ((False, False), (False, True), (True, False)):
+        readings = ((False, False), (False, True), (True, False)) if has_quoted_operator(command) else ((False, False),)
+        for literal, split in readings:
             try:
                 statements = walk(command, literal_operators=literal, split_operators=split)
             except OpaqueCommand as error:
