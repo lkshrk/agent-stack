@@ -44,6 +44,7 @@ RUN rm -rf /opt/hermes/.venv \
  && chmod -R a-w /opt/hermes
 
 COPY images/hermes/bin/ /opt/agent/bin/
+COPY --chmod=0644 images/hermes/profile.d/agent-path.sh /etc/profile.d/zz-agent-path.sh
 COPY images/hermes/gitconfig /etc/gitconfig.d/agent
 COPY --chmod=0644 config/hermes/config.yaml /etc/hermes/config.yaml
 # COPY --chmod also applies to the parent it creates, leaving /etc/hermes unsearchable for the runtime user.
