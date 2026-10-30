@@ -40,3 +40,16 @@ sandbox:
       - secret_name: agent-github-tokens
         mount_path: /agent-secrets/github
 
+policy_modules: [agent_stack_policies]
+
+policies:
+  no_merge:
+    type: function
+    function:
+      path: agent_stack_policies.merge.no_merge
+      arguments: {}
+  no_nested_agents:
+    type: function
+    function:
+      path: agent_stack_policies.agents.no_nested_agents
+      arguments: {}

@@ -1,6 +1,6 @@
 spec_version: 1
 name: codex
-description: Codex coding sub-agent — implements, cross-vendor reviews, or explores a scoped task in its own worktree.
+description: Codex read-only sub-agent — cross-vendor reviews or explores a scoped task in its own worktree.
 
 executor:
   type: omnigent
@@ -13,23 +13,10 @@ executor:
     yolo: true
 
 prompt: |
-  You are Codex, a coding sub-agent dispatched by the polly
+  You are Codex, a read-only sub-agent dispatched by the polly
   orchestrator for a single scoped task in a dedicated git worktree. Your task
-  prompt names its purpose — IMPLEMENT, REVIEW, or EXPLORE. Do exactly that one
-  thing; don't refactor or wander unprompted.
-
-  IMPLEMENT — write real product code:
-  - Stay strictly within the files/scope named in your task and acceptance
-    contract.
-  - Make the change, then drive it to green: run the relevant tests, lint, and
-    typecheck for the code you touched.
-  - When you report test results, include the exact command and file set. If
-    you mention counts, distinguish collected test cases from test functions.
-  - Commit messages and PR texts carry no AI attribution: no Co-authored-by
-    trailer, no session link, no note that the change was generated.
-  - When green, push your task branch and open a PR with `gh pr create` (clear
-    title, what changed, how you verified). Never push to a protected branch
-    (e.g. main) or force-push — open a PR and let it be reviewed/merged.
+  prompt names its purpose — REVIEW or EXPLORE. Do exactly that one thing;
+  never edit files. If asked to implement, refuse and report back.
 
   REVIEW — verify another agent's diff (you are given the diff + the acceptance
   contract):
@@ -41,8 +28,13 @@ prompt: |
   EXPLORE / SEARCH — answer a specific question, read-only:
   - Read only what you need; edit nothing. Answer with file:line evidence.
 
-  Always return a clear, structured result: for IMPLEMENT, what you changed
-  (file:line) and how you verified it; for REVIEW / EXPLORE, your findings.
+  Your shell is read-only: `rg`, `cat`, `head`, `nl`, `sed -n <from>,<to>p`,
+  `jq`, git read verbs and `gh` reads, by bare name, with no wrappers
+  (`xargs`, `timeout`, `env`, `npx`, `uv run`), no `VAR=` assignments and no
+  redirection except `2>/dev/null` and `2>&1`. Committing, pushing and commenting on or approving a
+  PR are denied.
+
+  Always return a clear, structured result with your findings.
   Note anything that did not fit the task.
 
 os_env:
@@ -51,15 +43,54 @@ os_env:
   sandbox:
     type: none
 
-# Implementers open their own PRs, so push / gh pr create are allowed
-# (gate_pushes: false). Only the catastrophic set (force-push, rm -rf /,
-# hard-reset to a remote ref) is still denied.
 guardrails:
+  ask_timeout: 300
   policies:
+    read_only_shell:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.readonly.read_only_shell
+        arguments:
+          extra_commands: [gh]
     blast_radius:
       type: function
       on: [tool_call]
       function:
-        path: omnigent.inner.nessie.policies.blast_radius
+        path: agent_stack_policies.unattended.deny_on_ask
         arguments:
-          gate_pushes: false
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: true
+            risky_action: DENY
+    github_readonly:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.github.github_policy
+          arguments:
+            read_all: true
+            write_repos: []
+    read_only_os:
+      type: function
+      on: [tool_call]
+      function:
+        path: omnigent.policies.builtins.orchestration.read_only_os
+        arguments: {}
+    no_write_tools:
+      type: function
+      on: [tool_call]
+      function:
+        # read_only_os misses Codex's apply_patch.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [apply_patch, "*spawn_agent"]
+    no_policy_tools:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]

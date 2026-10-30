@@ -1,6 +1,10 @@
 model = "gpt-sol"
 model_provider = "litellm"
 
+# write_stdin into a running exec session skips PreToolUse.
+[features]
+unified_exec = false
+
 [model_providers.litellm]
 name = "LiteLLM"
 base_url = "${OPENAI_BASE_URL}"

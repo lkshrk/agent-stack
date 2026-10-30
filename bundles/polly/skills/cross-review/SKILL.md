@@ -10,17 +10,28 @@ review is a sub-agent that returns a structured report, not a transcript
 anyone needs to read through.
 
 ## Procedure
+0. Have the implementer bring its branch up to date; never rebase, merge or
+   push it yourself. Send to the SAME implementer conversation (its original
+   `agent` + `title`, `purpose: "implement"`): rebase onto `origin/main` if the
+   branch was never pushed, otherwise `git merge origin/main`; resolve any
+   conflict, rerun the gates, push without force to an explicit destination
+   (`git push origin HEAD:<branch>`) and report the new head SHA.
+   End your turn, and snapshot the diff only after that report arrives.
 1. Reuse the supplied diff file, or save the task's diff directly with a shell
-   redirect (`gh pr diff <pr> > <absolute shared diff path>` or
-   `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > <absolute shared diff path>`).
-   Use a unique snapshot outside the implementer's worktree, record its base and
+   redirect into `.polly/diffs/` (`gh pr diff <pr> > .polly/diffs/<task_id>-<head-sha>.diff`
+   or `git -C .worktrees/<task_id> diff <base-sha>...<head-sha> > .polly/diffs/<task_id>-<head-sha>.diff`)
+   and pass its absolute path. `.polly/diffs/` is the only place besides the
+   registry and your skills that you write. It is outside the implementer's
+   worktree. Record its base and
    head commit SHAs, and leave it unchanged until review finishes. The reviewer
    must be able to read that path. For a different host or sandbox, transfer the
    snapshot first or arrange access to both commits so it can compute the diff;
    never regenerate the diff through model output.
 2. Run the deterministic gates first — tests / lint / typecheck via
    `sys_os_shell`. If red, re-dispatch the implementer to drive it green first;
-   don't involve the reviewer yet.
+   don't involve the reviewer yet. Missing e2e evidence is blocking only when
+   the sandbox could have run e2e; `e2e: not run (environment)` is a
+   non-blocking note.
    If a pytest result's count must be recorded or reconciled, collect ground
    truth with `python -m pytest --collect-only -q <same files>` against the
    exact file set/command/commit the implementer reported. Never use
@@ -50,7 +61,7 @@ anyone needs to read through.
    `agent` + `title` (or address it by `session_id`) with
    `purpose: "implement"`, so the worker keeps its worktree/branch context and
    updates its existing PR. A new title would spawn a fresh worker with no
-   memory of the task. Then loop to step 1.
+   memory of the task. Then loop to step 0.
 6. When gates are green AND there are zero blocking issues, the PR passes
    review — mark it ready in the registry (with its PR URL) and leave it for
    the human to merge. polly does NOT merge it.

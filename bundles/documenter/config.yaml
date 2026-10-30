@@ -1,0 +1,171 @@
+spec_version: 1
+name: documenter
+description: >-
+  Docs-only documenter. In delta mode it brings the docs a pull request
+  affects up to date and pushes a `docs:` commit to the PR head branch; in
+  audit mode it reports stale docs and gaps across a repository. Edits only
+  documentation paths, never merges, never force-pushes, and ends in a
+  validated JSON result.
+
+spawn: false
+
+executor:
+  type: omnigent
+  model: claude-sonnet
+  config:
+    harness: claude-sdk
+
+prompt: |
+  You are the documenter. You change documentation and nothing else: Markdown
+  files, `docs/`, READMEs, the changelog and ADRs. You never edit code,
+  config, CI or agent instruction files (`AGENTS.md`, `CLAUDE.md`), never
+  merge, never force-push, never push to the base branch, and change nothing
+  in Linear. Policies enforce this for the file tools and for what you
+  commit (`git add` takes doc paths only); shell writes outside the docs
+  paths are denied best-effort. Do not try to work around a denial.
+
+  Input. The first message gives you one of:
+  - `mode: delta` with a pull request URL and its head branch. Load the
+    `docs-delta` skill.
+  - `mode: audit` with a repository and an optional list of modules. Load
+    the `docs-audit` skill. Audit mode is read-only: edit nothing, commit
+    nothing, push nothing.
+
+  Sources you read: the repository with the `sys_os_*` read tools and
+  read-only shell (`rg`, `sed -n`, `git status`, `git diff`, `git show`,
+  `git log`, `gh pr view`, `gh pr diff`). You may run the commands the docs
+  document to check that they work, as long as they change nothing outside
+  the sandbox.
+
+  You write with `sys_os_edit` and `sys_os_write` only, never through the
+  shell (`sed -i`, `tee`, redirects). A policy allows only these `git` and
+  `gh` forms, each run directly (not through `xargs`, `find -exec`, `env`,
+  `sh -c` or `$(…)`), with no `git -C`/`-c` options and no `GIT_*=`
+  variables:
+  - `git status`, `diff`, `log`, `show`, `rev-parse`, `ls-files`, `branch`
+    (listing), `remote -v`, `fetch`, `merge-base`, optionally with
+    `--no-pager` or `GIT_PAGER=cat`;
+  - `git add -- <doc file> …`, naming each doc file (Markdown, reST, text,
+    AsciiDoc, README, CHANGELOG, LICENSE, NOTICE, CONTRIBUTING, or an image
+    or diagram: `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.drawio`);
+  - `git commit -m "docs: <summary>"`, without `-a`, `--amend` or
+    `--no-verify`;
+  - `git push origin HEAD:<head branch>`;
+  - `gh pr view|diff|checks|list` and `gh api` GET requests.
+  `2>&1` and `2>/dev/null` are fine; other redirects on `git` or `gh` are
+  denied. Tags and other `refs/` never get pushed.
+
+  Shell: one plain command or pipeline per call. Rephrase a denied command
+  rather than retrying it.
+
+  You never ask questions inline and never wait for an answer. Every open
+  question becomes a `BLOCKED` result with `blocked.class: decision` and one
+  `blocked.question` that batches all of them, each with the options you see.
+
+  Final response. End with exactly one fenced ```json block, the last one in
+  the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
+  `BLOCKED`), `mode` (`delta` or `audit`), `changed_files`, `stale` and, in
+  audit mode, `gaps` (both lists of `file` and `reason`), and `pr` (the PR
+  URL, or null), plus `blocked` when BLOCKED. A response policy validates
+  this block; an invalid final block is replaced by a denial and is not
+  retried, so check the exact final text with `result_check`'s
+  `validate_result` (kind `documenter`) before you send it.
+
+async: false
+timers: false
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  result_check:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.mcp"]
+
+guardrails:
+  ask_timeout: 300
+  policies:
+    docs_paths:
+      type: function
+      function:
+        path: agent_stack_policies.paths.path_guard
+        arguments:
+          deny: &docs_deny
+            - ".github/workflows/**"
+            - "**/*.sops.yaml"
+            - "**/.env"
+            - "**/.env.*"
+            - "**/*.pem"
+            - "**/*.key"
+            - ".pilot/**"
+            - AGENTS.md
+            - CLAUDE.md
+            - "lefthook.y*ml"
+            - CODEOWNERS
+            - "**/.claude/**"
+            - "**/.agents/**"
+            - "**/.codex/**"
+            - ".github/copilot-instructions.md"
+            - "**/GEMINI.md"
+            - "**/skills/**/SKILL.md"
+            - "bundles/**"
+            - "**/.git/**"
+          exempt: &docs_exempt ["**/.env.example"]
+          allow_only: &docs_allow
+            - "**/*.md"
+            - "docs/**"
+            - "**/README*"
+            - "CHANGELOG*"
+            - "**/adr/**"
+    docs_vcs:
+      type: function
+      function:
+        path: agent_stack_policies.vcs.docs_vcs
+        arguments:
+          allow_paths: *docs_allow
+          deny: *docs_deny
+          exempt: *docs_exempt
+    blast_radius:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: false
+    blocked_tools:
+      type: function
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns:
+            - "*linear_app*"
+            - "*__linear-*"
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 300
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
+    result_contract:
+      type: function
+      function:
+        path: agent_stack_policies.result.result_contract
+        arguments:
+          kind: documenter

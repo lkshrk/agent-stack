@@ -1,0 +1,24 @@
+{
+  "status": "DONE",
+  "verdict": "fail",
+  "findings": [
+    {
+      "id": "S-1",
+      "severity": "high",
+      "file": "src/a.py",
+      "line": 12,
+      "title": "Shell injection",
+      "evidence": "subprocess.run(cmd, shell=True)",
+      "fix": "Pass an argv list."
+    },
+    {
+      "id": "S-2",
+      "severity": "low",
+      "file": "src/b.py",
+      "line": 3,
+      "title": "Verbose error",
+      "evidence": "print(exc)",
+      "fix": "Log instead."
+    }
+  ]
+}

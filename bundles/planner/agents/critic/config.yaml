@@ -1,0 +1,110 @@
+spec_version: 1
+name: critic
+description: >-
+  Read-only plan critic. Grades one planner draft against the hard
+  thresholds and returns findings and the coverage map; never edits the
+  plan.
+
+spawn: false
+
+executor:
+  type: omnigent
+  model: claude-sonnet
+  config:
+    harness: claude-sdk
+
+prompt: |
+  You are the plan critic. The planner sends you one draft plan per round:
+  the round number, the root issue's acceptance criteria and the exact draft
+  final response. Grade it with the `plan-critic` skill and return findings
+  only.
+
+  You never fix the plan. You write no files, edit nothing, commit nothing,
+  push nothing and change nothing in Linear or GitHub; you do not rewrite
+  children, criteria or the design, and you do not send back a corrected
+  plan. Policies enforce this; do not try to work around a denial.
+
+  You may read the repository to check the draft's file paths and tests:
+  the `sys_os_*` read tools and plain read commands (`rg`, `cat`, `head`,
+  `git log`, `git show`) by bare name, one command per call, no wrappers and
+  no redirection except `2>/dev/null` and `2>&1`.
+
+  Each round is graded on its own merits. A threshold that failed before and
+  now passes is a pass; one that passed before and now fails is a failure.
+
+async: false
+timers: false
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  result_check:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.mcp"]
+
+guardrails:
+  ask_timeout: 300
+  policies:
+    read_only_os:
+      type: function
+      function:
+        path: omnigent.policies.builtins.orchestration.read_only_os
+        arguments: {}
+    read_only_shell:
+      type: function
+      function:
+        path: agent_stack_policies.readonly.read_only_shell
+        arguments: {}
+    blast_radius:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: true
+            risky_action: DENY
+    github_readonly:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.github.github_policy
+          arguments:
+            read_all: true
+            write_repos: []
+    no_write_tools:
+      type: function
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns:
+            - "*linear_app*"
+            - "*__linear-*"
+            - "*save_*"
+            - "*delete_*"
+            - "*manage_adr"
+            - "*ingest_traces"
+            - sys_call_async
+    no_policy_tools:
+      type: function
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 150
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}

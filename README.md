@@ -24,7 +24,7 @@ Deployment manifests, secrets, databases and routes live in the h-cloud reposito
 | [`plugins/`](plugins/README.md) | Plugins `runner`, `linear`, `personal` |
 | [`cmd/`](cmd/README.md) | Go programs: `signal-shim`, `token-minter`, `linear-bridge` |
 | [`config/`](config/README.md) | Omnigent server and Hermes configuration baked into images |
-| [`policies/`](policies/README.md) | Policies other workloads fetch at runtime (PR-Agent) |
+| [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime and the Omnigent policy package baked into the Omnigent images |
 | `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests for Claude Code and Codex |
 | `.github/workflows/` | CI, image build, release and the WoW refresh |
 
@@ -50,7 +50,7 @@ Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a vers
 
 | Workflow | Purpose |
 | --- | --- |
-| `ci.yml` | `go vet`, `go test -race`, golangci-lint, and a build of every changed image on pull requests |
+| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
 | `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
 | `release.yml` | `semantic-release` on `main`, then calls `images.yml` |
 | `wow-season-updates.yml` | Weekly WoW season refresh with Claude Code. Needs secret `WOW_REFRESH_API_KEY` and variables `WOW_REFRESH_BASE_URL`, `WOW_REFRESH_MODEL`; the key is the LiteLLM key `agent-stack-ci` in the ops-agents team |

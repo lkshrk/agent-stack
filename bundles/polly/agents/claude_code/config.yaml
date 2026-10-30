@@ -27,9 +27,20 @@ prompt: |
     you mention counts, distinguish collected test cases from test functions.
   - Commit messages and PR texts carry no AI attribution: no Co-authored-by
     trailer, no session link, no note that the change was generated.
-  - When green, push your task branch and open a PR with `gh pr create` (clear
+  - When green, push your task branch with an explicit destination,
+    `git push -u origin HEAD:<task-branch>` (a bare `git push` or
+    `git push origin HEAD` is denied), and open a PR with `gh pr create` (clear
     title, what changed, how you verified). Never push to a protected branch
     (e.g. main) or force-push — open a PR and let it be reviewed/merged.
+  - Verify through the repository's own dev and test entry points (Makefile
+    targets, package scripts, compose files, the CI workflow's steps). Run e2e
+    tests only against loopback URLs (`localhost`, `127.0.0.1`). For a UI
+    change, push the e2e run's PNG screenshots to a `pr-assets/<task-branch>`
+    branch and link their blob URLs in a PR comment. When the sandbox can't
+    run e2e (for example it needs Docker), write `e2e: not run (environment)`
+    in your result; that note doesn't block review.
+  - Never edit a path the policy forbids; if the task needs one, ask through
+    the orchestrator.
 
   REVIEW — verify another agent's diff (you are given the diff + the acceptance
   contract):
@@ -51,15 +62,43 @@ os_env:
   sandbox:
     type: none
 
-# Implementers open their own PRs, so push / gh pr create are allowed
-# (gate_pushes: false). Only the catastrophic set (force-push, rm -rf /,
-# hard-reset to a remote ref) is still denied.
 guardrails:
+  ask_timeout: 300
   policies:
+    path_guard:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.paths.path_guard
+        arguments:
+          deny:
+            - ".github/workflows/**"
+            - "**/*.sops.yaml"
+            - "**/.env"
+            - "**/.env.*"
+            - "**/*.pem"
+            - "**/*.key"
+            - ".pilot/**"
+            - AGENTS.md
+            - CLAUDE.md
+            - "lefthook.y*ml"
+            - CODEOWNERS
+          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc]
+          startup_home: /home/omnigent
+          exempt: ["**/.env.example"]
     blast_radius:
       type: function
       on: [tool_call]
       function:
-        path: omnigent.inner.nessie.policies.blast_radius
+        path: agent_stack_policies.unattended.deny_on_ask
         arguments:
-          gate_pushes: false
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: false
+    no_policy_tools:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]

@@ -1,0 +1,1025 @@
+import unittest
+
+from agent_stack_policies.merge import no_merge
+
+from . import tool_call_event
+
+EVENTS = [
+    tool_call_event("bash", {"command": "gh pr merge 5 --squash"}),
+    tool_call_event("bash", {"command": "git push -u origin feat/x"}),
+    tool_call_event("bash", {"command": "git push --force origin feat/x"}),
+    tool_call_event("bash", {"command": "echo `date` push"}),
+    tool_call_event("bash", {"command": 'echo "unterminated push'}),
+    tool_call_event("bash", {}),
+    tool_call_event("mcp__github__merge_pull_request", {"number": 1}),
+    tool_call_event("Read", {"file_path": "a"}),
+    {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}},
+    {"type": "other"},
+]
+
+
+def run(command, **kwargs):
+    return no_merge(**kwargs)(tool_call_event("bash", {"command": command}))
+
+
+class NoMergeTest(unittest.TestCase):
+    def assertDenied(self, command, text=None, **kwargs):
+        decision = run(command, **kwargs)
+        self.assertIsNotNone(decision, command)
+        self.assertEqual(decision["result"], "DENY", command)
+        self.assertTrue(decision["reason"].startswith("agent-stack: "))
+        if text:
+            self.assertIn(text, decision["reason"], command)
+
+    def test_no_merge_gh_pr_merge(self):
+        self.assertDenied("gh pr merge 5 --squash")
+        self.assertDenied("gh pr merge")
+        self.assertDenied("cd x && gh pr merge 5")
+        self.assertDenied("gh -R o/r pr merge 5")
+
+    def test_no_merge_gh_api_put(self):
+        self.assertDenied("gh api -X PUT repos/o/r/pulls/5/merge")
+        self.assertDenied("gh api -X POST repos/o/r/merges -f base=main")
+
+    def test_no_merge_gh_api_put_path_suffixes(self):
+        for path in (
+            "repos/o/r/pulls/5/merge#x",
+            "/repos/o/r/pulls/5/merge/",
+            "repos/o/r/pulls/5/merge?x=1",
+            "repos/o/r/merges/",
+            "repos/o/r/merges#x",
+        ):
+            with self.subTest(path=path):
+                self.assertDenied(f"gh api -X PUT {path}")
+                self.assertDenied(f"bash -lc 'gh api -X PUT {path}'")
+                listed = no_merge()(tool_call_event("bash", {"command": ["bash", "-lc", f"gh api -X PUT {path}"]}))
+                self.assertEqual(listed["result"], "DENY")
+        self.assertEqual(run("gh api repos/o/r/pulls/5/mergeable")["result"], "ALLOW")
+
+    def test_no_merge_gh_api_path_case_insensitive(self):
+        for path in ("repos/o/r/pulls/5/MERGE", "repos/o/r/PULLS/5/merge", "repos/o/r/Pulls/5/Merge", "repos/o/r/MERGES"):
+            with self.subTest(path=path):
+                self.assertDenied(f"gh api -X PUT {path}")
+                listed = no_merge()(tool_call_event("bash", {"command": ["gh", "api", "-X", "PUT", path]}))
+                self.assertEqual(listed["result"], "DENY")
+        self.assertEqual(run("gh api repos/o/r/PULLS/5/MERGEABLE")["result"], "ALLOW")
+
+    def test_merge_named_paths_with_substitution_allowed(self):
+        for command in (
+            "git diff $(git merge-base main HEAD) -- src/merge/x.py",
+            'rg -n "$(git rev-parse HEAD)" src/Merge/',
+            "git log --oneline $(git merge-base main HEAD)..HEAD -- lib/merges/",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+        self.assertDenied("gh api -X PUT https://api.github.com/repos/$o/r/merges -f base=main")
+
+    def test_no_merge_variable_pr_number_with_suffix(self):
+        for command in (
+            "n=5; gh api -X PUT repos/o/r/pulls/$n/merge#x",
+            "gh api -X PUT repos/o/r/pulls/$N/MERGE",
+            "gh api -X PUT repos/o/r/pulls/$n/merge/",
+            "gh api -X PUT repos/o/r/pulls/$n/merge?x=1",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_no_merge_gh_alias_extension_and_graphql_files_denied(self):
+        for command in (
+            "gh alias set m 'pr merge'",
+            "gh alias import /tmp/aliases.yml",
+            "gh alias delete m",
+            "gh alias",
+            "gh -R o/r alias set m 'pr merge'",
+            "gh extension install x/y",
+            "gh ext install x/y",
+            "gh extension upgrade --all",
+            "gh extension exec y",
+            "gh api graphql -F query=@/tmp/q.graphql",
+            "gh api graphql -f query=@/tmp/q.graphql",
+            "gh api graphql -Fquery=@/tmp/q.graphql",
+            "gh api graphql --field=query=@- < /tmp/q",
+            "gh api graphql --input /tmp/q.json",
+            "gh api graphql --input=- < /tmp/q.json",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh alias list",
+            "gh extension list",
+            "gh ext ls",
+            "gh api graphql -f query='{ viewer { login } }'",
+            "gh api graphql -F owner=o -f query='query { repository(owner: \"o\", name: \"r\") { id } }'",
+            "gh api repos/o/r/pulls/5 --input /tmp/x.json",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_graphql_endpoint_forms_and_expansions(self):
+        mutation = "mutation{mergePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}"
+        for command in (
+            "gh extensions install x/y",
+            "gh extensions exec y",
+            "gh extensions upgrade --all",
+            "gh api /graphql --input q.json",
+            "gh api /graphql -F query=@q",
+            "gh api https://api.github.com/graphql --input q.json",
+            "gh api https://ghe.example.com/api/graphql -F query=@q",
+            "gh api GRAPHQL -F query=@q",
+            "gh api /graphql/ --input q.json",
+            "gh api 'https://api.github.com/graphql?x=1' --input q.json",
+            f"gh api /graphql -f query='{mutation}'",
+            f"gh api https://api.github.com/graphql -f query='{mutation}'",
+            "gh api graphql -f query='mutation{mergeBranch(input:{repositoryId:\"x\",base:\"main\",head:\"f\"}){clientMutationId}}'",
+            "gh api graphql -f query='mutation{enqueuePullRequest(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+            "gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'",
+            'gh api graphql -f query="$(cat q.graphql)"',
+            'gh api graphql -f query="`cat q`"',
+            'gh api graphql -f query="$Q"',
+            "gh api graphql -f query=$Q",
+            'gh api graphql -f "query=${Q}"',
+            "gh api /graphql --field query=\"$(cat q)\"",
+            "gh api graphql -f query='{ viewer { login } }'\"$X\"",
+            "GH_CONFIG_DIR=/tmp/g gh m 5",
+            "env GH_CONFIG_DIR=/tmp/g gh m 5",
+            "export GH_CONFIG_DIR=/tmp/g; gh m 5",
+            "XDG_CONFIG_HOME=/tmp/x gh m 5",
+            "export XDG_CONFIG_HOME=/tmp/x && gh pr view 5",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh extensions list",
+            "gh api graphql -f query='{ viewer { login } }'",
+            "gh api /graphql -f query='{ viewer { login } }'",
+            "gh api graphql -F owner=o -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api graphql -F owner=\"$OWNER\" -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api repos/o/r/issues/5/comments -f body='see /graphql docs'",
+            "gh api repos/o/r/contents/graphql.md",
+            "gh pr view 5 --repo o/r",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+        listed = no_merge()(tool_call_event("bash", {"command": ["gh", "api", "graphql", "-f", "query=$Q"]}))
+        self.assertEqual(listed["result"], "ALLOW")
+
+    def test_no_merge_graphql_quoted_keys_and_stdin_wrappers(self):
+        for command in (
+            "gh api graphql -f 'query'=\"$(cat /tmp/q)\"",
+            "gh api graphql -f \"query\"=\"$Q\"",
+            "gh api graphql -f quer\\y=\"$(cat /tmp/q)\"",
+            "gh api graphql -f quer{y,}=\"$(cat /tmp/q)\"",
+            "gh api graphql -f quer{y,}='{ viewer { login } }'",
+            "gh api graphql -f query\"=\"$(cat /tmp/q)",
+            "gh api graphql -f 'query'='mutation { merge'\"$X\"'(input:{}) { x } }'",
+            "cat /tmp/q | xargs -0 -I{} gh api graphql -f query={}",
+            "xargs -a /tmp/q -0 -I{} gh api graphql -f query={}",
+            "cat /tmp/q | parallel gh api graphql -f query={}",
+            "cat /tmp/q | xargs -I{} gh api /graphql -f query={}",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+            if "xargs" not in command and "parallel" not in command:
+                with self.subTest(wrapped=command):
+                    quoted = command.replace("'", "'\"'\"'")
+                    self.assertEqual(run(f"bash -c '{quoted}'")["result"], "DENY")
+        for command in (
+            "gh api graphql -f 'query'='{ viewer { login } }'",
+            "gh api graphql -f \"query\"='query($o: String!) { repository(owner: $o, name: \"r\") { id } }' -F o=x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_no_gh_or_git_through_xargs_or_parallel(self):
+        for command in (
+            "ls | xargs -I{} gh pr view {}",
+            "cat ids | xargs -I{} gh api repos/o/r/issues/{}",
+            "gh pr list --json number -q '.[].number' | xargs -n1 gh pr checks",
+            "echo merge 5 | xargs gh pr",
+            "echo 'pr merge 5' | xargs gh",
+            "printf 'api\\0graphql\\0-f\\0query=x' | xargs -0 gh",
+            "echo graphql | xargs -I{} gh api {} -f query='mutation { mergePullRequest(input:{}) { x } }'",
+            "cat /tmp/q | xargs -0 -I{} sh -c 'gh api graphql -f query=\"{}\"'",
+            "cat /tmp/q | xargs -0 -I{} bash -c 'gh api graphql -f query={}'",
+            "ls | xargs git status",
+            "echo feat/x | xargs git push origin",
+            "timeout 5 xargs gh pr view < ids",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("run gh/git directly, not through xargs/parallel", decision["reason"])
+        for command in ("ls | xargs -I{} rg -n x {}", "ls | xargs wc -l"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_graphql_literal_fields_only(self):
+        q = "\"$(cat /tmp/q)\""
+        for command in (
+            'bash -c "gh api graphql -f query=\\$Q"',
+            'bash -c "gh api graphql -f query=\\"\\$(cat /tmp/q)\\""',
+            'bash -c "gh api graphql -f query=\\`cat /tmp/q\\`"',
+            'sh -c "gh api graphql -f \'query\'=\\"\\$(cat /tmp/q)\\""',
+            f"gh api graphql -f $'\\x71uery'={q}",
+            f"gh api graphql -f $'\\161uery'={q}",
+            f"gh api graphql -f q$'u'ery={q}",
+            f'gh api graphql -f "$K"={q}',
+            f"gh api graphql -f $K={q}",
+            'gh api graphql -f "$K=$V"',
+            'gh api graphql -f "$F"',
+            "gh api graphql -F $F",
+            'gh api graphql "$@"',
+            f"gh api graphql -f quer?={q}",
+            f"gh api graphql -f quer[y]={q}",
+            "gh api graphql -f novalue",
+            "gh api graphql -iFquer{y,}=@/tmp/q",
+            "gh api graphql -iF'quer'{y,}=@/tmp/q",
+            "gh api -iFquer{y,}=@/tmp/q graphql",
+            "gh api graphql --silent -iFquer{y,}=@/tmp/q",
+            'bash -c "gh api graphql -iFquer{y,}=@/tmp/q"',
+            "K=query; gh api graphql -iF$K=@/tmp/q",
+            'K=query; gh api graphql -iF"$K"=@/tmp/q',
+            "gh api graphql -iFquer?=@/tmp/q",
+            "gh api graphql -iF=quer{y,}=@/tmp/q",
+            "gh api graphql -if quer{y,}=x",
+            "E=graphql; gh api $E -f query='mutation { mergePullRequest(input:{}) { x } }'",
+            "gh api \"$E\" --input /tmp/q.json",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in (
+            "gh api graphql -F owner=$OWNER -f query='query($owner: String!) { repository(owner: $owner, name: \"r\") { id } }'",
+            "gh api graphql -F owner=\"$OWNER\" -F repo='{repo}' -f query='query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { id } }'",
+            "gh api graphql -F owner={owner} -f query='{ viewer { login } }'",
+            "gh api graphql -f query='{ viewer { login } }' -iF owner=x",
+            "gh api graphql -iF owner=x -f query='{ viewer { login } }'",
+            "gh api graphql -iXPOST -f query='{ viewer { login } }'",
+            "gh api graphql --paginate -f query='query($endCursor: String) { viewer { login } }' --jq '.data.viewer'",
+            "gh api graphql -f query='{ viewer { login } }' --template '{{.data.viewer.login}}'",
+            "gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: \"x\"}) { thread { id } } }'",
+            "bash -c \"gh api graphql -f query='{ viewer { login } }'\"",
+            "gh api repos/o/r/issues/5/comments -f body=\"$BODY\"",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_xargs_parallel_require_literal_non_shell_programs(self):
+        for command in (
+            "echo merge | xargs -I{} sh -c 'g\"\"h pr {} 5'",
+            "echo merge | xargs -I{} sh -c 'g\\h pr {} 5'",
+            "echo merge | xargs -I{} bash -c 'g''h pr {} 5'",
+            "echo merge | xargs -I{} bash -c $'\\x67h pr {} 5'",
+            "echo merge | xargs -I{} eval \"g\"\"h pr {} 5\"",
+            "echo merge | xargs -I{} env sh -c 'gh pr {} 5'",
+            "echo merge | xargs -I{} python3 -c 'import os'",
+            "echo 'gh pr merge 5' | xargs -I{} sh -c '{}'",
+            "printf 'gh pr merge 5\\0' | xargs -0 sh -c",
+            "xargs",
+            "xargs gh pr view",
+            "xargs git status",
+            "timeout 5 xargs gh pr view < ids",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("xargs/parallel", decision["reason"])
+        for command in (
+            "ls | xargs wc -l",
+            "ls | xargs -I{} rg -n x {}",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_stdin_allowlist_and_shell_families(self):
+        for command in (
+            "xargs find",
+            "xargs uv",
+            "xargs npm",
+            "xargs ruff check",
+            "xargs rm -f",
+            "xargs sort -o /tmp/x",
+            "xargs -I XX timeout 5 XX pr merge 5",
+            "xargs -I% nice % pr merge 5",
+            "parallel {.} pr merge 5 ::: gh.x",
+            "parallel --arg-sep ,,, ,,, gh",
+            "xargs -I{} rbash -c 'gh pr merge 5'",
+            "xargs -I{} busybox sh -c 'gh pr merge 5'",
+            "xargs -I{} python3.12 -c 'pass'",
+            "xargs -I{} gawk 'BEGIN{}'",
+            'rbash -c "git push --force origin HEAD:main"',
+            'rbash -c "gh pr merge 5"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ("xargs wc -l", "xargs -I{} rg -n x {}"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_round14b_shell_and_stdin_regressions(self):
+        for command in (
+            'printf -- "-o\\n/home/omnigent/.bashrc\\n/tmp/p\\n" | xargs sort',
+            'printf "/tmp/p\\n/home/omnigent/.bashrc\\n" | xargs uniq',
+            'echo x | xargs yq',
+            'parallel -I cat cat pr merge 5 ::: gh',
+            'xargs -I XX XX pr merge 5',
+            'zsh5 -c "git push --force origin HEAD:main"',
+            'zsh5 -c "gh pr merge 5"',
+            '/usr/bin/zsh5 -c "git push --force origin HEAD:main"',
+            'bash5.2 -c "gh pr merge 5"',
+            'rbash -c "git push --force origin HEAD:main"',
+            'fish -c "gh pr merge 5"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        for command in ('./scripts/test.sh', './scripts/lint.sh --fix', 'ssh -c aes128-ctr host true', 'push'):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+
+    def test_no_merge_xargs_replacements_come_from_xargs_options_only(self):
+        for command in (
+            "find . -name '*.py' | xargs grep -ir todo",
+            "git ls-files | xargs grep -ie foo",
+            "git ls-files | xargs ls -il",
+            "echo x | xargs -i rg foo {}",
+            "echo x | xargs --replace rg foo {}",
+            "echo x | xargs -n 1 grep -I x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+        for command in (
+            "echo gh | xargs -I cat cat pr merge 5",
+            "echo gh | xargs -Icat cat pr merge 5",
+            "echo gh | xargs -0I cat cat pr merge 5",
+            "echo gh | xargs -n 1 -I cat cat pr merge 5",
+            "echo gh | xargs -icat cat pr merge 5",
+            "echo gh | xargs -0icat cat pr merge 5",
+            "echo gh | xargs --replace=cat cat pr merge 5",
+            "echo gh | xargs --rep=cat cat pr merge 5",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("not through xargs", decision["reason"])
+
+    def test_no_merge_parallel_denied(self):
+        for command in (
+            "parallel",
+            "parallel --version",
+            "echo a | parallel echo {}",
+            "parallel echo {} ::: a",
+            "parallel rg -n x {} ::: src/a.py",
+            "/usr/bin/parallel rg -n x {} ::: src/a.py",
+            "parallel --rpl='cat s/.*/gh/' cat pr merge 5 ::: x",
+            "parallel --rpl=cat\\ s/.*/gh/ cat pr merge 5 ::: x",
+            "parallel -I cat cat pr merge 5 ::: gh",
+            "parallel ::: 'gh pr merge 5'",
+            "parallel {} ::: 'gh pr merge 5'",
+            "parallel {1} {2} {3} {4} ::: gh ::: pr ::: merge ::: 5",
+            "parallel 'g\"\"h pr {} 5' ::: merge",
+            "parallel :::: /tmp/cmds",
+            "ls | parallel git -C {} status",
+            "cat /tmp/q | parallel sh -c \"'gh api graphql -f query={}'\"",
+            "xargs parallel echo",
+            "bash -c 'parallel echo ::: a'",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("parallel is not available; run commands directly", decision["reason"])
+
+    def test_no_merge_shells_are_named_stems(self):
+        for command in ("push", "./push", "hash -r", "hash git", "ssh -c aes128-ctr host true", "busybox ls"):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "ALLOW")
+        for command in (
+            'zsh-5.9 -c "gh pr merge 5"',
+            'bash-5.2 -c "git push --force origin HEAD:main"',
+            'ksh93 -c "gh pr merge 5"',
+            'busybox sh -c "gh pr merge 5"',
+            'busybox ash -c "gh pr merge 5"',
+            'rzsh -c "gh pr merge 5"',
+            '/usr/bin/rzsh -c "git push --force origin HEAD:main"',
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(run(form)["result"], "DENY")
+
+    def test_no_merge_denies_unwrapped_shell_launchers(self):
+        for command in (
+            "capsh -- -c 'gh pr merge 5'",
+            "capsh --caps= -- -c 'gh pr merge 5'",
+            "/usr/sbin/capsh --print",
+            "sudo capsh -- -c 'gh pr merge 5'",
+            "runuser -l omnigent -c 'gh pr merge 5'",
+            "runuser -c 'gh pr merge 5' omnigent",
+            "runuser -u omnigent -- ls",
+            "sg omnigent -c 'gh pr merge 5'",
+            "sg omnigent 'gh pr merge 5'",
+            "setpriv --reuid=1000 gh pr merge 5",
+            "echo 'gh pr merge 5' | setpriv bash",
+            "unshare -r bash -c 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | unshare -r",
+            "nsenter -t 1 -- gh pr merge 5",
+            "echo 'gh pr merge 5' | nsenter -t 1",
+            "chroot / bash -c 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | chroot /",
+            "taskset 1 capsh -- -c 'gh pr merge 5'",
+            "prlimit capsh -- -c 'gh pr merge 5'",
+            "setarch x86_64 capsh -- -c 'gh pr merge 5'",
+            "linux32 capsh -- -c 'gh pr merge 5'",
+            "linux64 capsh -- -c 'gh pr merge 5'",
+            "x86_64 capsh -- -c 'gh pr merge 5'",
+            "i386 capsh -- -c 'gh pr merge 5'",
+            "xvfb-run capsh -- -c 'gh pr merge 5'",
+            "bwrap --bind / / capsh -- -c 'gh pr merge 5'",
+            "start-stop-daemon -S -x /bin/bash -- -c 'gh pr merge 5'",
+            "chrt -o 0 sg omnigent 'gh pr merge 5'",
+            "echo 'gh pr merge 5' | taskset 1 setarch x86_64",
+            "command taskset 1 capsh -- -c 'gh pr merge 5' -V",
+            "command chrt -v -o 0 capsh -- -c 'gh pr merge 5'",
+            "command -p bwrap --bind / / -v capsh -- -c 'gh pr merge 5'",
+            "command taskset 1 capsh -- -c 'claude -p hi' -V",
+            "/lib64/ld-linux-x86-64.so.2 /usr/bin/gh pr merge 5",
+            "ld.so /usr/bin/gh pr merge 5",
+            "taskset 1 capsh -- -c 'gh pr merge 5' command -v",
+            "nice taskset 1 command -v capsh",
+            "strace -f -o /dev/null taskset 1 capsh -- -c 'gh pr merge 5'",
+            "ltrace -f taskset 1 capsh -- -c 'gh pr merge 5'",
+            "gdb -batch -ex run --args taskset 1 capsh -- -c 'gh pr merge 5'",
+            "valgrind taskset 1 capsh -- -c 'gh pr merge 5'",
+            "env -a x command -v capsh -- -c 'gh pr merge 5'",
+            "env --argv0=x command -V taskset 1 capsh -- -c 'gh pr merge 5'",
+            "env -a x taskset 1 capsh -- -c 'gh pr merge 5'",
+            "find . -exec ls {} \; -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+            "find . -exec ls {} \; -o -exec taskset 1 capsh -- -c 'gh pr merge 5' \;",
+            "find . \( -exec command -v {} \; , -exec taskset 1 capsh -- -c 'gh pr merge 5' \; \)",
+        ):
+            words = command.split("| ")[-1].split()
+            name = next((word.rsplit("/", 1)[-1] for word in words if word.rsplit("/", 1)[-1] in {"capsh", "runuser", "sg", "setpriv", "unshare", "nsenter", "chroot", "taskset", "prlimit", "setarch", "linux32", "linux64", "x86_64", "i386", "uname26", "xvfb-run", "bwrap", "start-stop-daemon", "chrt", "strace", "ltrace", "gdb", "valgrind", "ld.so"}), words[1 if words[0] == "sudo" else 0].rsplit("/", 1)[-1])
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = run(form)
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn(f"{name} is not allowed; run commands directly", decision["reason"])
+        for command in ("which capsh", "grep -r runuser docs", "rg sg src", "git log --grep chroot", "git grep -n taskset", '[ "$(uname -m)" = x86_64 ]', "test x86_64 = x86_64", "command -v bwrap", "command -V bwrap", "command -pv bwrap", "command -vp bwrap", "X=1 command -v bwrap", "if command -v bwrap >/dev/null; then echo y; fi", "env command -v bwrap", "time command -v bwrap", "command -v -- bwrap", "which strace", "rg gdb docs", "cd sg", "find . -name chroot", "docker build --platform linux/x86_64 .", "ls /usr/sbin/runuser"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_gh_api_read_allowed(self):
+        self.assertEqual(run("gh api repos/o/r/pulls/5")["result"], "ALLOW")
+
+    def test_no_merge_push_main(self):
+        self.assertDenied("git push origin HEAD:main")
+        self.assertDenied("git push origin main")
+        self.assertDenied("git push origin refs/heads/master")
+        self.assertDenied("git push origin HEAD:refs/heads/main")
+        self.assertDenied("git push origin --delete main")
+        self.assertDenied("git push origin :main")
+        for command in (
+            "git push origin :",
+            "git push -u origin :",
+            "git -C .worktrees/t1 push origin :",
+            "git push -o ci.skip origin :",
+            "bash -lc 'git push origin :'",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, "git push origin HEAD:<branch>")
+
+    def test_no_merge_custom_protected_branches(self):
+        self.assertDenied("git push origin release", protected_branches=["release"])
+        self.assertEqual(run("git push origin main", protected_branches=["release"])["result"], "ALLOW")
+
+    def test_no_merge_feature_push_allowed(self):
+        self.assertEqual(run("git push -u origin feat/x")["result"], "ALLOW")
+        self.assertEqual(run("git push origin HEAD:feat/x")["result"], "ALLOW")
+
+    def test_no_merge_implicit_push_destination_denied(self):
+        for command in (
+            "git push",
+            "git push origin",
+            "git push -u origin",
+            "git push origin HEAD",
+            "git push -u origin HEAD",
+            "git push --set-upstream origin HEAD",
+            "git push origin @",
+            "git push origin HEAD feat/x",
+            "git -C .worktrees/t1 push",
+            "git push -o ci.skip origin",
+            "git push --push-option=ci.skip origin",
+            "git push --push-option ci.skip origin HEAD",
+            "bash -lc 'git push origin HEAD'",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, "git push origin HEAD:<branch>")
+        for command in (
+            "git push origin HEAD:feat/x",
+            "git push -u origin HEAD:feat/x",
+            "git push -o ci.skip origin HEAD:feat/x",
+            "git push --push-option=ci.skip origin feat/x",
+            "git -C .worktrees/t1 push -u origin HEAD:polly/t1",
+            "git push origin feat/x HEAD:feat/y",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_push_option_values_are_not_refspecs(self):
+        for command in (
+            "git push -uo ci.skip origin",
+            "git push -qo ci.skip origin",
+            "git push --push-opt ci.skip origin",
+            "git push --recurse-submodules no origin",
+            "git -C push push origin",
+            "git --work-tree push push origin",
+            "git push --rec no origin",
+            "git push --rep origin",
+            "git push --receive-pack x origin",
+            "git push --exe x origin",
+        ):
+            for form in (command, f"bash -lc '{command}'"):
+                with self.subTest(form=form):
+                    self.assertDenied(form, "git push origin HEAD:<branch>")
+                listed = no_merge()(tool_call_event("bash", {"command": ["bash", "-lc", command]}))
+                self.assertEqual(listed["result"], "DENY")
+        for command in (
+            "git push -uo ci.skip origin HEAD:feat/x",
+            "git push -o ci.skip -u origin HEAD:feat/x",
+            "git push -oci.skip origin HEAD:feat/x",
+            "git push -of origin HEAD:feat/x",
+            "git push --recurse-submodules no origin HEAD:feat/x",
+            "git push --recurse-submodules=check origin HEAD:feat/x",
+            "git push --push-opt=ci.skip origin feat/x",
+            "git -C push push origin HEAD:feat/x",
+            "git push --no-force origin feat/x",
+            "git push --no-tags origin HEAD:feat/x",
+            "git push --no-verify origin HEAD:feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_git_global_value_options(self):
+        for command in (
+            "git --attr-source push push origin",
+            "git --shallow-file push push origin",
+            "git --frobnicate push push origin",
+            "git --frobnicate push origin HEAD:feat/x",
+            "git --end-of-options push origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertDenied("git --frobnicate status", "unknown git option --frobnicate")
+        for command in (
+            "git -C .worktrees/t1 status",
+            "git --no-pager log -1",
+            "git -P log -1",
+            "git --git-dir=.git status",
+            "git --literal-pathspecs push origin HEAD:feat/x",
+            "git --attr-source HEAD push origin HEAD:feat/x",
+            "git --shallow-file x push -u origin HEAD:feat/x",
+            "git --no-optional-locks status",
+            "git --exec-path",
+            "git --version",
+            "git --list-cmds=main",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+    def test_no_merge_word_git_before_long_option_allowed(self):
+        for command in (
+            "rg -n git --hidden",
+            "grep -rn git --include '*.md' docs",
+            "rg -w git --type md docs",
+            "apt-get install -y git --no-install-recommends",
+            "echo use git --frob carefully",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "ALLOW")
+        for command in ("frob git --shallow-file push push origin", "frob git --frobnicate push origin HEAD:feat/x", "frob git --frob config alias.p push"):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_no_merge_end_of_options_in_push(self):
+        for command in (
+            "git push --end-of-options origin HEAD:feat/x -o HEAD:main",
+            "git push --end-of-options origin",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    self.assertEqual(no_merge()(tool_call_event("bash", {"command": form}))["result"], "DENY")
+        self.assertEqual(run("git push --end-of-options origin HEAD:feat/x")["result"], "ALLOW")
+
+    def test_no_merge_abbreviated_force_and_tag_flags_denied(self):
+        for command in (
+            "git push --force-w origin HEAD:feat/x",
+            "git push --force-with origin HEAD:feat/x",
+            "git push --force-w=feat/x origin HEAD:feat/x",
+            "git push --force-i origin HEAD:feat/x",
+            "git push -uf origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("force", decision["reason"])
+        for command in (
+            "git push --tag origin HEAD:feat/x",
+            "git push --follow origin HEAD:feat/x",
+            "git push --mirr origin",
+            "git push --al origin",
+            "git push --branches origin",
+            "git push --bran origin HEAD:feat/x",
+        ):
+            for form in (command, ["bash", "-lc", command]):
+                with self.subTest(form=form):
+                    decision = no_merge()(tool_call_event("bash", {"command": form}))
+                    self.assertEqual(decision["result"], "DENY")
+                    self.assertIn("tags or all refs", decision["reason"])
+        for command in ("git push --f origin HEAD:feat/x", "git push --forc origin HEAD:feat/x", "git push --no-forc origin HEAD:feat/x"):
+            with self.subTest(command=command):
+                self.assertDenied(command, "ambiguous")
+
+    def test_no_merge_force_push_denied(self):
+        for command in (
+            "git push --force origin feat/x",
+            "git push -f origin feat/x",
+            "git push --force-with-lease origin feat/x",
+            "git push --force-with-lease=feat/x origin feat/x",
+            "git push --force-if-includes origin feat/x",
+            "git push origin +feat/x",
+            "git push origin +HEAD:feat/x",
+        ):
+            self.assertDenied(command, "force-push")
+
+    def test_no_merge_short_ref_and_tag_pushes_denied(self):
+        for command in (
+            "git push origin HEAD:heads/main",
+            "git push origin heads/main",
+            "git push origin HEAD:heads/master",
+            "git push origin +HEAD:heads/main",
+            "git push origin HEAD:tags/v1",
+            "git push origin HEAD:refs/tags/v1",
+            "git push origin refs/tags/v1",
+            "git push origin tags/v1",
+            "git push origin HEAD:refs/notes/x",
+            "git push origin HEAD:refs/heads/refs/heads/main",
+            "git push --tags origin",
+            "git push origin --tags",
+            "git push --follow-tags origin HEAD:feat/x",
+            "git push --mirror origin",
+            "git push --all origin",
+        ):
+            self.assertDenied(command)
+        self.assertDenied("git push origin HEAD:heads/main", "main")
+        self.assertDenied("git push origin HEAD:refs/tags/v1", "tag")
+
+    def test_no_merge_branch_pushes_still_allowed(self):
+        for command in ("git push origin HEAD:feat/x", "git push -u origin feat/x", "git push origin refs/heads/feat/x"):
+            self.assertEqual(run(command)["result"], "ALLOW", command)
+
+    def test_no_merge_substitution_denied(self):
+        self.assertDenied("git push origin `echo main`")
+        self.assertDenied("git push origin $(echo main)")
+        self.assertDenied("gh pr $(echo merge) 5")
+
+    def test_no_merge_substitution_unrelated_allowed(self):
+        self.assertEqual(run("echo $(date)")["result"], "ALLOW")
+
+    def test_no_merge_nested_shell_denied(self):
+        self.assertDenied("bash -c 'gh pr merge 5'")
+        self.assertDenied("sh -c \"git push origin main\"")
+
+    def test_no_merge_unparseable_statement_denied(self):
+        self.assertDenied('git push origin "main')
+
+    def test_no_merge_unrelated_allowed(self):
+        self.assertEqual(run("pytest -q && git status")["result"], "ALLOW")
+
+    def test_no_merge_arguments_unparseable_denied(self):
+        event = {"type": "tool_call", "target": "bash", "data": {"name": "bash", "arguments": "{bad"}}
+        self.assertEqual(no_merge()(event)["result"], "DENY")
+
+    def test_no_merge_mcp_merge_tool(self):
+        decision = no_merge()(tool_call_event("mcp__github__merge_pull_request", {"number": 1}))
+        self.assertEqual(decision["result"], "DENY")
+
+    def test_no_merge_other_tools_abstain(self):
+        self.assertIsNone(no_merge()(tool_call_event("Read", {"file_path": "a"})))
+        self.assertIsNone(no_merge()({"type": "other"}))
+
+
+class QuoteAwareMergeTest(unittest.TestCase):
+    def test_quoted_text_allowed(self):
+        for command in (
+            'git commit -m "fix: a; b"',
+            "git commit -m \"don't push yet\"",
+            'gh pr create --title x --body "Don\'t merge until CI is green"',
+            'grep -E "merge|push" log',
+            "git commit -m \"$(cat <<'EOF'\nIt's done\nEOF\n)\"",
+        ):
+            self.assertEqual(run(command)["result"], "ALLOW", command)
+
+    def test_newline_separates_statements(self):
+        self.assertEqual(run("echo a\ngh pr merge 5")["result"], "DENY")
+
+    def test_nested_shell_login_flag(self):
+        self.assertEqual(run("bash -lc 'git push origin main'")["result"], "DENY")
+
+
+class SubstitutionTest(unittest.TestCase):
+    def test_quoted_and_nested_substitution_denied(self):
+        for command in (
+            'git push origin "$(echo main)"',
+            'git push origin "$(git branch --show-current)"',
+            "git push origin HEAD:$(git branch --show-current)",
+            "gh api -X PUT repos/o/r/pulls/$(echo 5)/merge",
+            'echo "$(gh pr merge 5)"',
+            'x="$(git push origin main)"',
+        ):
+            self.assertEqual(run(command)["result"], "DENY", command)
+
+    def test_backslash_newline_joined(self):
+        self.assertEqual(run("git push origin \\\nmain")["result"], "DENY")
+
+    def test_other_shells_and_eval(self):
+        self.assertEqual(run("dash -c 'git push origin main'")["result"], "DENY")
+        self.assertEqual(run("ksh -c 'gh pr merge 5'")["result"], "DENY")
+        self.assertEqual(run("eval 'git push origin main'")["result"], "DENY")
+        self.assertEqual(run("eval git push origin main")["result"], "DENY")
+
+    def test_abstains_on_agent_start_probe(self):
+        self.assertIsNone(no_merge()(tool_call_event("sys_agent_start")))
+
+
+class FinalReviewMergeTest(unittest.TestCase):
+    def test_substitution_reason_names_the_fix(self):
+        reason = run("git push -u origin $(git branch --show-current)")["reason"]
+        self.assertIn("name the branch literally", reason)
+
+    def test_graphql_merge_mutations_denied(self):
+        for command in (
+            "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'",
+            "gh api graphql -F query=@q.graphql -f q='enablePullRequestAutoMerge'",
+        ):
+            decision = run(command)
+            self.assertEqual(decision["result"], "DENY", command)
+            self.assertIn("graphql", decision["reason"])
+        self.assertEqual(run("gh api graphql -f query='{ viewer { login } }'")["result"], "ALLOW")
+
+    def test_wrappers_resolved(self):
+        for command in (
+            "timeout 60 git push origin main",
+            "setsid git push --force origin feat/x",
+            "flock /tmp/l -c 'gh pr merge 5'",
+            "script -qc 'git push origin main' /dev/null",
+            "parallel ::: 'gh pr merge 5'",
+            "env -S 'git push origin main'",
+        ):
+            self.assertEqual(run(command)["result"], "DENY", command)
+
+    def test_list_and_other_command_shapes(self):
+        policy = no_merge()
+        self.assertEqual(policy(tool_call_event("shell", {"command": ["bash", "-lc", "gh pr merge 5"]}))["result"], "DENY")
+        self.assertEqual(policy(tool_call_event("shell", {"command": ["git", "status"]}))["result"], "ALLOW")
+        self.assertEqual(policy(tool_call_event("shell", {"command": {"a": 1}}))["result"], "DENY")
+
+
+class StdinArgumentsTest(unittest.TestCase):
+    def test_xargs_into_push_or_merge_denied(self):
+        for command in (
+            "echo main | xargs git push origin",
+            "echo feat/x | xargs git push origin",
+            "echo 5 | xargs gh pr merge",
+            "echo 5 | xargs -I{} gh pr merge {}",
+            "ls | parallel git push origin",
+            "cat <(git push origin main)",
+            "diff <(gh pr merge 5) a",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_xargs_elsewhere_allowed(self):
+        for command in ("ls | xargs wc -l", "cat <(git log -1)"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+        self.assertEqual(run("echo a | xargs git log -1")["result"], "DENY")
+
+
+class VariableTargetTest(unittest.TestCase):
+    def test_variable_in_push_or_merge_denied(self):
+        for command in (
+            "printf -v b %s main; git push origin $b",
+            "b=main; git push origin $b",
+            'git push origin "$BRANCH"',
+            "git push origin HEAD:${B}",
+            "gh api -X PUT repos/o/r/pulls/$N/merge",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_literal_push_allowed(self):
+        for command in ("git push -u origin feat/x", "echo $HOME && git push origin feat/x"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class HiddenCommandTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in (
+            "bash -c 'echo ${0@P}' '\\044(git push origin main)'",
+            "cat '\\044(git push origin main)'; echo ${_@P}",
+            "echo ${x@P}",
+            "echo ${x@E}",
+            "${G@P} push origin main",
+            "git push origin ${b:-main}",
+            "git push origin ${a[0]}",
+            "bash -c 'git push origin \"$0\"' main",
+            "bash -c 'git status' _ x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_plain_expansions_allowed(self):
+        for command in (
+            "echo ${HOME} && git push origin feat/x",
+            "git push -u origin feat/x",
+            "bash -lc 'make test' 2>&1 | tail -5",
+            "echo ${x:-y}",
+            "bash -lc 'pytest -q' > /tmp/log",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+
+PUSH_GLOBS = ['touch HEAD:main; git push origin HEAD:ma?n', 'git push origin HEAD:ma[i]n', 'git push origin HEAD:{main,feat/x}', 'git push origin HEAD:{ma,}in', "git push origin 'HEAD:ma*'", 'git push {origin,} HEAD:feat/x']
+CONFIG_REDIRECTS = [
+    "git -c include.path=/tmp/c p origin",
+    "git -c includeIf.gitdir:/repo/.path=/tmp/c p origin",
+    "git -c IncludeIf.onbranch:main.path=/tmp/c p origin",
+    "git --config-env=include.path=E p origin",
+    "git config include.path /tmp/c",
+    "git config --add includeif.gitdir:/x/.path /tmp/c",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=include.path GIT_CONFIG_VALUE_0=/tmp/c git p origin",
+    "GIT_CONFIG_PARAMETERS=\"'include.path'='/tmp/c'\" git p origin",
+    "git config alias.ship 'push origin HEAD:main'; git ship", "git config --global alias.ship 'push origin HEAD:main'", "git config --local --add alias.ship 'push origin HEAD:main'", "git config set alias.ship 'push origin HEAD:main'", "git config Alias.Ship 'push origin HEAD:main'", "git -c alias.ship='push origin HEAD:main' ship", "git -calias.ship='push origin HEAD:main' ship", 'git --config-env=alias.ship=SHIP ship', 'git --config-env alias.ship=SHIP ship', 'git config remote.origin.push HEAD:refs/heads/main && git push', 'git config remote.origin.url https://github.com/o/fork.git', 'git config remote.origin.pushurl https://github.com/o/fork.git', 'git config remote.pushDefault fork', 'git config branch.feat/x.merge refs/heads/main', 'git config branch.feat/x.remote upstream', 'git config push.default current', 'git config url.https://github.com/o/fork.git.insteadOf https://github.com/o/r.git', 'git config --unset alias.ship', "git -C repo config alias.ship 'push origin HEAD:main'", 'git -c remote.origin.push=HEAD:refs/heads/main push', 'git -c push.default=upstream push', "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=alias.ship GIT_CONFIG_VALUE_0='push origin HEAD:main' git ship", 'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=HEAD:main; git push', 'GIT_CONFIG_PARAMETERS="\'alias.ship\'=\'push origin HEAD:main\'" git ship', 'GIT_CONFIG_GLOBAL=./evil.gitconfig git push origin feat/x', 'env GIT_CONFIG_SYSTEM=./evil git push origin feat/x']
+EVERYDAY = ['git push -u origin feat/x', 'git push origin HEAD:feat/x', 'git config user.email bot@example.com', 'git config --get remote.origin.url', "git config --get-regexp '^alias\\.'", 'git config --list', 'git config get remote.origin.url', 'git config list --show-origin', 'git -c core.pager=cat log', 'git -c user.name=bot commit -m x', 'git config core.hooksPath .githooks', "rg 'alias.ship' docs"]
+
+
+class PushRedirectTest(unittest.TestCase):
+    def test_glob_and_brace_refspecs_denied(self):
+        for command in PUSH_GLOBS:
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_config_redirects_denied(self):
+        for command in CONFIG_REDIRECTS:
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_everyday_git_allowed(self):
+        for command in EVERYDAY:
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW", run(command).get("reason"))
+
+
+class QuotedNameTest(unittest.TestCase):
+    def test_ansi_c_quoted_names_denied(self):
+        for command in (
+            "$'git' push origin main",
+            "$'\\x67it' push origin main",
+            '$"git" push origin main',
+            "git $'push' origin main",
+            "git $'\\x70ush' origin main",
+            "gh pr $'merge' 5",
+            "$'gh' pr merge 5",
+            "git $'\\x70ush' origin main $'it\\'s'",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_ansi_c_quoting_elsewhere_allowed(self):
+        for command in ("echo $'a\\tb' && git push -u origin feat/x", "printf $'x\\n'", "git commit -m $'line\\nmore'"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class MidWordQuotingTest(unittest.TestCase):
+    def test_mid_word_quoting_denied(self):
+        for command in (
+            "g$'it' push origin main",
+            "git p$'ush' origin main",
+            "g$'h' pr merge 1",
+            "gh pr m$'erge' 1",
+            "g$'\\x69t' push origin main",
+            "g$\"it\" push origin main",
+            "git push origin m$'ain'",
+            "git push origin HEAD:$'\\x6d'ain",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_ansi_c_in_arguments_allowed(self):
+        for command in ("git commit -m $'a\\nb'", "printf $'a\\tb'", "rg $'\\t' src", "git push -u origin feat/x"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class AnsiCOpaqueWordTest(unittest.TestCase):
+    def test_opaque_words_denied(self):
+        for command in (
+            "$'git\\0' push origin main",
+            "git push origin $'main\\0x'",
+            "git $'push\\0' origin main",
+            "echo $'\\c'; git push origin main #'",
+            "echo $'\\c'; git push origin main",
+            "gh pr merge $'1\\0'",
+            "$'gh\\x00' pr merge 1",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+
+class HeredocTest(unittest.TestCase):
+    def test_statements_after_a_heredoc_are_seen(self):
+        for command in (
+            "cat <<E\nit's\nE\ngit push origin main #'",
+            "cat <<E\n$'\nE\ngit push origin main\n#'",
+            "cat <<-E\n\tit's\n\tE\ngit push origin main",
+            "cat <<A <<'B'\nit's\nA\n\"\nB\ngit push origin main",
+            "cat <<E\nno end",
+            "cat <<E\nit's",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_heredoc_commit_form_allowed(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore text.\nEOF\n)\"",
+            "cat <<'EOF' > notes.md\nIt's fine\nEOF\ngit push -u origin feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")
+
+
+class HeredocInQuotedSubstitutionTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
+            "git commit -m \"$(cat <<EOF\nx\"\nEOF\n)\"\ngit push origin main\n#\"",
+            "git commit -m \"$(cat <<'EOF'\nx\"\n)\"",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_commit_and_pr_forms_allowed(self):
+        for command in (
+            "git commit -m \"$(cat <<'EOF'\nfix: it's done\n\nMore text.\nEOF\n)\"",
+            "gh pr create --title \"fix: x\" --body \"$(cat <<'EOF'\n## Summary\n- it's \"quoted\"\n\n## Testing\n- make test\nEOF\n)\"",
+            "git commit -m \"$(cat <<'EOF'\nfix: x\nEOF\n)\" && git push -u origin feat/x",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW", run(command).get("reason"))
+
+
+class CommentAfterSubstitutionTest(unittest.TestCase):
+    def test_hidden_push_denied(self):
+        for command in ("echo $(true)#; git push origin main", "echo $((1))#; git push origin main", "(true)# c\ngit push origin main"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_real_comment_allowed(self):
+        self.assertEqual(run("(make test)# run tests\ngit push -u origin feat/x")["result"], "ALLOW")
+
+
+class GhFlagsBeforeVerbTest(unittest.TestCase):
+    def test_pr_merge_with_flags_between_denied(self):
+        for command in (
+            "gh pr -R o/r merge 5",
+            "gh pr --repo=o/r merge 5",
+            "gh pr --repo o/r merge 5",
+            "gh --repo o/r pr --repo o/r merge 5",
+            "gh -R o/r pr -R o/r merge",
+            "gh pr -Ro/r merge 5",
+            "gh api -X PUT 'repos/o/r/pulls/5/merge?merge_method=squash'",
+            "gh alias set pm pr merge",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "DENY")
+
+    def test_other_pr_verbs_allowed(self):
+        for command in ("gh pr -R o/r view 5", "gh pr --repo=o/r diff 5", "gh pr view merge", "gh pr list --search merge"):
+            with self.subTest(command=command):
+                self.assertEqual(run(command)["result"], "ALLOW")

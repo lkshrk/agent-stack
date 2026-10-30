@@ -22,28 +22,89 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      go: ${{ steps.filter.outputs.go }}
-      images: ${{ steps.filter.outputs.images }}
+      go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
+      images: ${{ steps.images.outputs.images }}
+      policies: ${{ github.event_name != 'pull_request' || steps.filter.outputs.policies == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: hermes and hermes-webui pin the same Hermes image
         run: |
           [ "$(grep -h '^ARG HERMES_IMAGE=' images/hermes/Dockerfile)" = "$(grep -h '^ARG HERMES_IMAGE=' images/hermes-webui/Dockerfile)" ]
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: github.event_name == 'pull_request'
         id: filter
         with:
           filters: |
-            go:
-              - 'cmd/**'
-              - 'go.mod'
-              - 'go.sum'
-            images:
-              - 'images/**'
+            ci: &ci
+              - '.github/workflows/ci.yml'
+              - '.github/actions/test-image/**'
+            shared: &shared
+              - *ci
+              - '.github/workflows/images.yml'
+              - '.github/workflows/release.yml'
+              - '.github/actions/build-image/**'
+              - '.dockerignore'
+            omnigent: &omnigent
+              - 'policies/omnigent/**'
               - 'bundles/**'
-              - 'config/**'
+              - 'config/omnigent/**'
+              - 'images/omnigent-host/codex/**'
+            go:
+              - *ci
               - 'cmd/**'
               - 'go.mod'
               - 'go.sum'
+            policies:
+              - *ci
+              - *omnigent
+            omnigent-host:
+              - *shared
+              - *omnigent
+              - 'images/omnigent-host/**'
+              - '.claude-plugin/**'
+              - '.agents/**'
+              - 'plugins/**'
+            omnigent-server:
+              - *shared
+              - *omnigent
+              - 'images/omnigent-server/**'
+            agent-tools:
+              - *shared
+              - 'images/agent-tools/**'
+              - 'cmd/**'
+              - 'go.mod'
+              - 'go.sum'
+            hermes:
+              - *shared
+              - 'images/hermes/**'
+              - 'config/hermes/**'
+            hermes-webui:
+              - *shared
+              - 'images/hermes-webui/**'
+              - 'images/hermes/**'
+              - 'config/hermes/**'
+      - name: Images to build, only the changed ones on pull requests
+        id: images
+        env:
+          ALL: '["omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui"]'
+          CHANGES: ${{ steps.filter.outputs.changes }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            echo "images=$(jq -c --argjson all "$ALL" '[.[] | select(IN($all[]))]' <<<"$CHANGES")" >>"$GITHUB_OUTPUT"
+          else
+            echo "images=$(jq -c . <<<"$ALL")" >>"$GITHUB_OUTPUT"
+          fi
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker run --rm -v "$PWD:/repo" -w /repo docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
   go:
     needs: changes
@@ -60,49 +121,61 @@ jobs:
         with:
           version: v2.15.0
 
+  policies:
+    needs: changes
+    if: needs.changes.outputs.policies == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+
   images:
     needs: changes
-    if: needs.changes.outputs.images == 'true' && github.event_name == 'pull_request'
+    if: >-
+      needs.changes.outputs.images != '[]' &&
+      (github.event_name == 'pull_request' || github.ref != 'refs/heads/main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
-        image: [omnigent-host, omnigent-server, agent-tools, hermes, hermes-webui]
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
-          file: images/${{ matrix.image }}/Dockerfile
-          platforms: linux/amd64
-          push: false
-          load: ${{ matrix.image == 'hermes-webui' }}
-          tags: agent-stack/${{ matrix.image }}:ci
-          cache-from: type=gha,scope=${{ matrix.image }}
-      - name: Start hermes-webui offline and require a healthy agent
-        if: matrix.image == 'hermes-webui'
-        run: |
-          set -euo pipefail
-          data=$(mktemp -d)
-          sudo chown 10000:10000 "$data"
-          docker run -d --name webui --network none -e HERMES_HOME=/opt/data \
-            -e HERMES_WEBUI_PASSWORD=ci-smoke-password -v "$data:/opt/data" agent-stack/hermes-webui:ci
-          for _ in $(seq 1 30); do
-            status=$(docker inspect -f '{{.State.Health.Status}}' webui)
-            [ "$status" = healthy ] && break
-            [ "$(docker inspect -f '{{.State.Running}}' webui)" = true ] || break
-            sleep 4
-          done
-          docker logs webui
-          [ "$status" = healthy ]
-          grep -q 'Dependencies already installed' <(docker logs webui 2>&1)
-          grep -q 'Hermes agent critical imports verified' <(docker logs webui 2>&1)
-          docker exec -u 10000 webui test -r /etc/hermes/config.yaml
+          persist-credentials: false
+      - uses: ./.github/actions/test-image
+        with:
+          image: ${{ matrix.image }}
+          token: ${{ github.token }}
+
+  # The only job that writes the GHCR build cache, so pull requests never hold a packages write token.
+  images-main:
+    needs: changes
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.changes.outputs.images) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/test-image
+        with:
+          image: ${{ matrix.image }}
+          write-cache: "true"
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   gate:
     if: always()
-    needs: [changes, go, images]
+    needs: [changes, actionlint, go, policies, images, images-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job that ran to succeed

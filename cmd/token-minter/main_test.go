@@ -159,3 +159,115 @@ func TestRunFailsWithoutRequiredEnv(t *testing.T) {
 		t.Fatal("expected an error when configuration is missing")
 	}
 }
+
+func TestParseTokens(t *testing.T) {
+	got, err := parseTokens(" code=routivo, knowledge=lkshrk ,review=routivo@security-review", "agent-stack-minter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []tokenSpec{
+		{key: "code", owner: "routivo", identity: "agent-stack-minter"},
+		{key: "knowledge", owner: "lkshrk", identity: "agent-stack-minter"},
+		{key: "review", owner: "routivo", identity: "security-review"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseTokensRejectsMalformedEntries(t *testing.T) {
+	for _, raw := range []string{
+		"code",
+		"=routivo",
+		"code=",
+		"code=routivo@",
+		"code=@review",
+		"code=routivo@a@b",
+		"code=routivo,,knowledge=lkshrk",
+		"code=routivo,code=lkshrk",
+		"code=rou tivo",
+		"",
+	} {
+		if _, err := parseTokens(raw, "agent-stack-minter"); err == nil {
+			t.Errorf("parseTokens(%q) succeeded, want an error", raw)
+		}
+	}
+}
+
+func TestRunSendsEachTokensIdentity(t *testing.T) {
+	var mu sync.Mutex
+	identities := map[string]string{}
+	var data map[string]any
+
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"bearer"}`))
+	}))
+	defer auth.Close()
+	sts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		mu.Lock()
+		identities[q.Get("scope")+"@"+q.Get("identity")] = q.Get("identity")
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": "ghs_" + q.Get("scope") + "_" + q.Get("identity")})
+	}))
+	defer sts.Close()
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		var obj map[string]any
+		_ = json.Unmarshal(raw, &obj)
+		mu.Lock()
+		data = obj["stringData"].(map[string]any)
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+
+	sa := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sa, "token"), []byte("sa-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: api.Certificate().Raw})
+	if err := os.WriteFile(filepath.Join(sa, "ca.crt"), cert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(api.URL)
+	host, port, _ := net.SplitHostPort(u.Host)
+	env := map[string]string{
+		"AUTHENTIK_TOKEN_URL":     auth.URL,
+		"AUTHENTIK_CLIENT_ID":     "octo-sts",
+		"AUTHENTIK_APP_PASSWORD":  "pw",
+		"OCTO_STS_URL":            sts.URL,
+		"OCTO_STS_IDENTITY":       "agent-stack-minter",
+		"TOKENS":                  "code=routivo,review=routivo@security-review",
+		"SECRET_NAME":             "agent-github-tokens",
+		"SECRET_NAMESPACES":       "omnigent-sandboxes",
+		"KUBERNETES_SERVICE_HOST": host,
+		"KUBERNETES_SERVICE_PORT": port,
+	}
+	if err := run(context.Background(), func(k string) string { return env[k] }, sa); err != nil {
+		t.Fatal(err)
+	}
+	if identities["routivo@agent-stack-minter"] == "" || identities["routivo@security-review"] == "" || len(identities) != 2 {
+		t.Fatalf("octo-sts identities = %v", identities)
+	}
+	if data["code"] != "ghs_routivo_agent-stack-minter" || data["review"] != "ghs_routivo_security-review" {
+		t.Fatalf("secret data = %v", data)
+	}
+}
+
+func TestRunFailsOnMalformedTokens(t *testing.T) {
+	env := map[string]string{
+		"AUTHENTIK_TOKEN_URL": "http://127.0.0.1:1", "AUTHENTIK_CLIENT_ID": "c", "AUTHENTIK_APP_PASSWORD": "p",
+		"OCTO_STS_URL": "http://127.0.0.1:1", "OCTO_STS_IDENTITY": "i", "TOKENS": "code=routivo,broken",
+		"SECRET_NAME": "s", "SECRET_NAMESPACES": "n",
+	}
+	err := run(context.Background(), func(k string) string { return env[k] }, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "broken") {
+		t.Fatalf("run error = %v, want one naming the malformed entry", err)
+	}
+}

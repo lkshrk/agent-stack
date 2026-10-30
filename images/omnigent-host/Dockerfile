@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.10
 ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.19.1@sha256:46ddb52b8013e69bcd2068842d9746bc896d50f5884a2469d51a27a6211c5814
 
-FROM ${OMNIGENT_HOST_IMAGE}
+FROM ${OMNIGENT_HOST_IMAGE} AS image
 
 ARG CLAUDE_CODE_VERSION=2.1.309
 ARG CODEX_VERSION=0.164.0
@@ -15,6 +15,7 @@ ARG KOTLIN_LSP_BUILD=263.7084.0
 ARG KOTLIN_LSP_VERSION=0.0.27
 ARG KOTLIN_LSP_SHA256=6787185abb0e7f3b527484bb6cc4a881ce42b2e39320626937e65839751075e9
 ARG MISE_VERSION=v2026.10.15
+ARG PLAYWRIGHT_VERSION=1.60.0
 
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -42,7 +43,7 @@ RUN mise install \
  && rm -rf /opt/mise/cache \
  && chmod -R a+rX /opt/mise
 
-RUN npm install -g --no-fund --no-audit \
+RUN npm install -g --prefix /usr/local --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
       "@oh-my-pi/pi-coding-agent@${OMP_VERSION}" \
@@ -63,6 +64,13 @@ RUN mkdir -p /opt/agent/bin /tmp/dl && cd /tmp/dl \
  && ln -s /opt/kotlin-lsp/kotlin-lsp.sh /opt/agent/bin/kotlin-lsp \
  && cd / && rm -rf /tmp/dl
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN apt-get update \
+ && npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+ && echo "${PLAYWRIGHT_VERSION}" >"${PLAYWRIGHT_BROWSERS_PATH}/.playwright-version" \
+ && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
+
 COPY images/omnigent-host/bin/ /opt/agent/bin/
 COPY images/omnigent-host/claude/ /opt/agent/claude-home/
 COPY images/omnigent-host/codex/ /opt/agent/codex-home/
@@ -81,5 +89,23 @@ RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
  && rm -rf /opt/agent/claude-home/.claude/plugins/cache/*/.git \
  && chmod -R a+rX /opt/agent
 
+COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
+RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
+ && chmod -R a+rX /opt/agent-stack
+
 WORKDIR /root
 CMD ["sleep", "infinity"]
+
+FROM image AS test
+COPY policies/omnigent/ /src/policies/omnigent/
+COPY bundles/ /src/bundles/
+COPY config/omnigent/ /src/config/omnigent/
+COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
+COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
+WORKDIR /src
+RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+USER 1000660000
+RUN fail=0; for t in images/omnigent-host/test/*.sh; do echo "== $t"; bash "$t" || fail=1; done; exit "$fail"
+
+# The default target is the published image, without the test stage.
+FROM image

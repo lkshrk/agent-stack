@@ -23,6 +23,7 @@ Not durable: typos, session status, anything already in the repository's own doc
 ## Code changes
 
 - Work on a branch, never on `main`. Deliver through a pull request; never merge, never force-push.
+- Push with an explicit destination: `git push origin HEAD:<branch>`. A bare `git push` or `git push origin HEAD` is denied.
 - Commit messages and PR texts carry no AI attribution: no `Co-authored-by` trailers, no session links, no sentence saying it was generated.
 
 ## Code comments

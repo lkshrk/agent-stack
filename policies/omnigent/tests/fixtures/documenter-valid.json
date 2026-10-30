@@ -1,0 +1,14 @@
+{
+  "status": "DONE",
+  "mode": "delta",
+  "changed_files": [
+    "docs/a.md"
+  ],
+  "stale": [
+    {
+      "file": "docs/old.md",
+      "reason": "Mentions removed flag."
+    }
+  ],
+  "pr": "https://example.test/pr/1"
+}

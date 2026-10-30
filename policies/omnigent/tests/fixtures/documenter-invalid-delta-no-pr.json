@@ -1,0 +1,9 @@
+{
+  "status": "DONE",
+  "mode": "delta",
+  "changed_files": [
+    "docs/a.md"
+  ],
+  "stale": [],
+  "pr": null
+}

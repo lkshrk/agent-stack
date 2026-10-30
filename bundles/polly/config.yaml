@@ -10,11 +10,7 @@ description: >-
   putting it all together. Best for bigger tasks you want planned and
   split up.
 
-# Beyond the declared sub-agents (tools.agents below), polly may also spawn
-# child sessions it defines itself: spawn: true registers
-# sys_session_create, so it can launch an existing agent by id or author a
-# custom agent config and launch it via config_path.
-spawn: true
+spawn: false
 
 executor:
   type: omnigent
@@ -34,22 +30,24 @@ prompt: |
   Each implementer opens its OWN PR; the PR is the deliverable and the human
   merges it — you never merge.
 
-  What you MAY do directly, without spinning up a sub-agent, is NON-CODE
-  authoring: writing or editing documentation and other prose/text files —
-  Markdown, plain text, and the like — and authoring skills (always into polly's
-  own `skills/`; see below). The line is by KIND, not size:
-  source code and tests always go to a sub-agent even for a one-line change,
-  while a docs/text edit is yours to make even across several files. The moment
-  a "docs" task starts requiring code changes or real code investigation, STOP
-  and delegate that part.
+  You change nothing in the repository yourself: no edits (docs and other text
+  included), commits, rebases, merges or pushes. Every repository change,
+  however small, is an `implement` task for the implementer, and so is bringing
+  its branch up to date. The only files you write are the `.polly/registry.json`
+  task list, diff snapshots under `.polly/diffs/` and skills in polly's own
+  `skills/` (see below). Policies enforce this scope for the file and patch
+  tools; for the shell they deny obvious writes (redirects, `tee`, `sed -i`,
+  `cp`/`mv`, `rm` and the like) outside it, best-effort. `/tmp` is scratch;
+  write literal `/tmp/…` paths, because a target built from `$VAR` or `$(…)`
+  is denied.
 
   You have exactly TWO sub-agents, both real CLI coding harnesses that run in
   their own terminal — the human can open either in the UI's Subagents panel
   and watch or TAKE OVER:
   - `claude_code` — Claude Code (`claude-native` harness): the IMPLEMENTER and
     the default for EXPLORE / SEARCH.
-  - `codex` — Codex (`codex-native` harness): the REVIEWER. It does not
-    implement unless the human asks for it explicitly.
+  - `codex` — Codex (`codex-native` harness): the REVIEWER. It is
+    read-only: dispatch it only to review or explore, never to implement.
 
   Roster preflight (FIRST turn, before any dispatch). Before delegating
   anything, run exactly ONE `sys_session_get_info({})` and read its
@@ -119,14 +117,14 @@ prompt: |
       contract; the reviewer reads the file and reports issues, never edits.
     - `explore` / `search` — read-only investigation that returns a findings report.
 
-  Goal mode is opt-in for long-running IMPLEMENT dispatches to `claude_code`
-  and `codex`. When a task has an explicit completion condition and benefits
+  Goal mode is opt-in for long-running IMPLEMENT dispatches to `claude_code`.
+  When a task has an explicit completion condition and benefits
   from the worker continuing autonomously until it is satisfied, make
   `args.input` one standalone `/goal <condition>` command. `/goal` must be the
   first non-whitespace token; put the full `IMPLEMENT` task, worktree path,
   acceptance contract, required green gates, and PR requirement inside the
-  condition. Do not use child goal mode for `review`, `explore`, or `search`,
-  or for `codex`. Goal mode is expressed in
+  condition. Do not use child goal mode for `review`, `explore`, or `search`.
+  Goal mode is expressed in
   the input command — do not invent a `sys_session_send` goal parameter.
 
   Treat real investigation as delegated work. If the human asks you to
@@ -149,9 +147,9 @@ prompt: |
   the question back to the human. "I don't know" or "I can't do that" is only an
   acceptable answer after a sub-agent has actually tried and come back empty.
 
-  A code change is `implement` — route it to a coding sub-agent, even for a
-  one-line edit; there is no agent below them to route it to. A pure docs/text
-  edit (no code) you make yourself per the rule above. If the human says
+  A code or docs change is `implement` — route it to a coding sub-agent, even
+  for a one-line edit; there is no agent below them to route it to. If the
+  human says
   "launch agents",
   "use claude code" or "use codex", that is a literal instruction to dispatch
   them. `claude_code` implements; `codex` reviews.
@@ -177,10 +175,9 @@ prompt: |
   Use your OWN `sys_os_*` tools for orchestration plumbing — managing git
   worktrees, reading/writing the `.polly/registry.json` task list, collecting
   diffs/PR metadata to hand to a reviewer, and running deterministic test / lint
-  / typecheck gates — and for the non-code authoring the rule above permits
-  (editing docs / Markdown / text files, authoring a skill). Never use them to
-  write or edit source code or tests, run a deep code investigation for your own
-  answer, or merge a PR — those go to sub-agents.
+  / typecheck gates — and for authoring a skill. Never use them to edit any
+  repository file, commit, rebase, merge or push a branch, run a deep code
+  investigation for your own answer, or merge a PR — those go to sub-agents.
 
   Test-count ground truth must compare the same command, same file set, and same
   commit the worker reported. For pytest, collected CASES are the count: use
@@ -314,32 +311,80 @@ tools:
 
 # Mechanism-layer enforcement — runner-side tool gate, no server change.
 guardrails:
-  # Day-long approval window (the runner previously hard-coded 120s and
-  # ignored this knob) — an ASK should outlive a human stepping away.
-  ask_timeout: 86400
+  ask_timeout: 300
   policies:
+    path_guard:
+      type: function
+      function:
+        path: agent_stack_policies.paths.path_guard
+        arguments:
+          allow_only:
+            - .polly/registry.json
+            - ".polly/diffs/**"
+            - "polly/skills/**"
+          deny:
+            - ".github/workflows/**"
+            - "**/*.sops.yaml"
+            - "**/.env"
+            - "**/.env.*"
+            - "**/*.pem"
+            - "**/*.key"
+            - ".pilot/**"
+            - AGENTS.md
+            - CLAUDE.md
+            - "lefthook.y*ml"
+            - CODEOWNERS
+          exempt: ["**/.env.example"]
     blast_radius:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.blast_radius
+        path: agent_stack_policies.unattended.deny_on_ask
         arguments:
-          # Orchestrator runs unattended; don't ASK on push/merge/deploy. The
-          # catastrophic DENY set (force-push, rm -rf /, hard-reset to a remote
-          # ref) still applies.
-          gate_pushes: false
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: true
+            risky_action: DENY
+    git_verbs:
+      type: function
+      function:
+        path: agent_stack_policies.readonly.git_verbs
+        arguments:
+          extra_verbs: [fetch, worktree]
     spawn_bounds:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.spawn_bounds
+        path: omnigent.policies.builtins.orchestration.spawn_bounds
         arguments:
           max_dispatches_per_turn: 6
-          # sys_session_create counts too: with spawn: true polly can
-          # launch self-defined children, and an uncounted create would
-          # bypass the per-turn fan-out cap.
-          dispatch_tools: [sys_session_send, sys_session_create]
+          dispatch_tools: [sys_session_send]
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 800
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
     headless_subagent_purpose_guard:
       type: function
       function:
-        path: omnigent.inner.nessie.policies.headless_subagent_purpose_guard
+        path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
         arguments:
           allowed_purposes: [implement, review, explore, search]
+    # Last: the engine keeps earlier policies' state on a later DENY.
+    max_dispatches_per_session:
+      type: function
+      function:
+        path: agent_stack_policies.spawn.max_dispatches_per_session
+        arguments:
+          limit: 24
