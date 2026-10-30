@@ -10,7 +10,7 @@ spawn: false
 
 executor:
   type: omnigent
-  model: claude-opus
+  model: anthropic/claude-fable
   config:
     harness: claude-sdk
 

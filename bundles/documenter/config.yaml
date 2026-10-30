@@ -11,7 +11,7 @@ spawn: false
 
 executor:
   type: omnigent
-  model: claude-sonnet
+  model: anthropic-auto
   config:
     harness: claude-sdk
 

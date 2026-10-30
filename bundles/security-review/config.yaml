@@ -11,7 +11,7 @@ spawn: false
 # Create sessions with terminal_launch_args ["--profile", "security-review"] (images/omnigent-host/codex).
 executor:
   type: omnigent
-  model: gpt-sol
+  model: openai/gpt-astra
   config:
     harness: codex-native
 

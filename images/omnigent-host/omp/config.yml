@@ -1,8 +1,8 @@
 setupVersion: 2
 modelRoles:
-  default: local-agents/gpt-astra
-  smol: local-agents/claude-sonnet:low
-  slow: local-agents/claude-opus:high
+  default: local-agents/smart-auto
+  smol: local-agents/smart-auto
+  slow: local-agents/smart-auto
   plan: "@slow"
   task: "@default"
   commit: "@smol"

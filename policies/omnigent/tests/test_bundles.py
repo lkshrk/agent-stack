@@ -1333,7 +1333,7 @@ class BundleVerdictTest(unittest.TestCase):
         planner = load(BUNDLES / "planner", expand_env=False)
         (critic,) = planner.sub_agents
         self.assertEqual(critic.name, "critic")
-        self.assertEqual(critic.executor.model, "claude-sonnet")
+        self.assertEqual(critic.executor.model, "anthropic/claude-sonnet")
         self.assertEqual(critic.executor.config["harness"], "claude-sdk")
         self.assertIs(critic.spawn, False)
         self.assertIs(critic.async_enabled, False)
@@ -1479,7 +1479,7 @@ class BundleVerdictTest(unittest.TestCase):
         from omnigent.spec import load
 
         spec = load(BUNDLES / "security-review", expand_env=False)
-        self.assertEqual(spec.executor.model, "gpt-sol")
+        self.assertEqual(spec.executor.model, "openai/gpt-astra")
         self.assertEqual(spec.executor.config, {"harness": "codex-native"})
         self.assertIs(spec.spawn, False)
         self.assertIs(spec.async_enabled, False)
@@ -1537,7 +1537,7 @@ class BundleVerdictTest(unittest.TestCase):
         from omnigent.spec import load
 
         spec = load(BUNDLES / "documenter", expand_env=False)
-        self.assertEqual(spec.executor.model, "claude-sonnet")
+        self.assertEqual(spec.executor.model, "anthropic-auto")
         self.assertEqual(spec.executor.config["harness"], "claude-sdk")
         self.assertIs(spec.spawn, False)
         self.assertIs(spec.async_enabled, False)
