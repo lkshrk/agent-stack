@@ -9,7 +9,7 @@ spawn: false
 
 executor:
   type: omnigent
-  model: claude-sonnet
+  model: anthropic/claude-sonnet
   config:
     harness: claude-sdk
 

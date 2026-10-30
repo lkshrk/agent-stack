@@ -4,7 +4,7 @@ description: Codex read-only sub-agent — cross-vendor reviews or explores a sc
 
 executor:
   type: omnigent
-  model: gpt-sol
+  model: openai/gpt-sol
   config:
     harness: codex-native
     # YOLO: headless workers can't answer approval prompts, so run Codex
