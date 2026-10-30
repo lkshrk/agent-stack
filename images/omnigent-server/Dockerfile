@@ -17,7 +17,7 @@ RUN if [ -n "$AGENT_STACK_VERSION" ]; then \
     fi
 
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
-CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly"]
+CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly", "--agent", "/agents/planner"]
 
 FROM image AS test
 ARG AGENT_STACK_VERSION=""

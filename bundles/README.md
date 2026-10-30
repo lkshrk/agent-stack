@@ -1,6 +1,6 @@
 # bundles
 
-Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this directory to `/agents/` in the server image, and the server starts with `--agent /agents/polly`.
+Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this directory to `/agents/` in the server image, and the server starts with `--agent /agents/polly --agent /agents/planner`. `security-review` and `documenter` are in the image but not registered yet: security-review waits for per-bundle GitHub tokens (Plan 2 Task 11b), the documenter for read-only startup files and launch configs in runner pods (Tasks 11c and 11d).
 
 | Bundle | Contents |
 | --- | --- |
