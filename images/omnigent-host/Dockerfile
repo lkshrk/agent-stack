@@ -42,7 +42,7 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mi
 COPY images/omnigent-host/mise.toml /etc/mise/config.toml
 RUN mise install \
  && mise reshim \
- && rm -rf /opt/mise/cache \
+ && rm -rf /opt/mise/cache /root/.cache /root/go /root/.npm \
  && chmod -R a+rX /opt/mise
 
 RUN npm install -g --prefix /usr/local --no-fund --no-audit \
