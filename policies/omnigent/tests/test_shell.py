@@ -280,11 +280,11 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
 class FindExecTest(unittest.TestCase):
     def test_all_find_exec_runs_are_nested(self):
         tokens = ["find", "."]
-        for i in range(80):
+        for i in range(2_000):
             tokens += ["-exec", "echo", str(i), ";"]
         started = time.perf_counter()
         command = resolve(tokens)
-        self.assertEqual(len(command.nested), 79)
+        self.assertEqual(len(command.nested), 1_999)
         self.assertLess(time.perf_counter() - started, 0.05)
 
 
