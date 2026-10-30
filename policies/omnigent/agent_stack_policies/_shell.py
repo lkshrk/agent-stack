@@ -18,7 +18,6 @@ _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _SHELL_VALUE_FLAGS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 _ROUGH_STATEMENT = re.compile(r"[;&|\n]+")
 _ROUGH_TOKEN = re.compile(r"[^\s'\"`;&|()<>]+")
-_BACKTICKS = re.compile(r"`([^`]*)`")
 
 _SUDO_VALUES = {
     "-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T", "--user", "--group", "--chdir",
@@ -148,8 +147,8 @@ _AMBIGUOUS_FIND = "a find -exec, -execdir, -ok or -okdir word inside another one
 _HEREDOC = re.compile(r"<<(-?)[ \t]*(?:'([^']*)'|\"([^\"]*)\"|\\?([^\s;&|<>()'\"]+))")
 
 
-def _heredocs(line: str) -> list[tuple[str, bool]]:
-    """(delimiter, strip leading tabs) for each unquoted `<<WORD`/`<<-WORD` in a line, in order; `<<<` is a here-string."""
+def _heredocs(line: str) -> list[tuple[str, bool, bool]]:
+    """(delimiter, strip leading tabs, quoted delimiter) for each unquoted `<<WORD`/`<<-WORD` in a line, in order; `<<<` is a here-string."""
     docs, quote, i = [], None, 0
     while i < len(line):
         ch = line[i]
@@ -171,16 +170,17 @@ def _heredocs(line: str) -> list[tuple[str, bool]]:
             arithmetic = line.count("((", 0, i) > line.count("))", 0, i)
             match = _HEREDOC.match(line, i)
             if match and not arithmetic:
-                docs.append((next(g for g in match.groups()[1:] if g is not None), match.group(1) == "-"))
+                quoted = match.group(2) is not None or match.group(3) is not None or "\\" in match.group()
+                docs.append((next(g for g in match.groups()[1:] if g is not None), match.group(1) == "-", quoted))
                 i = match.end()
                 continue
         i += 1
     return docs
 
 
-def _skip_heredocs(text: str, pos: int, docs: list[tuple[str, bool]]) -> int:
+def _skip_heredocs(text: str, pos: int, docs: list[tuple[str, bool, bool]]) -> int:
     """Index after the bodies of `docs`, which start at `pos`; raises OpaqueCommand when a delimiter line is missing."""
-    for delimiter, strip in docs:
+    for delimiter, strip, _ in docs:
         while True:
             if pos >= len(text):
                 raise OpaqueCommand(_UNCLOSED_HEREDOC)
@@ -801,17 +801,104 @@ def substituted(token: str) -> bool:
     return "`" in token or "$(" in token
 
 
-def _bodies(text: str) -> list[str]:
-    bodies = []
-    i = 0
-    while (start := text.find("$(", i)) >= 0:
-        depth, j = 1, start + 2
-        while j < len(text) and depth:
-            depth += {"(": 1, ")": -1}.get(text[j], 0)
-            j += 1
-        bodies.append(text[start + 2 : j - 1 if depth == 0 else j])
-        i = j
-    return bodies + _BACKTICKS.findall(text)
+_BODY_STOPS = {
+    None: re.compile(r"[\\$`'\"#()\n]"),
+    '"': re.compile(r'[\\$`"]'),
+    "'": re.compile(r"'"),
+    "$'": re.compile(r"[\\']"),
+    "text": re.compile(r"[\\$`]"),
+}
+_BACKTICK_ESCAPE = re.compile(r"\\([\\`$])")
+
+
+@dataclass
+class _Frame:
+    """One shell context in `_bodies`: the top level or a `$(…)` body."""
+
+    start: int
+    quote: str | None = None
+    depth: int = 0
+    line_start: int = 0
+    line: list[str] = field(default_factory=list)
+    comment: int | None = None
+
+
+def _bodies(text: str, quotes: bool = True) -> list[str]:
+    """`$(…)` and backtick bodies that bash runs: none inside single quotes, `$'…'`, comments or quoted heredocs, or after a backslash; with `quotes` off (an unquoted heredoc body) quote characters are literal."""
+    bodies, frames, i = [], [_Frame(0)], 0
+    while i < len(text):
+        frame = frames[-1]
+        quote = frame.quote
+        stops = _BODY_STOPS["text" if quote is None and not quotes and len(frames) == 1 else quote]
+        found = stops.search(text, i)
+        if not found:
+            break
+        i, ch = found.start(), found.group()
+        if quote == "'":
+            frame.quote = None
+            i += 1
+        elif ch == "\\":
+            i += 2
+        elif quote == "$'":
+            frame.quote = None
+            i += 1
+        elif text.startswith("$(", i):
+            frame.line.append(text[frame.line_start : i])
+            frames.append(_Frame(i + 2, line_start=i + 2))
+            i += 2
+        elif ch == "`":
+            j = i + 1
+            while j < len(text) and text[j] != "`":
+                j += 2 if text[j] == "\\" else 1
+            if len(frames) == 1:
+                bodies.append(_BACKTICK_ESCAPE.sub(r"\1", text[i + 1 : j]))
+            i = j + 1
+        elif ch == "$":
+            if quote is None and text.startswith("$'", i):
+                frame.quote = "$'"
+                i += 1
+            i += 1
+        elif quote == '"':
+            frame.quote = None
+            i += 1
+        elif ch in "'\"":
+            frame.quote = ch
+            i += 1
+        elif ch == "#":
+            if i == 0 or text[i - 1] in " \t\n;&|(":
+                frame.comment = i if frame.comment is None else frame.comment
+                end = text.find("\n", i)
+                i = len(text) if end < 0 else end
+            else:
+                i += 1
+        elif ch == "(":
+            frame.depth += 1
+            i += 1
+        elif ch == ")":
+            i += 1
+            if frame.depth:
+                frame.depth -= 1
+            elif len(frames) > 1:
+                frames.pop()
+                frames[-1].line_start = i
+                if len(frames) == 1:
+                    bodies.append(text[frame.start : i - 1])
+        else:
+            line = "".join(frame.line) + text[frame.line_start : i if frame.comment is None else frame.comment]
+            frame.line, frame.comment = [], None
+            i += 1
+            for doc in _heredocs(line) if "<<" in line else ():
+                try:
+                    end = _skip_heredocs(text, i, [doc])
+                except OpaqueCommand:
+                    end = len(text)
+                if not doc[2] and len(frames) == 1:
+                    bodies.extend(_bodies(text[i:end], quotes=False))
+                i = end
+            frame.line_start = i
+    if len(frames) > 1:
+        bodies.append(text[frames[1].start :])
+    return bodies
 
 
 def _rough(text: str) -> list[list[str]]:
@@ -826,7 +913,11 @@ def _walk_quietly(command: str, literal_operators: bool, split_operators: bool, 
         raise
     except ValueError:
         del result[start:]
-        result.extend(_rough(command))
+        for unit in _rough(command):
+            result.append(unit)
+            words[0] += len(unit)
+            if len(result) > STATEMENT_LIMIT or words[0] > WORD_LIMIT:
+                raise OpaqueCommand(_TOO_LARGE) from None
 
 
 def group_token(token: str) -> bool:
