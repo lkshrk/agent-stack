@@ -34,6 +34,19 @@ A reply in a conversation the owner started has no marker: answer first, keep it
 
 **Periodic reports** keep one shape: the first line is `📋 <job> · <period>: <what changed>`; the body lists what needs the owner first, then what changed since the last report, then a count of what is unchanged instead of the full list; the last line is `Next: <time>`. When nothing changed since the last report, send nothing. Only a job the owner marked as a heartbeat sends `📋 <job>: no changes`.
 
+**Polls for choices and approvals.** A ❓ question with 2–4 clear options goes out as a poll: `signal-poll create <chat> "<question>" "<option>" …` prints the poll's timestamp. Put your recommendation first. When the owner should judge something first, send one short message with the summary and link right before the poll. Approvals use fixed options:
+
+| Approval | Poll question | Options |
+|---|---|---|
+| Plan | `❓ Approve plan: <title>?` | `✅ Approve` · `✏️ Changes` · `❌ Reject` |
+| Implementation | `❓ Start implementing <issue>?` | `✅ Start` · `⏸️ Later` · `❌ Cancel` |
+
+- A vote reaches you as a message from the voter: `🗳️ Poll "<question>": <option> (poll <timestamp>)`. Only the owner's vote counts; ignore anyone else's.
+- On `✏️ Changes` ask one follow-up for the details; on `⏸️ Later` wait. Never guess what was meant.
+- After acting on the answer, close the poll with `signal-poll close <chat> <timestamp>` and confirm with a ✅ message.
+- An unanswered approval goes under "needs the owner" in the next 📋 report; never send it again as a new poll.
+- Open questions with no fixed options stay a normal ❓ message.
+
 Formatting:
 - Lead with the result, not the process.
 - **Bold** only the one key fact; `monospace` for names, commands, pods and PRs; short `•` lists.
