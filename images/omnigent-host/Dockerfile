@@ -1,7 +1,32 @@
 # syntax=docker/dockerfile:1.10
 ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.19.1@sha256:46ddb52b8013e69bcd2068842d9746bc896d50f5884a2469d51a27a6211c5814
 
-FROM ${OMNIGENT_HOST_IMAGE} AS image
+FROM ${OMNIGENT_HOST_IMAGE} AS upstream-env
+RUN printenv >/upstream.env
+
+FROM ${OMNIGENT_HOST_IMAGE} AS upstream
+USER root
+# Claude Code and Codex are reinstalled at pinned versions below; kiro-cli is unused.
+RUN --mount=type=bind,source=images/omnigent-host/build,target=/build-tools \
+    rm -rf /usr/local/bin/kiro-cli /usr/local/bin/kiro-cli-chat /root/.local/bin/kiro-cli* \
+      /usr/local/bin/claude /usr/local/bin/codex \
+      /usr/local/lib/node_modules/@anthropic-ai /usr/local/lib/node_modules/@openai \
+ && /build-tools/prune-native-platforms /usr/local/lib/node_modules
+
+# A removal in a later layer still ships the bytes, so the base is flattened into one layer without them.
+FROM scratch AS image
+COPY --from=upstream / /
+ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    PYTHON_VERSION=3.12.15 \
+    PYTHON_SHA256=c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a \
+    NPM_CONFIG_REGISTRY= \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    IS_SANDBOX=1 \
+    AGY_VERSION=1.1.16 \
+    AGY_SHA256_AMD64=7742953b7835b457e9102f1357a493913657dfd147435584f609d58356ec085a \
+    AGY_SHA256_ARM64=c71599bb548cf72dfe7a8f6c411b3c7a3623cd4b0f6276bae89c69f769d6c92d
 
 ARG CLAUDE_CODE_VERSION=2.1.309
 ARG CODEX_VERSION=0.164.0
@@ -107,6 +132,7 @@ COPY bundles/ /src/bundles/
 COPY config/omnigent/ /src/config/omnigent/
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
+COPY --from=upstream-env /upstream.env /src/upstream.env
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 RUN install -d -m 0777 /home/omnigent
