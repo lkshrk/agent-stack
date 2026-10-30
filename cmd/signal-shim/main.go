@@ -214,6 +214,10 @@ func (s *shim) send(ctx context.Context, p map[string]any) (any, error) {
 		}
 		body["base64_attachments"] = encoded
 	}
+	if msg, ok := styledMessage(str(p["message"]), textStyles(p)); ok {
+		body["message"] = msg
+		body["text_mode"] = "styled"
+	}
 	if ts, ok := num(p["quoteTimestamp"]); ok {
 		body["quote_timestamp"] = ts
 		if a := str(p["quoteAuthor"]); a != "" {
@@ -297,6 +301,26 @@ func targets(p map[string]any) []string {
 	case string:
 		if v != "" {
 			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// textStyles collects signal-cli's textStyle (one range or a list) and textStyles params.
+func textStyles(p map[string]any) []string {
+	var out []string
+	for _, key := range []string{"textStyle", "textStyles"} {
+		switch v := p[key].(type) {
+		case string:
+			if v != "" {
+				out = append(out, v)
+			}
+		case []any:
+			for _, s := range v {
+				if s := str(s); s != "" {
+					out = append(out, s)
+				}
+			}
 		}
 	}
 	return out

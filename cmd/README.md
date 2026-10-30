@@ -6,6 +6,8 @@ Go programs, all built into the `agent-tools` image (`images/agent-tools/Dockerf
 
 Serves the subset of signal-cli's HTTP daemon API that the Hermes Signal adapter uses (`GET /api/v1/check`, `GET /api/v1/events` as SSE, `POST /api/v1/rpc`) and translates it to signal-cli-rest-api in json-rpc mode.
 
+`send` keeps the adapter's formatting: the `textStyle`/`textStyles` ranges (bold, italic, strikethrough, monospace, spoiler) become signal-cli-rest-api's `text_mode: "styled"` markers, with literal `*`, `` ` ``, `~` and `|` escaped. A range the styled parser can't express is dropped and its text sent unstyled: ranges that cross, a style overlapping itself, or a marker directly after a literal `\`.
+
 | Variable | Meaning |
 | --- | --- |
 | `SIGNAL_REST_URL` | signal-cli-rest-api base URL (required) |
