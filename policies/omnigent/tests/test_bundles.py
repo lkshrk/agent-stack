@@ -8,6 +8,8 @@ from pathlib import Path
 
 from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT
 
+from .scaling import CEILING, GROWTH_LIMIT, growth
+
 IN_IMAGE = os.environ.get("AGENT_STACK_IN_IMAGE") == "1"
 REPO = Path(__file__).resolve().parents[3]
 BUNDLES = REPO / "bundles"
@@ -1093,7 +1095,7 @@ class StatementAndWrapperTest(unittest.TestCase):
                         got = verdict(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": form}, ""))
                         self.assertEqual(got[0], want)
 
-    def test_full_call_within_50ms(self):
+    def test_full_call_within_ceiling(self):
         runs = lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n))
         inputs = {
             "80 redirect statements": ("; ".join(f"echo x > /tmp/f{i}" for i in range(80)), False),
@@ -1120,9 +1122,26 @@ class StatementAndWrapperTest(unittest.TestCase):
                 with self.subTest(agent=agent, input=label):
                     case = Case(agent, "tool_call", tool, {"command": command}, "")
                     timings = [timed_results(BUNDLES / agent, case) for _ in range(3)]
-                    self.assertLess(min(sum(seconds for _, seconds, _ in run) for run in timings), 0.05)
+                    self.assertLess(min(sum(seconds for _, seconds, _ in run) for run in timings), CEILING)
                     reasons = [decision.reason or "" for _, _, decision in timings[0]]
                     self.assertEqual(any("is not checked; split it up" in reason for reason in reasons), over_limit)
+
+    def test_full_call_scales_linearly(self):
+        shapes = {
+            "redirect targets": lambda n: "echo x" + "".join(f" > /tmp/a{i}" for i in range(n)),
+            "redirect statements": lambda n: "; ".join(f"echo x > /tmp/f{i}" for i in range(n)),
+            "find runs": lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n)),
+            "tee files, bash -lc": lambda n: ["bash", "-lc", "echo x | tee " + " ".join(f"/tmp/t{i}" for i in range(n))],
+            "bash -c bodies": lambda n: "; ".join(f"bash -c 'echo {i}'" for i in range(n)),
+        }
+        for agent, tool in SHELL_AGENTS:
+            for label, build in shapes.items():
+                with self.subTest(agent=agent, shape=label):
+                    def measure(n):
+                        case = Case(agent, "tool_call", tool, {"command": build(n)}, "")
+                        return sum(seconds for _, seconds, _ in timed_results(BUNDLES / agent, case))
+
+                    self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")

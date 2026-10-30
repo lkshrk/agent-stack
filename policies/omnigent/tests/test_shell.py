@@ -1,7 +1,8 @@
-import time
 import unittest
 
 from agent_stack_policies._shell import CHARACTER_LIMIT, STATEMENT_LIMIT, WORD_LIMIT, OpaqueCommand, has_quoted_operator, parse, resolve, shell_command, shell_name, walk
+
+from .scaling import CEILING, GROWTH_LIMIT, elapsed, growth
 
 
 def argv(command):
@@ -279,13 +280,10 @@ class CommentAfterSubstitutionTest(unittest.TestCase):
 
 class FindExecTest(unittest.TestCase):
     def test_all_find_exec_runs_are_nested(self):
-        tokens = ["find", "."]
-        for i in range(2_000):
-            tokens += ["-exec", "echo", str(i), ";"]
-        started = time.perf_counter()
-        command = resolve(tokens)
-        self.assertEqual(len(command.nested), 1_999)
-        self.assertLess(time.perf_counter() - started, 0.05)
+        runs = lambda n: ["find", "."] + [word for i in range(n) for word in ("-exec", "echo", str(i), ";")]
+        self.assertEqual(len(resolve(runs(2_000)).nested), 1_999)
+        self.assertLess(elapsed(lambda: resolve(runs(2_000))), CEILING)
+        self.assertLess(growth(lambda n: elapsed(lambda: resolve(runs(n))), 250), GROWTH_LIMIT)
 
 
 class OperatorWordTest(unittest.TestCase):
@@ -372,10 +370,20 @@ class FindRunTest(unittest.TestCase):
         }
         for label, command in inputs.items():
             with self.subTest(input=label):
-                started = time.perf_counter()
                 with self.assertRaises(OpaqueCommand):
                     walk(command)
-                self.assertLess(time.perf_counter() - started, 0.05)
+                self.assertLess(elapsed(lambda: self.assertRaises(OpaqueCommand, walk, command)), CEILING)
+
+    def test_walk_scales_linearly(self):
+        shapes = {
+            "statements": lambda n: "; ".join(f"echo x > /tmp/f{i}" for i in range(n)),
+            "find runs": lambda n: "find . " + " ".join(f"-exec echo {i} \\;" for i in range(n)),
+            "bash -c bodies": lambda n: "; ".join(f"bash -c 'echo {i}'" for i in range(n)),
+            "$() bodies": lambda n: "echo " + " ".join(f"$(echo {i})" for i in range(n)),
+        }
+        for label, build in shapes.items():
+            with self.subTest(shape=label):
+                self.assertLess(growth(lambda n: elapsed(lambda: walk(build(n))), 100), GROWTH_LIMIT)
 
     def test_walk_results_are_independent_copies(self):
         first = walk("ls -l; echo x")
@@ -501,10 +509,9 @@ class FindRunTest(unittest.TestCase):
         self.assertEqual(walk(at_limit), [["echo", "x" * (CHARACTER_LIMIT - 5)]])
         for command in (at_limit + "x", "cat > docs/a.md <<'EOF'\n" + "line\n" * (CHARACTER_LIMIT // 5) + "EOF", "echo '" + "a b " * 50_000 + "'"):
             with self.subTest(command=command[:30]):
-                started = time.perf_counter()
                 with self.assertRaisesRegex(OpaqueCommand, f"longer than {CHARACTER_LIMIT} characters"):
                     walk(command)
-                self.assertLess(time.perf_counter() - started, 0.005)
+                self.assertLess(elapsed(lambda: self.assertRaises(OpaqueCommand, walk, command)), 0.015)
 
 
 class WrapperOptionTest(unittest.TestCase):

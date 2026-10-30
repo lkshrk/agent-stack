@@ -1,10 +1,10 @@
-import time
 import unittest
 
 from agent_stack_policies._shell import _walk_cached
 from agent_stack_policies.paths import glob_match, path_guard
 
 from . import assert_not_ask, tool_call_event
+from .scaling import CEILING, GROWTH_LIMIT, elapsed, growth
 
 WORKFLOWS = ".github/workflows/**"
 UNPARSEABLE = {"type": "tool_call", "target": "Write", "data": {"name": "Write", "arguments": "{bad"}}
@@ -741,9 +741,25 @@ class ShellWriteScopeTest(unittest.TestCase):
                 for guard in guards:
                     with self.subTest(command=command[:30], count=count, guard=guards.index(guard)):
                         _walk_cached.cache_clear()
-                        started = time.perf_counter()
                         self.assertEqual(guard(tool_call_event("Bash", {"command": command}))["result"], expected)
-                        self.assertLess(time.perf_counter() - started, 0.05)
+                        self.assertLess(elapsed(lambda: guard(tool_call_event("Bash", {"command": command}))), CEILING)
+
+    def test_write_scope_check_scales_linearly(self):
+        guards = (
+            path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent"),
+            path_guard(allow_only=["docs/**", "/tmp/**"], deny=[WORKFLOWS, "**/.env*"]),
+        )
+        shapes = {
+            "targets": lambda n: "echo x" + "".join(f" > docs/a{i}.md" for i in range(n)),
+            "statements": lambda n: "; ".join(f"echo x > docs/a{i}.md" for i in range(n)),
+            "env -a targets": lambda n: "env -a x echo x" + "".join(f" > /tmp/a{i}" for i in range(n)),
+            "tee files, bash -lc": lambda n: ["bash", "-lc", "echo x | tee " + " ".join(f"/tmp/t{i}" for i in range(n))],
+        }
+        for index, guard in enumerate(guards):
+            for label, build in shapes.items():
+                with self.subTest(guard=index, shape=label):
+                    measure = lambda n: elapsed(lambda: guard(tool_call_event("Bash", {"command": build(n)})))
+                    self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
     def test_large_non_home_commands_keep_their_verdict(self):
         guard = path_guard(startup_files=[".bashrc"], startup_home="/home/omnigent")
