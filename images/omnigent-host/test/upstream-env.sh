@@ -13,6 +13,8 @@ while IFS= read -r line; do
   case $key in
     # GPG_KEY only verified the Python source in the python image's own build.
     HOME | HOSTNAME | PWD | SHLVL | _ | GPG_KEY) continue ;;
+    # BuildKit sets these in each RUN (trace context, proxy build args); they are not part of the image.
+    TRACEPARENT | TRACESTATE | HTTP_PROXY | http_proxy | HTTPS_PROXY | https_proxy | FTP_PROXY | ftp_proxy | NO_PROXY | no_proxy | ALL_PROXY | all_proxy) continue ;;
     PATH)
       IFS=: read -ra dirs <<<"$want"
       for dir in "${dirs[@]}"; do
