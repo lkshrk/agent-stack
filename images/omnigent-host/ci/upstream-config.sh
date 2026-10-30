@@ -5,8 +5,25 @@ dockerfile=$(dirname "$0")/../Dockerfile
 ref=${1:-$(sed -n 's/^ARG OMNIGENT_HOST_IMAGE=//p' "$dockerfile")}
 reviewed='{"Cmd":["sleep","infinity"],"WorkingDir":"/root"}'
 
-config=$(docker buildx imagetools inspect "$ref" --format '{{json .Image}}' |
-  jq -ce 'if has("config") then .config else .["linux/amd64"].config end')
+inspect() {
+  docker buildx imagetools inspect "$ref" --format '{{json .Image}}'
+}
+if ! image=$(inspect); then
+  echo "retrying the inspection of $ref in 10 s" >&2
+  sleep 10
+  image=$(inspect) || {
+    echo "FAIL could not inspect $ref"
+    exit 1
+  }
+fi
+
+config=$(jq -c '
+  if has("config") then select(.os == "linux" and .architecture == "amd64") | .config
+  else .["linux/amd64"].config end // empty' <<<"$image")
+if [[ -z $config ]]; then
+  echo "FAIL $ref has no linux/amd64 image config"
+  exit 1
+fi
 
 # Env is compared by test/upstream-env.sh; ArgsEscaped only affects Windows images.
 drift=$(jq -r --argjson reviewed "$reviewed" '
