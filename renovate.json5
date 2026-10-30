@@ -120,5 +120,10 @@
       addLabels: ['checksum-update'],
       automerge: false,
     },
+    {
+      description: 'Image inputs ship in the published images, so commit them as fixes to trigger a release',
+      matchFileNames: ['**/Dockerfile'],
+      semanticCommitType: 'fix',
+    },
   ],
 }
