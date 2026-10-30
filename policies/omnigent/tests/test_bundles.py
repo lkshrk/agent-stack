@@ -947,7 +947,21 @@ EVERY_BUNDLE_ALLOW = [
     r"find . -name '*.py' -exec grep -n TODO {} \;",
     "find . " + " ".join(f"-exec echo {i} \\;" for i in range(100)),
     "echo ';' claude -p hi",
+    r"echo hi \; claude -p hi",
 ]
+SPANS = "\n".join(f"- update `opt_{i}`" for i in range(300))
+WRITING_AGENTS = (("polly/agents/claude_code", "Bash"), ("polly", "sys_os_shell"), ("documenter", "Bash"), ("security-review", "Bash"))
+QUOTED_SPAN_ROWS = {
+    "gh pr create --title 'feat: x' --body \"$(cat <<'EOF'\n" + SPANS + "\nEOF\n)\"": ("ALLOW", "ALLOW", "DENY", "DENY"),
+    "git commit -m \"$(cat <<'EOF'\n" + SPANS + "\nEOF\n)\"": ("ALLOW", "DENY", "DENY", "DENY"),
+    "cat > docs/api.md <<'EOF'\n" + SPANS + "\nEOF": ("ALLOW", "DENY", "ALLOW", "DENY"),
+    'cat > docs/api.md <<"EOF"\n' + SPANS + "\nEOF": ("ALLOW", "DENY", "ALLOW", "DENY"),
+    "cat > docs/api.md <<\\EOF\n" + SPANS + "\nEOF": ("ALLOW", "DENY", "ALLOW", "DENY"),
+    'gh pr create --title x --body "$(gh pr merge 5)"': ("DENY", "DENY", "DENY", "DENY"),
+    "cat > docs/a.md <<EOF\n$(claude -p hi)\nEOF": ("DENY", "DENY", "DENY", "DENY"),
+    'git commit -m "`claude -p hi`"': ("DENY", "DENY", "DENY", "DENY"),
+    "tmux new-session -d echo ';' claude -p hi": ("ALLOW", "ALLOW", "ALLOW", "ALLOW"),
+}
 PROBE_AGENTS = ("polly/agents/claude_code", "documenter", "polly", "security-review", "planner")
 SCOPED_AGENTS = (("documenter", "Bash"), ("polly", "sys_os_shell"))
 
@@ -1011,6 +1025,13 @@ class StatementAndWrapperTest(unittest.TestCase):
                     with self.subTest(agent=agent, form=form):
                         self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": form}, "")), want)
 
+    def test_quoted_spans_are_text_and_real_substitutions_are_checked(self):
+        for command, expected in QUOTED_SPAN_ROWS.items():
+            for (agent, tool), want in zip(WRITING_AGENTS, expected):
+                for form in (command, ["bash", "-lc", command]):
+                    with self.subTest(agent=agent, form=str(form)[:60]):
+                        self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, {"command": form}, "")), want)
+
     def test_env_argv0_matches_plain_env(self):
         for agent, tool in SHELL_AGENTS:
             for argv0, plain in (("env -a x git commit -m x", "env git commit -m x"), ("env -a x tee -a docs/a.md", "env tee -a docs/a.md")):
@@ -1039,6 +1060,13 @@ class StatementAndWrapperTest(unittest.TestCase):
             "80 find runs": (runs(80), False),
             "2000 find runs": (runs(2_000), True),
             "2000 find {} + runs": ("find . " + " ".join("-exec ls {} +" for _ in range(2_000)), True),
+            "find runs at the statement limit, bash -lc": (["bash", "-lc", runs(STATEMENT_LIMIT - 2)], False),
+            "1018 tee files, bash -lc": (["bash", "-lc", "echo x | tee " + " ".join(f"/tmp/t{i}" for i in range(1_018))], False),
+            "2000 escaped spans in double quotes": ('echo "' + " ".join(f"\\`x{i}\\`" for i in range(2_000)) + '"', False),
+            "220-line PR body with escaped spans": (
+                'gh pr create --title x --body "' + "\n".join(f"- line {i}: set \\`opt_{i}\\` and \\`val_{i}\\`" for i in range(220)) + '"',
+                False,
+            ),
         }
         for agent, tool in SHELL_AGENTS:
             for label, (command, over_limit) in inputs.items():

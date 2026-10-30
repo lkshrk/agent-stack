@@ -382,6 +382,59 @@ class FindRunTest(unittest.TestCase):
         first[0].append("mutated")
         self.assertEqual(walk("ls -l; echo x"), [["ls", "-l"], ["echo", "x"]])
 
+    def test_spans_bash_does_not_run_are_text(self):
+        spans = "\n".join(f"- update `opt_{i}`" for i in range(300))
+        cases = {
+            "quoted heredoc in $()": f"gh pr create --title x --body \"$(cat <<'EOF'\n{spans}\nEOF\n)\"",
+            "commit heredoc": f"git commit -m \"$(cat <<'EOF'\n{spans}\nEOF\n)\"",
+            "quoted heredoc": f"cat > docs/api.md <<'EOF'\n{spans}\nEOF",
+            "double-quoted delimiter": f'cat > docs/api.md <<"EOF"\n{spans}\nEOF',
+            "escaped delimiter": f"cat > docs/api.md <<\\EOF\n{spans}\nEOF",
+            "single quotes": "gh pr comment 5 --body '" + " ".join(f"`opt_{i}`" for i in range(300)) + "'",
+            "ANSI-C quotes": "echo $'" + " ".join(f"`opt_{i}`" for i in range(300)) + "'",
+            "escaped in double quotes": 'echo "' + " ".join(f"\\`opt_{i}\\`" for i in range(300)) + '"',
+            "escaped unquoted": "echo " + " ".join(f"\\`opt_{i}\\`" for i in range(300)),
+            "comment": "echo hi # " + " ".join(f"`opt_{i}`" for i in range(300)),
+        }
+        for label, command in cases.items():
+            for form in (command, shell_command({"command": ["bash", "-lc", command]})):
+                with self.subTest(case=label, form=form[:12]):
+                    statements = walk(form)
+                    self.assertFalse(any(s and s[0].startswith("opt_") for s in statements), statements[:5])
+
+    def test_substitutions_bash_runs_are_walked(self):
+        cases = {
+            "unquoted heredoc": "cat > docs/a.md <<EOF\n`claude -p hi`\nEOF",
+            "unquoted heredoc $()": "cat <<EOF\n$(claude -p hi)\nEOF",
+            "double quotes": 'echo "`claude -p hi`"',
+            "$() in double quotes": 'echo "$(claude -p hi)"',
+            "after a comment with a quote": "echo hi # it's\necho $(claude -p hi)",
+            "after a comment with <<": "# use <<EOF\necho $(claude -p hi)",
+            "after a $() heredoc": "x=$(cat <<'EOF'\nfoo (\nEOF\n)\necho `claude -p hi`",
+            "nested backticks": "echo `echo \\`claude -p hi\\``",
+            "inside $() in double quotes": 'echo "$(echo "a" `claude -p hi`)"',
+            "unclosed $()": "echo $(claude -p hi",
+        }
+        for label, command in cases.items():
+            with self.subTest(case=label):
+                self.assertIn(["claude", "-p", "hi"], walk(command))
+
+    def test_rough_bodies_count_toward_the_limits(self):
+        body = "echo it's; " + "; ".join(["true"] * STATEMENT_LIMIT)
+        with self.assertRaisesRegex(OpaqueCommand, f"more than {STATEMENT_LIMIT} statements"):
+            walk(f'echo "$({body})"')
+        words = "echo it's " + " ".join(["x"] * WORD_LIMIT)
+        with self.assertRaisesRegex(OpaqueCommand, f"more than {WORD_LIMIT} words"):
+            walk(f'echo "$({words})"')
+
+    def test_limit_reasons_say_how_to_recover(self):
+        for command, limit in (("; ".join(["true"] * (STATEMENT_LIMIT + 1)), "statements"), ("echo " + " ".join(["x"] * WORD_LIMIT), "words")):
+            with self.subTest(limit=limit):
+                with self.assertRaises(OpaqueCommand) as caught:
+                    walk(command)
+                self.assertIn(limit, str(caught.exception))
+                self.assertIn("put a long script in a file under the workspace", str(caught.exception))
+
 
 class WrapperOptionTest(unittest.TestCase):
     def test_help_value_options_and_abbreviations(self):
