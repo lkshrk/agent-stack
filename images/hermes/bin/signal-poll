@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Sends or closes a Signal poll through the signal-shim sidecar; <chat> is `group:<id>` or a phone number.
+set -euo pipefail
+
+usage() {
+  echo "usage: signal-poll create <chat> <question> <option> <option> [<option>...]" >&2
+  echo "       signal-poll close <chat> <poll timestamp>" >&2
+  exit 2
+}
+
+rpc() {
+  local method=$1 params=$2 resp
+  if [ -n "${SIGNAL_ACCOUNT:-}" ]; then
+    params=$(jq -c --arg a "$SIGNAL_ACCOUNT" '. + {account: $a}' <<<"$params")
+  fi
+  resp=$(jq -nc --arg m "$method" --argjson p "$params" '{jsonrpc: "2.0", method: $m, params: $p, id: "signal-poll"}' \
+    | curl -fsS --max-time 60 -H 'Content-Type: application/json' --data-binary @- \
+      "${SIGNAL_HTTP_URL:-http://127.0.0.1:8090}/api/v1/rpc")
+  if jq -e '.error' <<<"$resp" >/dev/null; then
+    echo "signal-poll: $(jq -r '.error.message // .error' <<<"$resp")" >&2
+    exit 1
+  fi
+  jq -c '.result // {}' <<<"$resp"
+}
+
+target() {
+  case $1 in
+    group:*) jq -nc --arg g "${1#group:}" '{groupId: $g}' ;;
+    *) jq -nc --arg r "$1" '{recipient: [$r]}' ;;
+  esac
+}
+
+[ $# -ge 1 ] || usage
+case $1 in
+  create)
+    [ $# -ge 5 ] || usage
+    chat=$2 question=$3
+    shift 3
+    params=$(jq -c --arg q "$question" '. + {question: $q, options: $ARGS.positional}' --args "$@" <<<"$(target "$chat")")
+    rpc sendPollCreate "$params" | jq -r '.timestamp'
+    ;;
+  close)
+    [ $# -eq 3 ] || usage
+    params=$(jq -c --arg t "$3" '. + {pollTimestamp: $t}' <<<"$(target "$2")")
+    rpc sendPollTerminate "$params" >/dev/null
+    ;;
+  *) usage ;;
+esac
