@@ -390,8 +390,18 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(out["state"], "completed")
         self.assertEqual(len(self.calls("complete")), 1)
 
+    def test_idle_with_valid_block_completes_despite_unsettled_child(self):
+        out = self.run_slice(snapshot(), children=[child(None), child("running")])
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(len(self.calls("complete")), 1)
+
+    def test_idle_with_invalid_block_and_running_child_keeps_following(self):
+        out = self.run_slice(snapshot({"status": "DONE"}, updated_at=T0), children=[child("running")], slice_seconds=0)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertFalse(self.terminal_writes())
+
     def test_idle_child_listing_error_fails_closed(self):
-        out = self.run_slice(snapshot(), fail={"child_sessions": OmnigentError(0, "reset")})
+        out = self.run_slice(between_rounds(updated_at=T0), fail={"child_sessions": OmnigentError(0, "reset")})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
     def test_failed_session_blocks_without_child_listing(self):

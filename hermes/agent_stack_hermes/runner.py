@@ -9,6 +9,7 @@ from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
 from agent_stack_hermes.postrun import GitHubReader, agent_actors, violations
 from agent_stack_hermes.runspec import (
+    INVALID_RESULT,
     MAX_RUNTIME,
     NO_RESULT_BLOCK,
     Outcome,
@@ -291,13 +292,14 @@ def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verd
     else:
         children, missing = None, False
         if _quiet(snap):
-            children = omni.child_sessions(session_id)
-            if not any(_child_active(c) for c in children):
-                outcome = evaluate(spec.bundle, snap)
-                # A planner between critic rounds idles with only a status line.
-                missing = outcome.result is None and outcome.reason == NO_RESULT_BLOCK
-                if not missing:
-                    return _judge(spec, session_id, outcome, comments, omni, gh)
+            outcome = evaluate(spec.bundle, snap)
+            valid = outcome.result is not None and not outcome.reason.startswith(INVALID_RESULT)
+            children = [] if valid else omni.child_sessions(session_id)
+            settled = not any(_child_active(c) for c in children)
+            # A planner between critic rounds idles with only a status line.
+            missing = settled and outcome.result is None and outcome.reason == NO_RESULT_BLOCK
+            if valid or (settled and not missing):
+                return _judge(spec, session_id, outcome, comments, omni, gh)
         created = _epoch(snap, "created_at")
         updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
         if t - updated > STALL_SECONDS:

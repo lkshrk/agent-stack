@@ -17,6 +17,7 @@ LINK_PREFIX = "agent-stack-link: "
 RUN_PREFIX = "agent-stack-run: "
 MAX_ERRORS_SHOWN = 5
 NO_RESULT_BLOCK = "no result block"
+INVALID_RESULT = "invalid result: "
 
 _REPO = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _REF_BAD = re.compile(r"[\s#]")
@@ -168,7 +169,7 @@ def evaluate(bundle: str, snapshot: dict) -> Outcome:
         return _block(NO_RESULT_BLOCK)
     errors = validate_result(RESULT_KIND[bundle], result)
     if errors:
-        return _block("invalid result: " + "; ".join(errors[:MAX_ERRORS_SHOWN]), result=result)
+        return _block(INVALID_RESULT + "; ".join(errors[:MAX_ERRORS_SHOWN]), result=result)
     if result.get("status") == "BLOCKED":
         blocked = result["blocked"]
         return Outcome(False, blocked["class"], blocked["question"], result)
