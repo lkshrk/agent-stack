@@ -23,11 +23,6 @@ memory:
 skills:
   write_approval: false
 
-approvals:
-  mode: smart
-  cron_mode: deny
-  unattended_mode: deny
-
 # The gateway's dispatcher reads these from this profile for every assignee's cards.
 kanban:
   auto_decompose: false

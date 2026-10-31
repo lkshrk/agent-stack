@@ -22,8 +22,3 @@ memory:
 
 skills:
   write_approval: true
-
-approvals:
-  mode: smart
-  cron_mode: deny
-  unattended_mode: deny

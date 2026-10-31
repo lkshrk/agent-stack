@@ -20,11 +20,6 @@ memory:
 skills:
   write_approval: true
 
-approvals:
-  mode: smart
-  cron_mode: deny
-  unattended_mode: deny
-
 kanban:
   auto_decompose: false
   review_dispatch: false

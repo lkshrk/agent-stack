@@ -28,7 +28,6 @@ H16_PER_PROFILE = {
     "delegation": None,
     "memory": ["provider", "write_approval"],
     "skills": ["write_approval"],
-    "approvals": None,
     "mcp_servers": None,
     "plugins": None,
     "platform_toolsets": None,
