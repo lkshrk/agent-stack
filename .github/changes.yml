@@ -24,6 +24,7 @@ policies:
   - *ci
   - 'policies/omnigent/**'
   - 'hermes/**'
+  - 'config/hermes/**'
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
@@ -50,6 +51,11 @@ hermes:
   - *shared
   - 'images/hermes/**'
   - 'config/hermes/**'
+  - 'hermes/**'
+  - 'policies/omnigent/**'
+  - 'bundles/**'
+  - 'config/omnigent/**'
+  - 'images/omnigent-host/codex/**'
 hermes-webui:
   - *shared
   - 'images/hermes-webui/**'
@@ -57,3 +63,4 @@ hermes-webui:
   - 'images/hermes/profile.d/agent-path.sh'
   - 'images/hermes/gitconfig'
   - 'config/hermes/config.yaml'
+  - 'config/hermes/profiles/default/config.yaml'

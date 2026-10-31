@@ -1,0 +1,53 @@
+gateway:
+  multiplex_profiles: true
+
+model:
+  provider: custom:litellm
+  default: smart-auto
+
+auxiliary:
+  background_review:
+    enabled: true
+
+agent:
+  max_turns: 150
+
+delegation:
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+
+memory:
+  provider: openviking
+  write_approval: false
+
+skills:
+  write_approval: false
+
+approvals:
+  mode: smart
+  cron_mode: deny
+  unattended_mode: deny
+
+mcp_servers:
+  linear_read:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_read
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+    tools:
+      include:
+        - list_issues
+        - get_issue
+        - list_comments
+        - list_projects
+        - get_project
+        - list_teams
+        - list_issue_labels
+        - list_issue_statuses
+  context7:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/context7
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+  searxng:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/searxng
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}

@@ -1,0 +1,29 @@
+model:
+  provider: custom:litellm
+  default: anthropic/claude-haiku
+
+auxiliary:
+  background_review:
+    enabled: false
+
+platform_toolsets:
+  cli: [omnigent_runner]
+  api_server: [omnigent_runner]
+
+plugins:
+  enabled: [omnigent_runner]
+
+agent:
+  max_turns: 400
+  disabled_toolsets: [kanban, terminal, file, code_execution, delegation, skills, web, memory, browser, cronjob, computer_use]
+
+memory:
+  write_approval: true
+
+skills:
+  write_approval: true
+
+approvals:
+  mode: smart
+  cron_mode: deny
+  unattended_mode: deny

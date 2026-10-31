@@ -1,0 +1,37 @@
+model:
+  provider: custom:litellm
+  default: smart-auto
+
+auxiliary:
+  background_review:
+    enabled: true
+
+platform_toolsets:
+  cli: [memory, todo, linear_app]
+  api_server: [memory, todo, linear_app]
+
+agent:
+  max_turns: 150
+  disabled_toolsets: [terminal, file, code_execution, delegation, skills, browser, cronjob, computer_use]
+
+memory:
+  write_approval: true
+
+skills:
+  write_approval: true
+
+approvals:
+  mode: smart
+  cron_mode: deny
+  unattended_mode: deny
+
+kanban:
+  auto_decompose: false
+  review_dispatch: false
+  failure_limit: 2
+
+mcp_servers:
+  linear_app:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_app
+    headers:
+      x-litellm-api-key: ${LITELLM_DELIVERY_API_KEY}

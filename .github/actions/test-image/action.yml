@@ -42,7 +42,7 @@ runs:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        target: ${{ startsWith(inputs.image, 'omnigent-') && 'test' || '' }}
+        target: ${{ (startsWith(inputs.image, 'omnigent-') || inputs.image == 'hermes') && 'test' || '' }}
         push: false
         load: ${{ inputs.image == 'hermes-webui' }}
         outputs: ${{ inputs.image != 'hermes-webui' && 'type=cacheonly' || '' }}
@@ -89,7 +89,7 @@ runs:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        target: ${{ startsWith(inputs.image, 'omnigent-') && 'test' || '' }}
+        target: ${{ (startsWith(inputs.image, 'omnigent-') || inputs.image == 'hermes') && 'test' || '' }}
         push: false
         outputs: type=cacheonly
         cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache,mode=max
