@@ -479,6 +479,9 @@ CASES: list[Case] = [
     Case("security-review", "tool_call", "Bash", {"command": "GH_TOKEN_FILE=/agent-secrets/github/review gh pr review 3 --approve"}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": 'GH_TOKEN="$(cat /agent-secrets/github/review)" gh pr diff 3 --repo o/r'}, "DENY"),
     Case("security-review", "tool_call", "Bash", {"command": "rg -n subprocess src"}, "ALLOW"),
+    Case("security-review", "tool_call", "Bash", {"command": "cat /proc/1/environ"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "cat $HOME/.codex/config.toml"}, "DENY"),
+    Case("security-review", "tool_call", "Bash", {"command": "printenv"}, "DENY"),
     *[
         Case("security-review", "tool_call", "Bash", {"command": form}, expected)
         for command, expected in (

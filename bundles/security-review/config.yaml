@@ -99,6 +99,12 @@ guardrails:
         arguments:
           secret_dir: /agent-secrets
           token_file: /agent-secrets/github/review
+    no_process_secrets:
+      type: function
+      function:
+        # Pattern-based and best effort: Codex runs without its own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
     read_only_os:
       type: function
       function:
