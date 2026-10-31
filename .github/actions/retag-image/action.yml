@@ -1,0 +1,47 @@
+name: retag-image
+description: Publish an unchanged image under a new release by pointing its version tags at the previous release's manifest
+
+inputs:
+  image:
+    description: Directory under images/, e.g. hermes
+    required: true
+  version:
+    description: Release tag to publish, e.g. v1.2.3
+    required: true
+  previous:
+    description: Release tag whose manifest the new tags point at, e.g. v1.2.2
+    required: true
+  token:
+    description: Token with packages write access
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+    - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.token }}
+    - name: Tag the previous release's manifest with this release's version tags
+      shell: bash
+      env:
+        IMAGE: ghcr.io/${{ github.repository }}/${{ inputs.image }}
+        VERSION: ${{ inputs.version }}
+        PREVIOUS: ${{ inputs.previous }}
+      run: |
+        set -euo pipefail
+        digest() { docker buildx imagetools inspect --format '{{json .Manifest}}' "$1" | jq -r .digest; }
+        version=${VERSION#v}
+        tags=("$version" "${version%.*}" latest)
+        want=$(digest "$IMAGE:${PREVIOUS#v}")
+        args=()
+        for tag in "${tags[@]}"; do args+=(--tag "$IMAGE:$tag"); done
+        # Without --prefer-index=false a single-manifest source is wrapped in a new index with a new digest.
+        docker buildx imagetools create --prefer-index=false "${args[@]}" "$IMAGE@$want"
+        for tag in "${tags[@]}"; do
+          got=$(digest "$IMAGE:$tag")
+          [ "$got" = "$want" ] || { echo "::error::$IMAGE:$tag is $got, want $want"; exit 1; }
+        done
+        echo "::notice::$IMAGE:$version is unchanged from ${PREVIOUS#v} ($want)"
