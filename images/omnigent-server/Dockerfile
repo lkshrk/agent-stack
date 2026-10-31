@@ -1,17 +1,11 @@
-ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.19.1@sha256:5746692f3c3a95502f76f83260c3e5ff36348ad8c3cdce1fab85784065e44dad
+ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.21.0.dev20261031@sha256:55a9b9d4cc494354f18d6729011e51fcd721189bcdf53db05aeb84a613b14ceb
 
 FROM ${OMNIGENT_SERVER_IMAGE} AS image
 
-# Upstream gives --agent rows a random id, which its omnigent.ai/agent label gate never accepts.
-RUN f=$(/opt/venv/bin/python3 -c 'import omnigent.cli as c; print(c.__file__)') \
- && [ "$(grep -cx '    from omnigent.db.utils import generate_agent_id' "$f")" = 1 ] \
- && [ "$(grep -cx '    agent_id = generate_agent_id()' "$f")" = 1 ] \
- && sed -i -e 's/^    from omnigent\.db\.utils import generate_agent_id$/    from omnigent.db.utils import builtin_agent_id/' \
-           -e 's/^    agent_id = generate_agent_id()$/    agent_id = builtin_agent_id(spec.name)/' "$f" \
- && rm -f "$(dirname "$f")"/__pycache__/cli.*.pyc \
- && /opt/venv/bin/python3 -c 'import omnigent.cli'
-
 COPY bundles/ /agents/
+# Extra built-ins seed last, so they win over any packaged agent of the same name.
+ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter \
+    OMNIGENT_SEEDED_AGENTS=claude-native-ui,codex-native-ui
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
@@ -26,7 +20,7 @@ RUN if [ -n "$AGENT_STACK_VERSION" ]; then \
     fi
 
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
-CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly", "--agent", "/agents/planner", "--agent", "/agents/security-review", "--agent", "/agents/documenter"]
+CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml"]
 
 FROM image AS test
 ARG AGENT_STACK_VERSION=""
@@ -37,7 +31,7 @@ COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 COPY images/omnigent-server/test/ /src/images/omnigent-server/test/
-RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py /agents/polly /agents/planner /agents/security-review /agents/documenter
+RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py
 RUN pin='^    image: ghcr\.io/lkshrk/agent-stack/omnigent-host:' \
  && got=$(grep -E "$pin" /etc/omnigent/config.yaml) \
  && if [ -n "$AGENT_STACK_VERSION" ]; then want="    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}"; \
