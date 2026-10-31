@@ -43,6 +43,18 @@ def snapshot(result=None, **over):
     return snap
 
 
+def between_rounds(**over):
+    snap = snapshot(**over)
+    snap["items"][-1]["data"]["content"][0]["text"] = "Critic round 1 sent; waiting for its reply."
+    return snap
+
+
+def child(status, **over):
+    task_status = {"running": "in_progress", "waiting": "in_progress", "idle": "completed", "failed": "failed"}
+    return {"id": f"k_{status}", "updated_at": T0 - 60, "busy": status in ("running", "waiting"),
+            "current_task_status": task_status.get(status), "pending_elicitations_count": 0, **over}
+
+
 def running(**over):
     return snapshot(**{"status": "running", "active_response_id": "resp_1", "updated_at": T0, **over})
 
@@ -338,6 +350,54 @@ class RunnerTest(unittest.TestCase):
                 out = self.run_slice(running(updated_at=stale), **omni)
                 self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
                 self.assertFalse(self.calls("complete"))
+
+    def test_idle_planner_with_running_critic_keeps_following(self):
+        snap = between_rounds(updated_at=T0 - 30)
+        for state in (child("running"), child("waiting"), child(None), child("idle", pending_elicitations_count=1)):
+            with self.subTest(child=state):
+                self.log.clear()
+                out = self.run_slice(snap, bundle="planner", children=[child("idle"), state], slice_seconds=0)
+                self.assertEqual((out["state"], out["call_again"]), ("running", True))
+                self.assertFalse(self.terminal_writes() + self.calls("interrupt"))
+                self.assertEqual(self.calls("child_sessions"), [("child_sessions", "conv_old")])
+
+    def test_idle_without_block_keeps_following_before_stall_cap(self):
+        out = self.run_slice(between_rounds(updated_at=T0 - 30), bundle="planner",
+                             children=[child("idle"), child("failed")], slice_seconds=0)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertFalse(self.terminal_writes() + self.calls("interrupt"))
+
+    def test_idle_without_block_blocks_after_stall_cap(self):
+        stale = T0 - runner.STALL_SECONDS - 1
+        out = self.run_slice(between_rounds(updated_at=stale), bundle="planner",
+                             children=[child("idle", updated_at=stale - 5)])
+        self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_old")])
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: no result block")
+
+    def test_idle_without_block_counts_child_activity_toward_stall(self):
+        stale = T0 - runner.STALL_SECONDS - 1
+        out = self.run_slice(between_rounds(updated_at=stale), bundle="planner",
+                             children=[child("idle", updated_at=T0 - 60)], slice_seconds=0)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertFalse(self.terminal_writes())
+
+    def test_idle_with_invalid_block_blocks_immediately(self):
+        out = self.run_slice(snapshot({"status": "DONE"}, updated_at=T0), children=[child("idle")])
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: invalid result")
+
+    def test_idle_with_valid_block_and_idle_children_completes(self):
+        out = self.run_slice(snapshot(), children=[child("idle"), child("failed")])
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(len(self.calls("complete")), 1)
+
+    def test_idle_child_listing_error_fails_closed(self):
+        out = self.run_slice(snapshot(), fail={"child_sessions": OmnigentError(0, "reset")})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
+
+    def test_failed_session_blocks_without_child_listing(self):
+        out = self.run_slice(between_rounds(status="failed"), children=[child("running")])
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: session failed")
+        self.assertFalse(self.calls("child_sessions"))
 
     def test_runtime_cap_blocks(self):
         out = self.run_slice(running(created_at=T0 - 7201), bundle="planner")

@@ -10,6 +10,8 @@ from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, Toke
 from agent_stack_hermes.postrun import GitHubReader, agent_actors, violations
 from agent_stack_hermes.runspec import (
     MAX_RUNTIME,
+    NO_RESULT_BLOCK,
+    Outcome,
     RunSpec,
     evaluate,
     parse_card_body,
@@ -122,9 +124,12 @@ def _empty(value) -> bool:
     return value is None or value == [] or value == 0
 
 
-def _terminal(snap: dict) -> bool:
-    if snap.get("status") == "failed":
-        return True
+def _child_active(child: dict) -> bool:
+    settled = child.get("busy") is False and _empty(child.get("pending_elicitations_count"))
+    return not settled or child.get("current_task_status") not in ("completed", "failed")
+
+
+def _quiet(snap: dict) -> bool:
     labels = snap.get("labels")
     labels = labels if isinstance(labels, dict) else {}
     return (
@@ -237,8 +242,7 @@ def _pr_url(result: dict, omni, session_id: str) -> str | None:
     return url
 
 
-def _judge(spec: RunSpec, session_id: str, snap: dict, comments: tuple[str, ...], omni, gh) -> _Verdict:
-    outcome = evaluate(spec.bundle, snap)
+def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str, ...], omni, gh) -> _Verdict:
     result = outcome.result if isinstance(outcome.result, dict) else {}
     pr_url = _pr_url(result, omni, session_id)
     at, before = _refs_before(comments)
@@ -282,16 +286,26 @@ def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verd
     t = now()
     if sandbox_error is not None:
         reason = f"sandbox failed: {sandbox_error}"
-    elif _terminal(snap):
-        return _judge(spec, session_id, snap, comments, omni, gh)
+    elif snap.get("status") == "failed":
+        return _judge(spec, session_id, evaluate(spec.bundle, snap), comments, omni, gh)
     else:
+        children, missing = None, False
+        if _quiet(snap):
+            children = omni.child_sessions(session_id)
+            if not any(_child_active(c) for c in children):
+                outcome = evaluate(spec.bundle, snap)
+                # A planner between critic rounds idles with only a status line.
+                missing = outcome.result is None and outcome.reason == NO_RESULT_BLOCK
+                if not missing:
+                    return _judge(spec, session_id, outcome, comments, omni, gh)
         created = _epoch(snap, "created_at")
         updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
         if t - updated > STALL_SECONDS:
             # A parent waiting on a sub-agent gets no items, so its updated_at stays put.
-            updated = max([updated, *(_epoch(c, "updated_at") for c in omni.child_sessions(session_id))])
+            children = omni.child_sessions(session_id) if children is None else children
+            updated = max([updated, *(_epoch(c, "updated_at") for c in children)])
         if t - updated > STALL_SECONDS:
-            reason = f"stalled: no session or child session update for {int(t - updated)} s"
+            reason = NO_RESULT_BLOCK if missing else f"stalled: no session or child session update for {int(t - updated)} s"
         elif t - created > MAX_RUNTIME[spec.bundle]:
             reason = f"runtime cap: {int(t - created)} s exceeds {MAX_RUNTIME[spec.bundle]} s"
         else:
