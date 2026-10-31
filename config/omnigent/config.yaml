@@ -17,15 +17,15 @@ sandbox:
         claude-sdk:
           provider: litellm
           default_model: anthropic-auto
-          model_allowlist: [anthropic-auto, anthropic/claude-fable, anthropic/claude-opus, anthropic/claude-sonnet]
+          model_allowlist: [anthropic-auto, smart-auto, anthropic/claude-fable, anthropic/claude-opus, anthropic/claude-sonnet]
         claude-native:
           provider: litellm
           default_model: anthropic-auto
-          model_allowlist: [anthropic-auto, anthropic/claude-sonnet, anthropic/claude-opus]
+          model_allowlist: [anthropic-auto, smart-auto, anthropic/claude-sonnet, anthropic/claude-opus]
         codex-native:
           provider: litellm
           default_model: openai-auto
-          model_allowlist: [openai-auto, openai/gpt-astra, openai/gpt-sol]
+          model_allowlist: [openai-auto, smart-auto, openai/gpt-astra, openai/gpt-sol]
   kubernetes:
     namespace: omnigent-sandboxes
     service_account: omnigent-runner
