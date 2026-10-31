@@ -167,8 +167,10 @@ class OmnigentClient:
             raise _bad_body("pull-requests response has no data list")
         return data
 
-    def list_sessions(self, agent_id: str | None = None, max_pages: int = MAX_LIST_PAGES) -> list[dict]:
-        params = {"limit": LIST_PAGE_SIZE, "order": "desc", "sort_by": "created_at", "visibility": "mine"}
+    def list_sessions(
+        self, agent_id: str | None = None, visibility: str = "mine", max_pages: int = MAX_LIST_PAGES
+    ) -> list[dict]:
+        params = {"limit": LIST_PAGE_SIZE, "order": "desc", "sort_by": "created_at", "visibility": visibility}
         if agent_id:
             params["agent_id"] = agent_id
         sessions: list[dict] = []

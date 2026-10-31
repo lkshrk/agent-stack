@@ -272,6 +272,13 @@ class ClientTest(unittest.TestCase):
                                       "visibility": ["mine"], "agent_id": ["ag1"]})
         self.assertEqual((queries[1]["after"], queries[2]["after"]), (["c2"], ["c1x"]))
 
+    def test_list_sessions_archived_visibility_without_agent_filter(self):
+        c, opener = client([json_response({"object": "list", "data": [{"id": "c9"}], "has_more": False})])
+        self.assertEqual(c.list_sessions(visibility="archived"), [{"id": "c9"}])
+        query = parse_qs(opener.requests[0].full_url.split("?", 1)[1])
+        self.assertEqual(query["visibility"], ["archived"])
+        self.assertNotIn("agent_id", query)
+
     def test_list_sessions_fails_closed(self):
         page = {"data": [{"id": "c"}], "last_id": "c", "has_more": True}
         cases = [

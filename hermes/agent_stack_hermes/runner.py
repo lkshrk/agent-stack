@@ -11,7 +11,6 @@ from agent_stack_hermes.postrun import GitHubReader, violations
 from agent_stack_hermes.runspec import (
     MAX_RUNTIME,
     RunSpec,
-    builtin_agent_id,
     evaluate,
     parse_card_body,
     session_request,
@@ -138,20 +137,18 @@ def _terminal(snap: dict) -> bool:
     )
 
 
-def _recover(omni, task_id: str, spec: RunSpec) -> str | None:
-    matches = [
-        s
-        for s in omni.list_sessions(agent_id=builtin_agent_id(spec.bundle))
-        if isinstance(s.get("labels"), dict) and s["labels"].get(CARD_LABEL) == task_id
-    ]
+def _recover(omni, task_id: str) -> str | None:
+    matches: set[str] = set()
+    for visibility in ("mine", "archived"):
+        for s in omni.list_sessions(visibility=visibility):
+            if isinstance(s.get("labels"), dict) and s["labels"].get(CARD_LABEL) == task_id:
+                session_id = s.get("id")
+                if not isinstance(session_id, str) or not session_id:
+                    raise ValueError("listed session has no id")
+                matches.add(session_id)
     if len(matches) > 1:
         raise _BlockReason("multiple sessions for this card")
-    if not matches:
-        return None
-    session_id = matches[0].get("id")
-    if not isinstance(session_id, str) or not session_id:
-        raise ValueError("listed session has no id")
-    return session_id
+    return matches.pop() if matches else None
 
 
 def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link, comments) -> tuple[str, tuple]:
@@ -162,7 +159,7 @@ def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link,
         kanban.note(task_id, refs_note)
         notes = (refs_note,)
     else:
-        session_id = _recover(omni, task_id, spec)
+        session_id = _recover(omni, task_id)
     created = session_id is None
     if created:
         session_id = omni.create_session(session_request(spec, task_id, link))

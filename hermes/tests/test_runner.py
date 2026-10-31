@@ -80,11 +80,13 @@ class FakeKanban:
 class FakeOmnigent:
     def __init__(self, log, clock, snap, events=(DONE_EVENT,), step=0, prs=(), fail=None, sessions=()):
         self.log, self.clock, self.snap, self.events, self.step = log, clock, snap, events, step
-        self.prs, self.fail, self.sessions = list(prs), fail or {}, list(sessions)
+        self.prs, self.fail = list(prs), fail or {}
+        self.sessions = dict(sessions) if isinstance(sessions, dict) else {"mine": list(sessions)}
 
-    def list_sessions(self, agent_id=None):
-        self._call("list_sessions", agent_id)
-        return copy.deepcopy(self.sessions)
+    def list_sessions(self, agent_id=None, visibility="mine"):
+        self._call("list_sessions", agent_id, visibility)
+        listed = self.sessions.get(visibility, [])
+        return copy.deepcopy([s for s in listed if agent_id is None or s.get("agent_id", agent_id) == agent_id])
 
     def _call(self, name, *args):
         self.log.append((name, *args))
@@ -346,11 +348,31 @@ class RunnerTest(unittest.TestCase):
                     {"id": "conv_found", "labels": {"agent-stack/card": "t_1"}},
                     {"id": "conv_bare"}]
         out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
-        self.assertEqual(self.calls("list_sessions"), [("list_sessions", builtin_agent_id("polly"))])
+        self.assertEqual(self.calls("list_sessions"),
+                         [("list_sessions", None, "mine"), ("list_sessions", None, "archived")])
         self.assertFalse(self.calls("create") + self.calls("refs"))
         self.assertEqual([c[1] for c in self.calls("note")], [runner.SESSION_NOTE + "conv_found"])
         self.assertEqual(self.calls("stream")[0][1], "conv_found")
         self.assertEqual((out["session_id"], out["call_again"]), ("conv_found", True))
+
+    def test_label_match_on_another_agent_resumes(self):
+        other = {"id": "conv_planner", "agent_id": builtin_agent_id("planner"), "labels": {"agent-stack/card": "t_1"}}
+        out = self.run_slice(running(), comments=RECORDED[:1], sessions=[other])
+        self.assertFalse(self.calls("create"))
+        self.assertEqual(out["session_id"], "conv_planner")
+
+    def test_label_match_only_in_archived_listing_resumes(self):
+        archived = {"id": "conv_archived", "archived": True, "labels": {"agent-stack/card": "t_1"}}
+        out = self.run_slice(running(), comments=RECORDED[:1], sessions={"mine": [], "archived": [archived]})
+        self.assertFalse(self.calls("create"))
+        self.assertEqual(out["session_id"], "conv_archived")
+
+    def test_label_matches_across_listings_count_together(self):
+        match = {"labels": {"agent-stack/card": "t_1"}}
+        sessions = {"mine": [{"id": "conv_a", **match}], "archived": [{"id": "conv_b", **match}, {"id": "conv_a", **match}]}
+        out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
+        self.assertFalse(self.calls("create"))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: multiple sessions for this card")
 
     def test_refs_note_without_session_creates_with_original_baseline(self):
         moved = {**AFTER, "refs/tags/v1": "d" * 40}
