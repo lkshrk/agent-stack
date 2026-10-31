@@ -7,7 +7,7 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, deny, is_response, response_text, session_state, turn_final
 from .spawn import COLLECT_STATE_KEY, DISPATCH_STATE_KEY, awaiting
 
-KINDS = ("planner", "security", "documenter")
+KINDS = ("planner", "security", "documenter", "polly")
 STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED")
 BLOCK_CLASSES = ("decision", "permission", "dependency", "environment")
 RISK_CLASSES = ("low", "medium", "high")
@@ -27,6 +27,7 @@ _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
 _GAP_ID = re.compile(r"gap-[1-9][0-9]*")
 _GAP_REF = re.compile(r"(gap-[1-9][0-9]*)(?![\w-])")
 _LOCATION = re.compile(r"[^\s:]+:[1-9][0-9]*")
+_PULL_URL = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/[1-9][0-9]*")
 
 
 def extract_result(text: str) -> dict | None:
@@ -268,6 +269,14 @@ def _check_documenter(result: dict, errors: list[str]) -> None:
         errors.append("pr is required in delta mode with changed files")
 
 
+def _check_polly(result: dict, errors: list[str]) -> None:
+    pr = result.get("pr")
+    if not isinstance(pr, str) or not _PULL_URL.fullmatch(pr):
+        errors.append("pr must be a https://github.com/<owner>/<repo>/pull/<n> URL")
+    if not _text(result.get("branch")):
+        errors.append("branch must be a non-empty string")
+
+
 def _check_gate(result: dict, errors: list[str]) -> None:
     gate = result.get("gate")
     if (gate is not None or result.get("status") != "BLOCKED") and gate not in GATES:
@@ -338,7 +347,7 @@ def _check_assumptions(result: dict, gap_ids: set[str], errors: list[str]) -> No
             errors.append(f"assumptions[{i}] must start with a gap id from gaps, e.g. 'gap-1: ...'")
 
 
-_CHECKS = {"planner": _check_planner, "security": _check_security, "documenter": _check_documenter}
+_CHECKS = {"planner": _check_planner, "security": _check_security, "documenter": _check_documenter, "polly": _check_polly}
 
 
 def validate_result(kind: str, result: dict) -> list[str]:
@@ -355,7 +364,7 @@ def validate_result(kind: str, result: dict) -> list[str]:
         return errors
     if kind == "planner":
         _check_gate(result, errors)
-    may_stub = kind == "documenter" and result.get("mode") == "delta"
+    may_stub = kind == "polly" or (kind == "documenter" and result.get("mode") == "delta")
     _check_assumptions(result, _check_gaps(result, kind, may_stub, errors), errors)
     if status == "BLOCKED":
         blocked = result.get("blocked")

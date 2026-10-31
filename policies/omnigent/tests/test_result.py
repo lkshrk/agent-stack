@@ -580,3 +580,42 @@ class DepthTest(unittest.TestCase):
         data = {"status": "DONE", "verdict": "pass", "findings": [], "extra": nested(500)}
         decision = result.result_contract(kind="security")(response(fenced(data)))
         self.assertEqual(decision["result"], "DENY")
+
+
+class PollyResultTest(unittest.TestCase):
+    def test_polly_valid_fixture(self):
+        self.assertEqual(result.validate_result("polly", load("polly-valid.json")), [])
+
+    def test_polly_done_requires_pr(self):
+        errors = result.validate_result("polly", load("polly-invalid-no-pr.json"))
+        self.assertTrue(any("pr" in e for e in errors), errors)
+
+    def test_polly_pr_must_be_github_pull_url(self):
+        errors = result.validate_result("polly", load("polly-invalid-gitlab-pr.json"))
+        self.assertTrue(any(e.startswith("pr ") for e in errors), errors)
+        data = load("polly-valid.json")
+        for bad in ("https://github.com/a/b/pull/0", "https://github.com/a/b/pull/1/files", "http://github.com/a/b/pull/1", 7, None):
+            errors = result.validate_result("polly", {**data, "pr": bad})
+            self.assertTrue(any(e.startswith("pr ") for e in errors), (bad, errors))
+
+    def test_polly_done_requires_branch(self):
+        for bad in ("", " ", None, 3):
+            errors = result.validate_result("polly", {**load("polly-valid.json"), "branch": bad})
+            self.assertTrue(any("branch" in e for e in errors), (bad, errors))
+
+    def test_polly_done_with_assumptions_rejected(self):
+        errors = result.validate_result("polly", load("polly-invalid-done-assumptions.json"))
+        self.assertTrue(any("assumptions must be empty for DONE" in e for e in errors), errors)
+
+    def test_polly_gap_without_stub_location_rejected(self):
+        errors = result.validate_result("polly", load("polly-invalid-gap-no-location.json"))
+        self.assertTrue(any("location must be path:line" in e for e in errors), errors)
+
+    def test_polly_stubbed_gap_accepted(self):
+        data = load("polly-invalid-gap-no-location.json")
+        data["gaps"][0]["location"] = "src/export.py:12"
+        self.assertEqual(result.validate_result("polly", data), [])
+
+    def test_polly_blocked_needs_no_pr(self):
+        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION}
+        self.assertEqual(result.validate_result("polly", blocked), [])

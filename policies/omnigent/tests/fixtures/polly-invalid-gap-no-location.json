@@ -1,0 +1,14 @@
+{
+  "status": "DONE_WITH_CONCERNS",
+  "pr": "https://github.com/acme/shop/pull/42",
+  "branch": "feat/orders-export",
+  "gaps": [
+    {
+      "id": "gap-1",
+      "class": "cosmetic",
+      "question": "Should the export be named orders or order-lines?",
+      "stub": "Visible note: 'Open question (gap-1): export name may change.'"
+    }
+  ],
+  "assumptions": ["gap-1: the export is named orders"]
+}
