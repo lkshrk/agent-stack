@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.19.1@sha256:46ddb52b8013e69bcd2068842d9746bc896d50f5884a2469d51a27a6211c5814
+ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.21.0.dev20261031@sha256:e0073f41be7dacb6cb73438692bf8108a10c03dfd961251ad05c81e95119e9c9
 
 FROM ${OMNIGENT_HOST_IMAGE} AS upstream-env
 RUN printenv >/upstream.env
@@ -18,8 +18,8 @@ FROM scratch AS image
 COPY --from=upstream / /
 ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8 \
-    PYTHON_VERSION=3.12.15 \
-    PYTHON_SHA256=c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a \
+    PYTHON_VERSION=3.12.16 \
+    PYTHON_SHA256=b5796915dc45ff745cfb4e990a7e7c93d6f546328a102ce31448d69ebc37575c \
     NPM_CONFIG_REGISTRY= \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

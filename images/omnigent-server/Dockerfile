@@ -1,10 +1,11 @@
-ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.19.1@sha256:5746692f3c3a95502f76f83260c3e5ff36348ad8c3cdce1fab85784065e44dad
+ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.21.0.dev20261031@sha256:55a9b9d4cc494354f18d6729011e51fcd721189bcdf53db05aeb84a613b14ceb
 
 FROM ${OMNIGENT_SERVER_IMAGE} AS image
 
 COPY bundles/ /agents/
 # Extra built-ins seed after the packaged ones, so ours replace the same-named packaged polly.
-ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter
+ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter \
+    OMNIGENT_SEEDED_AGENTS=claude-native-ui,codex-native-ui
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
