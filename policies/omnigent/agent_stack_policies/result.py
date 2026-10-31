@@ -212,6 +212,11 @@ def _check_security(result: dict, errors: list[str]) -> None:
     verdict = result.get("verdict")
     if verdict not in ("pass", "fail"):
         errors.append("verdict must be pass or fail")
+    reviewed = result.get("reviewed")
+    if verdict == "pass" and not (
+        isinstance(reviewed, list) and reviewed and all(_text(item) for item in reviewed)
+    ):
+        errors.append("reviewed must list what was reviewed (non-empty strings) for a pass")
     findings = result.get("findings")
     if not isinstance(findings, list):
         errors.append("findings must be a list")
@@ -373,6 +378,8 @@ def validate_result(kind: str, result: dict) -> list[str]:
             errors.append(f"blocked.class must be one of {'|'.join(BLOCK_CLASSES)}")
         if not _text(blocked.get("question")):
             errors.append("blocked.question must be a non-empty string")
+        if kind == "security" and result.get("verdict") not in (None, "fail"):
+            errors.append("a BLOCKED security result carries no verdict, or fail")
     else:
         _CHECKS[kind](result, errors)
     return errors

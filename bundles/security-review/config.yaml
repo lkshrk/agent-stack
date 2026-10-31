@@ -63,7 +63,9 @@ prompt: |
 
   Final response. End with exactly one fenced ```json block, the last one in
   the message, holding the result: `status` (`DONE`, `DONE_WITH_CONCERNS` or
-  `BLOCKED`), `verdict` (`pass` or `fail`), `findings`, `gaps` and
+  `BLOCKED`), `verdict` (`pass` or `fail`; omit it when BLOCKED, a BLOCKED
+  result never passes), `reviewed` (the files and commands you actually
+  reviewed; a `pass` needs at least one), `findings`, `gaps` and
   `assumptions`, plus `blocked` when BLOCKED. Each finding carries `id`, `severity`, `file`, `line`,
   `title`, `evidence` and `fix`. `verdict` is `fail` exactly when a finding
   is `critical` or `high`. A response policy validates this block; an

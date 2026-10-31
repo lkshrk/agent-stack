@@ -386,8 +386,33 @@ class SecurityDocumenterTest(unittest.TestCase):
         self.assertTrue(any("verdict" in e for e in errors))
         clean_fail = {"status": "DONE", "verdict": "fail", "findings": []}
         self.assertTrue(result.validate_result("security", clean_fail))
-        clean_pass = {"status": "DONE", "verdict": "pass", "findings": []}
+        clean_pass = {"status": "DONE", "verdict": "pass", "findings": [], "reviewed": ["a.py"]}
         self.assertEqual(result.validate_result("security", clean_pass), [])
+
+    def test_security_blocked_cannot_carry_a_verdict(self):
+        blocked = load("security-valid-blocked-gap.json")
+        self.assertNotIn("verdict", blocked)
+        self.assertEqual(result.validate_result("security", blocked), [])
+        self.assertTrue(result.validate_result("security", {**blocked, "verdict": "pass"}))
+        for verdict in ("fail", None):
+            with self.subTest(verdict=verdict):
+                data = {**blocked, "verdict": verdict}
+                if verdict is None:
+                    del data["verdict"]
+                self.assertEqual(result.validate_result("security", data), [])
+        self.assertTrue(result.validate_result("security", {**blocked, "verdict": "approve"}))
+
+    def test_security_pass_needs_reviewed_evidence(self):
+        clean = {"status": "DONE", "verdict": "pass", "findings": [], "reviewed": ["src/a.py"]}
+        self.assertEqual(result.validate_result("security", clean), [])
+        for reviewed in (None, [], [""], "src/a.py", [1]):
+            with self.subTest(reviewed=reviewed):
+                data = {**clean, "reviewed": reviewed}
+                if reviewed is None:
+                    del data["reviewed"]
+                self.assertTrue(any("reviewed" in e for e in result.validate_result("security", data)))
+        failing = {**load("security-valid.json")}
+        self.assertEqual(result.validate_result("security", failing), [])
 
     def test_security_line_must_be_positive_int(self):
         data = load("security-valid.json")
