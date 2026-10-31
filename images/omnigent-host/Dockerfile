@@ -105,7 +105,7 @@ COPY images/omnigent-host/bin/ /opt/agent/bin/
 COPY images/omnigent-host/claude/ /opt/agent/claude-home/
 RUN install -d -m 0755 /etc/claude-code \
  && install -m 0644 /opt/agent/claude-home/managed-settings.json /etc/claude-code/managed-settings.json \
- && install -m 0644 /opt/agent/claude-home/managed-mcp.json /etc/claude-code/managed-mcp.json
+ && install -m 0644 /opt/agent/claude-home/.claude/CLAUDE.md /etc/claude-code/CLAUDE.md
 COPY images/omnigent-host/codex/ /opt/agent/codex-home/
 COPY images/omnigent-host/omp/ /opt/agent/omp-home/
 COPY images/omnigent-host/agents/ /opt/agent/agents-home/.agents/
