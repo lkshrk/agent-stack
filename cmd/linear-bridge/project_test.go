@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -240,7 +241,7 @@ func TestPoisonCardSkippedAfterThreeFailures(t *testing.T) {
 		events: []CardEvent{{ID: 1, CardID: "a"}, {ID: 2, CardID: "b"}},
 		cards:  map[string]Card{"a": linkedCard("a", "todo"), "b": good},
 	}
-	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": errors.New("issue not found")}}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": permanent(errors.New("issue not found"))}}
 	p, n := newProj(k, l)
 	for i := 0; i < 2; i++ {
 		if err := p.tick(context.Background()); err == nil {
@@ -356,12 +357,12 @@ func TestSkippedCardNotRealertedWhileStalled(t *testing.T) {
 		events: []CardEvent{{ID: 1, CardID: "a"}, {ID: 2, CardID: "b"}, {ID: 3, CardID: "c"}},
 		cards:  map[string]Card{"a": linkedCard("a", "todo"), "b": linkedCard("b", "todo"), "c": linkedCard("c", "todo")},
 	}
-	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": errors.New("gone")}}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": permanent(errors.New("gone"))}}
 	p, n := newProj(k, l)
 	for i := 0; i < 2; i++ {
 		_ = p.tick(context.Background())
 	}
-	l.issueErrFor["iss-b"] = errors.New("flaky")
+	l.issueErrFor["iss-b"] = permanent(errors.New("flaky"))
 	k.cards["b"] = linkedCard("b", "ready")
 	if err := p.tick(context.Background()); err == nil {
 		t.Fatal("want error: b is failing")
@@ -389,7 +390,7 @@ func stallKanban(ids ...string) *projKanban {
 func failingLinear(ids ...string) *fakeLinear {
 	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{}}
 	for _, id := range ids {
-		l.issueErrFor["iss-"+id] = errors.New("linear issue not found")
+		l.issueErrFor["iss-"+id] = permanent(errors.New("linear issue not found"))
 	}
 	return l
 }
@@ -418,6 +419,70 @@ func TestLonePoisonCardAlertsThenIsSkipped(t *testing.T) {
 	}
 	if len(n.msgs) != 2 || !strings.HasPrefix(n.msgs[1], "⚠️ projection skipped for card a") {
 		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestLoneTransientCardNeverSkipped(t *testing.T) {
+	k := stallKanban("a")
+	l := failingLinear()
+	l.issueErrFor["iss-a"] = errors.New("linear down")
+	p, n := newProj(k, l)
+	for i := 0; i < 20; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatalf("tick %d: want error", i)
+		}
+	}
+	if len(k.setCursor) != 0 || len(p.fails) != 0 || len(p.skipped) != 0 {
+		t.Fatalf("cursor=%v fails=%v skipped=%v", k.setCursor, p.fails, p.skipped)
+	}
+	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 linear-bridge projection stalled: ") {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestTwoCardsTransientFailureNeverSkipped(t *testing.T) {
+	k := stallKanban("a", "b")
+	l := failingLinear()
+	l.issueErrFor["iss-b"] = errors.New("timeout")
+	p, n := newProj(k, l)
+	for i := 0; i < 8; i++ {
+		_ = p.tick(context.Background())
+	}
+	if len(k.setCursor) != 0 || len(p.fails) != 0 || len(p.skipped) != 0 || len(n.msgs) != 0 {
+		t.Fatalf("cursor=%v fails=%v skipped=%v msgs=%q", k.setCursor, p.fails, p.skipped, n.msgs)
+	}
+}
+
+func TestClassifyErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  gqlError
+		perm bool
+	}{
+		{gqlError{Message: "x"}, false},
+		{gqlError{Message: "Entity not found", Extensions: struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+		}{Type: "invalid input"}}, true},
+		{gqlError{Message: "slow", Extensions: struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+		}{Type: "ratelimited"}}, false},
+		{gqlError{Message: "no", Extensions: struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+		}{Type: "authentication error"}}, false},
+	} {
+		if got := isPermanent(tc.err.err()); got != tc.perm {
+			t.Errorf("%+v: permanent=%v", tc.err, got)
+		}
+	}
+	for status, want := range map[int]bool{400: true, 404: true, 401: false, 403: false, 408: false, 429: false, 500: false, 503: false} {
+		if permanentStatus(status) != want {
+			t.Errorf("status %d", status)
+		}
+	}
+	if !isPermanent(fmt.Errorf("w: %w", errUnknownCard)) || isPermanent(errors.New("x")) {
+		t.Error("sentinel")
 	}
 }
 

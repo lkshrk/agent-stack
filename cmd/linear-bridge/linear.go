@@ -176,17 +176,17 @@ func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
 				} `json:"team"`
 			} `json:"issue"`
 		} `json:"data"`
-		Errors []struct{ Message string } `json:"errors"`
+		Errors []gqlError `json:"errors"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return IssueInfo{}, err
 	}
 	if len(out.Errors) > 0 {
-		return IssueInfo{}, fmt.Errorf("linear graphql error: %s", out.Errors[0].Message)
+		return IssueInfo{}, out.Errors[0].err()
 	}
 	i := out.Data.Issue
 	if i == nil {
-		return IssueInfo{}, errors.New("linear issue not found")
+		return IssueInfo{}, permanent(errors.New("linear issue not found"))
 	}
 	info := IssueInfo{ID: i.ID, Identifier: i.Identifier, Title: i.Title, TeamID: i.Team.ID, States: i.Team.States.Nodes}
 	if i.Description != nil {
@@ -233,7 +233,11 @@ func (g *graphQL) exec(ctx context.Context, query string, vars map[string]any) (
 			continue
 		}
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("linear graphql returned %d", status)
+			err := fmt.Errorf("linear graphql returned %d", status)
+			if permanentStatus(status) {
+				err = permanent(err)
+			}
+			return nil, err
 		}
 		return raw, nil
 	}
@@ -258,16 +262,63 @@ func (g *graphQL) post(ctx context.Context, token string, payload []byte) (int, 
 func checkResult(raw []byte, field string) error {
 	var out struct {
 		Data   map[string]struct{ Success bool } `json:"data"`
-		Errors []struct{ Message string }        `json:"errors"`
+		Errors []gqlError                        `json:"errors"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return err
 	}
 	if len(out.Errors) > 0 {
-		return fmt.Errorf("linear graphql error: %s", out.Errors[0].Message)
+		return out.Errors[0].err()
 	}
 	if !out.Data[field].Success {
 		return fmt.Errorf("linear %s returned success=false", field)
 	}
 	return nil
+}
+
+var errPermanent = errors.New("permanent")
+
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string        { return e.err.Error() }
+func (e permanentError) Unwrap() error        { return e.err }
+func (e permanentError) Is(target error) bool { return target == errPermanent }
+
+func permanent(err error) error { return permanentError{err} }
+
+func isPermanent(err error) bool {
+	return errors.Is(err, errPermanent) || errors.Is(err, errUnknownCard)
+}
+
+func permanentStatus(status int) bool {
+	if status < 400 || status >= 500 {
+		return false
+	}
+	switch status {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusRequestTimeout, http.StatusTooManyRequests:
+		return false
+	}
+	return true
+}
+
+type gqlError struct {
+	Message    string `json:"message"`
+	Extensions struct {
+		Type string `json:"type"`
+		Code string `json:"code"`
+	} `json:"extensions"`
+}
+
+func (e gqlError) err() error {
+	err := fmt.Errorf("linear graphql error: %s", e.Message)
+	kind := strings.ToLower(e.Extensions.Type + " " + e.Extensions.Code)
+	if strings.TrimSpace(kind) == "" {
+		return err
+	}
+	for _, transient := range []string{"auth", "forbidden", "rate", "internal", "unavailable", "timeout", "network"} {
+		if strings.Contains(kind, transient) {
+			return err
+		}
+	}
+	return permanent(err)
 }

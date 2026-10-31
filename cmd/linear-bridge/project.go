@@ -264,6 +264,12 @@ func (p *projector) tick(ctx context.Context) error {
 		if p.skipped[id] {
 			continue
 		}
+		if !isPermanent(errs[id]) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("card %s: %w", id, errs[id])
+			}
+			continue
+		}
 		p.fails[id]++
 		if p.fails[id] < maxCardFailures {
 			if firstErr == nil {
