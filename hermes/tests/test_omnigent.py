@@ -90,6 +90,28 @@ class TokenSourceTest(unittest.TestCase):
         clock.t += 2
         self.assertEqual(source.token(), "b")
 
+    def test_bad_token_responses_raise(self):
+        bad = [
+            json_response({"expires_in": 60}),
+            json_response({"access_token": None, "expires_in": 60}),
+            json_response({"access_token": "", "expires_in": 60}),
+            json_response({"access_token": "a"}),
+            json_response({"access_token": "a", "expires_in": "60"}),
+            FakeResponse(b"not json"),
+            FakeResponse(b""),
+        ]
+        for response in bad:
+            with self.subTest(response=response.getvalue()):
+                source = TokenSource(CREDS, opener=FakeOpener([response]), now=Clock())
+                with self.assertRaises(OmnigentError):
+                    source.token()
+
+    def test_token_transport_error_raises(self):
+        source = TokenSource(CREDS, opener=FakeOpener([urllib.error.URLError("down")]), now=Clock())
+        with self.assertRaises(OmnigentError) as ctx:
+            source.token()
+        self.assertEqual(ctx.exception.status, 0)
+
     def test_token_endpoint_failure_raises(self):
         source = TokenSource(CREDS, opener=FakeOpener([http_error(401)]), now=Clock())
         with self.assertRaises(OmnigentError) as ctx:
@@ -157,6 +179,78 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(request.full_url, "https://omni.test/v1/sessions/s1/events")
         self.assertEqual(json.loads(request.data), {"type": "interrupt"})
 
+    def test_non_json_body_raises(self):
+        c, _ = client([FakeResponse(b"<html>")])
+        with self.assertRaises(OmnigentError) as ctx:
+            c.snapshot("s1")
+        self.assertEqual(ctx.exception.status, 502)
+
+    def test_non_object_body_raises(self):
+        c, _ = client([FakeResponse(b"[1]")])
+        with self.assertRaises(OmnigentError):
+            c.snapshot("s1")
+
+    def test_empty_body_raises_for_snapshot_and_create(self):
+        c, _ = client([FakeResponse(b""), FakeResponse(b"")])
+        with self.assertRaises(OmnigentError):
+            c.snapshot("s1")
+        with self.assertRaises(OmnigentError):
+            c.create_session({})
+
+    def test_empty_body_allowed_for_interrupt_and_share(self):
+        c, _ = client([FakeResponse(b"", 204), FakeResponse(b"", 204)])
+        c.interrupt("s1")
+        c.share("s1", "u1")
+
+    def test_url_error_becomes_omnigent_error(self):
+        c, _ = client([urllib.error.URLError("refused")])
+        with self.assertRaises(OmnigentError) as ctx:
+            c.snapshot("s1")
+        self.assertEqual(ctx.exception.status, 0)
+
+    def test_timeout_becomes_omnigent_error(self):
+        c, _ = client([TimeoutError("slow")])
+        with self.assertRaises(OmnigentError) as ctx:
+            c.snapshot("s1")
+        self.assertEqual(ctx.exception.status, 0)
+
+    def test_stream_read_error_becomes_omnigent_error(self):
+        class Broken(FakeResponse):
+            def readline(self, *args):
+                raise ConnectionResetError("reset")
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise ConnectionResetError("reset")
+
+        c, _ = client([Broken(b"")])
+        with self.assertRaises(OmnigentError) as ctx:
+            list(c.stream("s1", read_timeout=5.0))
+        self.assertEqual(ctx.exception.status, 0)
+
+    def test_missing_id_raises(self):
+        c, _ = client([json_response({"status": "idle"}, 201), json_response({"id": ""}, 201)])
+        with self.assertRaises(OmnigentError):
+            c.create_session({})
+        with self.assertRaises(OmnigentError):
+            c.create_session({})
+
+    def test_pull_requests_without_data_list_raises(self):
+        c, _ = client([json_response({"synced": True}), json_response({"data": None})])
+        with self.assertRaises(OmnigentError):
+            c.pull_requests("s1")
+        with self.assertRaises(OmnigentError):
+            c.pull_requests("s1")
+
+    def test_error_body_is_truncated(self):
+        c, _ = client([http_error(500, b"x" * 2000)])
+        with self.assertRaises(OmnigentError) as ctx:
+            c.snapshot("s1")
+        self.assertEqual(ctx.exception.status, 500)
+        self.assertLess(len(str(ctx.exception)), 600)
+
     def test_share_puts_permission(self):
         c, opener = client([json_response({})])
         self.assertIsNone(c.share("s1", "u1", level=2))
@@ -195,6 +289,23 @@ class ParseSseTest(unittest.TestCase):
             list(parse_sse(chunks)),
             [StreamEvent("a", {"x": 1}), StreamEvent("b", {"y": 2}), StreamEvent("message", None)],
         )
+
+    def test_malformed_frame_raises_typed(self):
+        with self.assertRaises(OmnigentError) as ctx:
+            list(parse_sse([b"event: a\n", b"data: {nope\n", b"\n"]))
+        self.assertEqual(ctx.exception.status, 502)
+
+    def test_bare_data_line_raises_typed(self):
+        with self.assertRaises(OmnigentError):
+            list(parse_sse([b"event: a\n", b"data:\n", b"\n"]))
+
+    def test_non_object_frame_raises_typed(self):
+        with self.assertRaises(OmnigentError):
+            list(parse_sse([b"data: [1]\n", b"\n"]))
+
+    def test_unterminated_tail_frame_is_dropped(self):
+        lines = [b"event: a\n", b'data: {"x": 1}\n', b"\n", b"event: b\n", b'data: {"y": 2}\n']
+        self.assertEqual(list(parse_sse(lines)), [StreamEvent("a", {"x": 1})])
 
     def test_crlf_lines(self):
         events = list(parse_sse([b"event: a\r\n", b'data: {"x": 1}\r\n', b"\r\n"]))

@@ -8,6 +8,8 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 TOKEN_SKEW_SECONDS = 300
+TRANSPORT_STATUS = 0
+BAD_BODY_STATUS = 502
 
 
 class OmnigentError(Exception):
@@ -37,6 +39,24 @@ def _error_from(exc: urllib.error.HTTPError) -> OmnigentError:
     finally:
         exc.close()
     return OmnigentError(exc.code, detail)
+
+
+def _transport_error(exc: Exception) -> OmnigentError:
+    return OmnigentError(TRANSPORT_STATUS, f"{type(exc).__name__}: {exc}")
+
+
+def _bad_body(message: str) -> OmnigentError:
+    return OmnigentError(BAD_BODY_STATUS, message)
+
+
+def _decode_object(raw: bytes) -> dict:
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise _bad_body("response body is not JSON") from None
+    if not isinstance(value, dict):
+        raise _bad_body("response body is not a JSON object")
+    return value
 
 
 class TokenSource:
@@ -72,22 +92,46 @@ class TokenSource:
         )
         try:
             with self._opener(request, timeout=30.0) as response:
-                payload = json.load(response)
+                raw = response.read()
         except urllib.error.HTTPError as exc:
             raise _error_from(exc) from None
-        self._token = payload["access_token"]
-        self._expires_at = self._now() + float(payload.get("expires_in", 0)) - TOKEN_SKEW_SECONDS
+        except OSError as exc:
+            raise _transport_error(exc) from None
+        payload = _decode_object(raw)
+        token = payload.get("access_token")
+        expires_in = payload.get("expires_in")
+        if not isinstance(token, str) or not token:
+            raise _bad_body("token response has no access_token")
+        if isinstance(expires_in, bool) or not isinstance(expires_in, (int, float)):
+            raise _bad_body("token response has no numeric expires_in")
+        self._token = token
+        self._expires_at = self._now() + expires_in - TOKEN_SKEW_SECONDS
+
+
+def _frame(name: str, data: list[str]) -> StreamEvent:
+    payload = "\n".join(data)
+    if payload == "[DONE]":
+        return StreamEvent(name, None)
+    try:
+        value = json.loads(payload)
+    except ValueError:
+        raise _bad_body(f"malformed SSE data in {name!r} frame") from None
+    if not isinstance(value, dict):
+        raise _bad_body(f"SSE data in {name!r} frame is not an object")
+    return StreamEvent(name, value)
 
 
 def parse_sse(lines: Iterable[bytes]) -> Iterator[StreamEvent]:
     name = "message"
     data: list[str] = []
     for raw in lines:
-        line = raw.decode("utf-8").rstrip("\r\n")
+        try:
+            line = raw.decode("utf-8").rstrip("\r\n")
+        except UnicodeDecodeError:
+            raise _bad_body("SSE line is not UTF-8") from None
         if line == "":
             if data:
-                payload = "\n".join(data)
-                yield StreamEvent(name, None if payload == "[DONE]" else json.loads(payload))
+                yield _frame(name, data)
             name = "message"
             data = []
         elif line.startswith(":"):
@@ -96,9 +140,6 @@ def parse_sse(lines: Iterable[bytes]) -> Iterator[StreamEvent]:
             name = line[6:].strip()
         elif line.startswith("data:"):
             data.append(line[5:].removeprefix(" "))
-    if data:
-        payload = "\n".join(data)
-        yield StreamEvent(name, None if payload == "[DONE]" else json.loads(payload))
 
 
 class OmnigentClient:
@@ -109,28 +150,46 @@ class OmnigentClient:
         self._timeout = timeout
 
     def create_session(self, body: dict) -> str:
-        return self._json("POST", "/v1/sessions", body)["id"]
+        session_id = self._json("POST", "/v1/sessions", body).get("id")
+        if not isinstance(session_id, str) or not session_id:
+            raise _bad_body("session response has no id")
+        return session_id
 
     def snapshot(self, session_id: str) -> dict:
         return self._json("GET", f"/v1/sessions/{session_id}?include_items=true&include_usage=true")
 
     def pull_requests(self, session_id: str) -> list[dict]:
-        return self._json("GET", f"/v1/sessions/{session_id}/pull-requests")["data"]
+        data = self._json("GET", f"/v1/sessions/{session_id}/pull-requests").get("data")
+        if not isinstance(data, list):
+            raise _bad_body("pull-requests response has no data list")
+        return data
 
     def interrupt(self, session_id: str) -> None:
-        self._json("POST", f"/v1/sessions/{session_id}/events", {"type": "interrupt"})
+        self._json("POST", f"/v1/sessions/{session_id}/events", {"type": "interrupt"}, allow_empty=True)
 
     def share(self, session_id: str, user_id: str, level: int = 1) -> None:
-        self._json("PUT", f"/v1/sessions/{session_id}/permissions", {"user_id": user_id, "level": level})
+        self._json(
+            "PUT", f"/v1/sessions/{session_id}/permissions", {"user_id": user_id, "level": level}, allow_empty=True
+        )
 
-    def stream(self,session_id: str, read_timeout: float) -> Iterator[StreamEvent]:
+    def stream(self, session_id: str, read_timeout: float) -> Iterator[StreamEvent]:
         with self._open("GET", f"/v1/sessions/{session_id}/stream", None, read_timeout, "text/event-stream") as response:
-            yield from parse_sse(response)
+            try:
+                yield from parse_sse(response)
+            except OSError as exc:
+                raise _transport_error(exc) from None
 
-    def _json(self, method: str, path: str, body: dict | None = None) -> dict:
+    def _json(self, method: str, path: str, body: dict | None = None, allow_empty: bool = False) -> dict:
         with self._open(method, path, body, self._timeout, "application/json") as response:
-            raw = response.read()
-        return json.loads(raw) if raw else {}
+            try:
+                raw = response.read()
+            except OSError as exc:
+                raise _transport_error(exc) from None
+        if not raw.strip():
+            if allow_empty:
+                return {}
+            raise _bad_body("empty response body")
+        return _decode_object(raw)
 
     def _open(self, method: str, path: str, body: dict | None, timeout: float, accept: str):
         for attempt in (0, 1):
@@ -148,3 +207,5 @@ class OmnigentClient:
                     self._tokens.invalidate()
                     continue
                 raise _error_from(exc) from None
+            except OSError as exc:
+                raise _transport_error(exc) from None
