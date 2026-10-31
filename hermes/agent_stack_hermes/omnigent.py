@@ -16,9 +16,10 @@ MAX_LIST_PAGES = 10
 
 
 class OmnigentError(Exception):
-    def __init__(self, status: int, message: str = ""):
+    def __init__(self, status: int, message: str = "", malformed: bool = False):
         super().__init__(f"omnigent: HTTP {status} {message}".strip())
         self.status = status
+        self.malformed = malformed
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ def _transport_error(exc: Exception) -> OmnigentError:
 
 
 def _bad_body(message: str) -> OmnigentError:
-    return OmnigentError(BAD_BODY_STATUS, message)
+    return OmnigentError(BAD_BODY_STATUS, message, malformed=True)
 
 
 def _decode_object(raw: bytes) -> dict:

@@ -22,9 +22,10 @@ RefMap = dict[str, str]
 
 
 class GitHubError(Exception):
-    def __init__(self, message: str, status: int = BAD_BODY_STATUS):
+    def __init__(self, message: str, status: int | None = None):
         super().__init__(f"github: {message}")
-        self.status = status
+        self.status = BAD_BODY_STATUS if status is None else status
+        self.malformed = status is None
 
 
 @dataclass(frozen=True)
