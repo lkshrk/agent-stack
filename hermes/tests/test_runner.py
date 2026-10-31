@@ -4,9 +4,9 @@ import json
 import unittest
 from pathlib import Path
 
-from agent_stack_hermes import runner
+from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
-from agent_stack_hermes.omnigent import OmnigentError, StreamEvent
+from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
 from agent_stack_hermes.postrun import Activity, GitHubError, PullHead
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
@@ -341,7 +341,7 @@ class RunnerTest(unittest.TestCase):
     def test_child_listing_failure_or_bad_child_fails_closed(self):
         stale = T0 - runner.STALL_SECONDS - 1
         cases = (
-            {"fail": {"child_sessions": OmnigentError(0, "reset")}},
+            {"fail": {"child_sessions": OmnigentError(404, "gone")}},
             {"children": [{"id": "k", "updated_at": "soon"}]},
         )
         for omni in cases:
@@ -401,7 +401,7 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(self.terminal_writes())
 
     def test_idle_child_listing_error_fails_closed(self):
-        out = self.run_slice(between_rounds(updated_at=T0), fail={"child_sessions": OmnigentError(0, "reset")})
+        out = self.run_slice(between_rounds(updated_at=T0), fail={"child_sessions": OmnigentError(404, "gone")})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
     def test_failed_session_blocks_without_child_listing(self):
@@ -522,9 +522,9 @@ class RunnerTest(unittest.TestCase):
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: non-doc file: src/app.py")
 
     def test_github_error_blocks_environment(self):
-        out = self.run_slice(snapshot(), gh_fail={"pull": GitHubError("HTTP 500", 500)})
+        out = self.run_slice(snapshot(), gh_fail={"pull": GitHubError("HTTP 404", 404)})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
-        self.assertIn("HTTP 500", self.calls("block")[0][3])
+        self.assertIn("HTTP 404", self.calls("block")[0][3])
 
     def test_untyped_error_blocks_environment(self):
         out = self.run_slice(running(), fail={"snapshot": http.client.IncompleteRead(b"")})
@@ -639,6 +639,119 @@ class RunnerTest(unittest.TestCase):
                 out = self.run_slice(running(), body=body)
                 self.assert_blocked(out, "needs_input", "BLOCKED{decision}: card has no valid run spec")
                 self.assertFalse(self.calls("stream") + self.calls("create") + self.calls("refs"))
+
+    def outage_notes(self):
+        return [c[1] for c in self.calls("note") if c[1].startswith(retry.OUTAGE_NOTE)]
+
+    def assert_retrying(self, out, source="omnigent"):
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertTrue(out["reason"].startswith(f"{source} unreachable, retrying: "), out["reason"])
+        self.assertEqual(out["session_id"], "conv_old")
+        self.assertFalse(self.terminal_writes())
+
+    def test_omnigent_transport_error_on_recorded_session_keeps_following(self):
+        out = self.run_slice(running(), fail={"snapshot": OmnigentError(0, "URLError: Connection refused")})
+        self.assert_retrying(out)
+        self.assertIn("Connection refused", out["reason"])
+        self.assertTrue(self.calls("heartbeat"))
+        self.assertEqual(len(self.calls("snapshot")), runner.SLICE_SECONDS // runner.POLL_SECONDS + 1)
+        self.assertEqual(self.outage_notes(), [f"{retry.OUTAGE_NOTE}7 {T0}"])
+        self.assertFalse(self.calls("interrupt"))
+
+    def test_omnigent_5xx_and_429_keep_following(self):
+        for status in (500, 502, 503, 429):
+            with self.subTest(status=status):
+                self.log.clear()
+                self.clock.t = T0
+                out = self.run_slice(running(), fail={"snapshot": OmnigentError(status, "unavailable")})
+                self.assert_retrying(out)
+
+    def test_child_listing_transport_error_keeps_following(self):
+        out = self.run_slice(between_rounds(updated_at=T0), fail={"child_sessions": OmnigentError(0, "reset")})
+        self.assert_retrying(out)
+
+    def test_omnigent_4xx_or_bad_body_blocks(self):
+        for exc in (OmnigentError(404, "no such session"), OmnigentError(401), _bad_body("response body is not JSON")):
+            with self.subTest(exc=str(exc)):
+                self.log.clear()
+                out = self.run_slice(running(), fail={"snapshot": exc})
+                self.assert_blocked(out, "transient", "BLOCKED{environment}: OmnigentError")
+                self.assertFalse(self.outage_notes())
+
+    def test_outage_longer_than_stall_blocks_within_a_slice(self):
+        out = self.run_slice(running(), fail={"snapshot": OmnigentError(0, "refused")},
+                             slice_seconds=runner.STALL_SECONDS + 600)
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: omnigent unreachable for ")
+        self.assertLessEqual(self.clock.t, T0 + runner.STALL_SECONDS + runner.POLL_SECONDS)
+        self.assertEqual(len(self.outage_notes()), 1)
+
+    def test_outage_clock_persists_across_slices(self):
+        since = T0 - runner.STALL_SECONDS - 1
+        out = self.run_slice(running(), comments=RECORDED + (f"{retry.OUTAGE_NOTE}7 {since}",),
+                             fail={"snapshot": OmnigentError(0, "refused")})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: omnigent unreachable for 2701 s")
+        self.assertFalse(self.outage_notes())
+
+    def test_outage_note_of_another_run_or_closed_is_ignored(self):
+        old = T0 - runner.STALL_SECONDS - 1
+        for notes in ((f"{retry.OUTAGE_NOTE}6 {old}",), (f"{retry.OUTAGE_NOTE}7 {old}", f"{retry.OUTAGE_NOTE}7 over"),
+                      (f"{retry.OUTAGE_NOTE}7 soon",)):
+            with self.subTest(notes=notes):
+                self.log.clear()
+                self.clock.t = T0
+                out = self.run_slice(running(), comments=RECORDED + notes,
+                                     fail={"snapshot": OmnigentError(0, "refused")})
+                self.assert_retrying(out)
+
+    def test_success_after_errors_resets_outage_clock(self):
+        def snap(t):
+            if t < T0 + 60:
+                raise OmnigentError(0, "refused")
+            return running()
+
+        since = T0 - runner.STALL_SECONDS + 100
+        out = self.run_slice(snap, comments=RECORDED + (f"{retry.OUTAGE_NOTE}7 {since}",))
+        self.assertEqual((out["state"], out["call_again"], out["reason"]), ("running", True, "session still running"))
+        self.assertEqual(self.outage_notes(), [f"{retry.OUTAGE_NOTE}7 over"])
+        comments = tuple(self.kanban.comments)
+        self.log.clear()
+        out = self.run_slice(running(), comments=comments, fail={"snapshot": OmnigentError(0, "refused")})
+        self.assert_retrying(out)
+        self.assertEqual(self.outage_notes(), [f"{retry.OUTAGE_NOTE}7 {T0 + runner.SLICE_SECONDS}"])
+
+    def test_error_after_success_in_slice_counts_from_last_success(self):
+        out = self.run_slice(lambda t: running() if t < T0 + 30 else (_ for _ in ()).throw(OmnigentError(503)))
+        self.assert_retrying(out)
+        self.assertEqual(self.outage_notes(), [f"{retry.OUTAGE_NOTE}7 {T0 + 15}"])
+
+    def test_create_transport_error_without_session_blocks(self):
+        out = self.run_slice(running(), comments=(), fail={"create": OmnigentError(0, "refused")})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: OmnigentError")
+        self.assertFalse(self.outage_notes())
+
+    def test_session_list_transport_error_without_session_blocks(self):
+        out = self.run_slice(running(), comments=RECORDED[:1], fail={"list_sessions": OmnigentError(0, "refused")})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: OmnigentError")
+
+    def test_post_run_github_transport_error_keeps_following(self):
+        for exc in (GitHubError("URLError: timed out", 0), GitHubError("HTTP 503", 503), GitHubError("HTTP 429", 429)):
+            with self.subTest(exc=str(exc)):
+                self.log.clear()
+                self.clock.t = T0
+                out = self.run_slice(snapshot(), gh_fail={"pull": exc})
+                self.assert_retrying(out, "github")
+                self.assertFalse(self.calls("interrupt"))
+
+    def test_post_run_github_bad_body_blocks(self):
+        out = self.run_slice(snapshot(), gh_fail={"pull": GitHubError("pull response has the wrong shape")})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: GitHubError")
+
+    def test_post_run_github_outage_is_bounded(self):
+        since = T0 - runner.STALL_SECONDS - 1
+        out = self.run_slice(snapshot(), comments=RECORDED + (f"{retry.OUTAGE_NOTE}7 {since}",),
+                             gh_fail={"pull": GitHubError("HTTP 502", 502)})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: github unreachable for 2701 s")
+
 
     def test_missing_kanban_env_writes_nothing(self):
         out = self.run_slice(running(), env={})

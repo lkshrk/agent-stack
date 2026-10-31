@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
 from agent_stack_hermes.postrun import GitHubReader, agent_actors, violations
+from agent_stack_hermes.retry import OutageClock, unreachable
 from agent_stack_hermes.runspec import (
     INVALID_RESULT,
     MAX_RUNTIME,
@@ -319,8 +320,14 @@ def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verd
     return _blocked("environment", reason)
 
 
+def _outage(source: str, elapsed: float, exc: Exception) -> _Verdict:
+    if elapsed > STALL_SECONDS:
+        return _blocked("environment", f"{source} unreachable for {int(elapsed)} s: {_short(exc)}")
+    return _Verdict("running", f"{source} unreachable, retrying: {_short(exc)}")
+
+
 def _close(kanban: KanbanPort, task_id: str, run_id: int, session_id: str | None, verdict: _Verdict) -> dict:
-    if verdict is _RUNNING:
+    if verdict.state == "running":
         return _result("running", session_id, verdict.reason, call_again=True)
     if verdict is _STALE:
         return _result("running", session_id, verdict.reason)
@@ -364,9 +371,18 @@ def run_slice(
         heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, now)
         if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, now, deadline):
             return _close(kanban, task_id, run_id, session_id, _STALE)
+        outage = OutageClock(comments, run_id, lambda body: kanban.note(task_id, body), now)
         while True:
-            verdict = _reconcile(spec, session_id, comments, omni, gh, now)
-            if verdict is not _RUNNING or now() >= deadline:
+            try:
+                verdict = _reconcile(spec, session_id, comments, omni, gh, now)
+            except Exception as exc:
+                source = unreachable(exc)
+                if source is None:
+                    raise
+                verdict = _outage(source, outage.elapsed(), exc)
+            else:
+                outage.ok()
+            if verdict.state != "running" or now() >= deadline:
                 break
             sleep(max(0.0, min(POLL_SECONDS, deadline - now())))
             if not heartbeat.beat():
