@@ -31,6 +31,8 @@ marker() { [[ -e $1/.agent-seeded ]] && echo present || echo absent; }
 login "$home"
 expect "a login shell seeds a writable HOME" "$(seeded "$home")" seeded
 expect "a login shell writes the marker" "$(marker "$home")" present
+expect "the system-managed Claude settings exist" "$(test -f /etc/claude-code/managed-settings.json && echo present || echo absent)" present
+expect "the managed Claude MCP template exists" "$(test -f /opt/agent/claude-config/managed-mcp.json.tmpl && echo present || echo absent)" present
 
 rm "$home/.agent-seeded"
 HOME=$home /opt/agent/bin/seed-agent-home >/dev/null 2>&1

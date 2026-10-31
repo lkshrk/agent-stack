@@ -103,6 +103,9 @@ RUN apt-get update \
 
 COPY images/omnigent-host/bin/ /opt/agent/bin/
 COPY images/omnigent-host/claude/ /opt/agent/claude-home/
+RUN install -d -m 0755 /etc/claude-code /opt/agent/claude-config \
+ && install -m 0644 /opt/agent/claude-home/managed-settings.json /etc/claude-code/managed-settings.json \
+ && install -m 0644 /opt/agent/claude-home/managed-mcp.json.tmpl /opt/agent/claude-config/managed-mcp.json.tmpl
 COPY images/omnigent-host/codex/ /opt/agent/codex-home/
 COPY images/omnigent-host/omp/ /opt/agent/omp-home/
 COPY images/omnigent-host/agents/ /opt/agent/agents-home/.agents/
