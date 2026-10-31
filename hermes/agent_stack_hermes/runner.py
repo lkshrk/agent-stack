@@ -278,7 +278,10 @@ def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verd
         created = _epoch(snap, "created_at")
         updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
         if t - updated > STALL_SECONDS:
-            reason = f"stalled: no session update for {int(t - updated)} s"
+            # A parent waiting on a sub-agent gets no items, so its updated_at stays put.
+            updated = max([updated, *(_epoch(c, "updated_at") for c in omni.child_sessions(session_id))])
+        if t - updated > STALL_SECONDS:
+            reason = f"stalled: no session or child session update for {int(t - updated)} s"
         elif t - created > MAX_RUNTIME[spec.bundle]:
             reason = f"runtime cap: {int(t - created)} s exceeds {MAX_RUNTIME[spec.bundle]} s"
         else:

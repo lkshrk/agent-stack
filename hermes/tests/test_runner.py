@@ -78,10 +78,14 @@ class FakeKanban:
 
 
 class FakeOmnigent:
-    def __init__(self, log, clock, snap, events=(DONE_EVENT,), step=0, prs=(), fail=None, sessions=()):
+    def __init__(self, log, clock, snap, events=(DONE_EVENT,), step=0, prs=(), fail=None, sessions=(), children=()):
         self.log, self.clock, self.snap, self.events, self.step = log, clock, snap, events, step
-        self.prs, self.fail = list(prs), fail or {}
+        self.prs, self.fail, self.children = list(prs), fail or {}, list(children)
         self.sessions = dict(sessions) if isinstance(sessions, dict) else {"mine": list(sessions)}
+
+    def child_sessions(self, session_id):
+        self._call("child_sessions", session_id)
+        return copy.deepcopy(self.children)
 
     def list_sessions(self, agent_id=None, visibility="mine"):
         self._call("list_sessions", agent_id, visibility)
@@ -279,6 +283,38 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(running(updated_at=T0 - runner.STALL_SECONDS - 1))
         self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_old")])
         self.assert_blocked(out, "transient", "BLOCKED{environment}: stalled")
+        self.assertEqual(self.calls("child_sessions"), [("child_sessions", "conv_old")])
+
+    def test_fresh_parent_skips_child_listing(self):
+        out = self.run_slice(running(), slice_seconds=0)
+        self.assertTrue(out["call_again"])
+        self.assertFalse(self.calls("child_sessions"))
+
+    def test_active_child_keeps_static_parent_running(self):
+        stale = T0 - runner.STALL_SECONDS - 600
+        children = [{"id": "k_old", "updated_at": stale}, {"id": "k_impl", "updated_at": T0 - 60}]
+        out = self.run_slice(running(updated_at=stale), children=children, slice_seconds=0)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertFalse(self.terminal_writes() + self.calls("interrupt"))
+
+    def test_stale_children_still_stall(self):
+        stale = T0 - runner.STALL_SECONDS - 1
+        out = self.run_slice(running(updated_at=stale), children=[{"id": "k", "updated_at": stale - 5}])
+        self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_old")])
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: stalled")
+
+    def test_child_listing_failure_or_bad_child_fails_closed(self):
+        stale = T0 - runner.STALL_SECONDS - 1
+        cases = (
+            {"fail": {"child_sessions": OmnigentError(0, "reset")}},
+            {"children": [{"id": "k", "updated_at": "soon"}]},
+        )
+        for omni in cases:
+            with self.subTest(omni=omni):
+                self.log.clear()
+                out = self.run_slice(running(updated_at=stale), **omni)
+                self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
+                self.assertFalse(self.calls("complete"))
 
     def test_runtime_cap_blocks(self):
         out = self.run_slice(running(created_at=T0 - 7201), bundle="planner")

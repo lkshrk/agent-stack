@@ -173,9 +173,17 @@ class OmnigentClient:
         params = {"limit": LIST_PAGE_SIZE, "order": "desc", "sort_by": "created_at", "visibility": visibility}
         if agent_id:
             params["agent_id"] = agent_id
+        return self._pages("/v1/sessions", params, max_pages)
+
+    def child_sessions(self, session_id: str, max_pages: int = MAX_LIST_PAGES) -> list[dict]:
+        params = {"limit": LIST_PAGE_SIZE, "order": "desc"}
+        return self._pages(f"/v1/sessions/{session_id}/child_sessions", params, max_pages)
+
+    def _pages(self, path: str, params: dict, max_pages: int) -> list[dict]:
+        params = dict(params)
         sessions: list[dict] = []
         for _ in range(max_pages):
-            page = self._json("GET", "/v1/sessions?" + urllib.parse.urlencode(params))
+            page = self._json("GET", path + "?" + urllib.parse.urlencode(params))
             data = page.get("data")
             if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
                 raise _bad_body("session list has no data list of objects")

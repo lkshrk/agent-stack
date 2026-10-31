@@ -293,6 +293,34 @@ class ClientTest(unittest.TestCase):
                 with self.assertRaises(OmnigentError):
                     c.list_sessions(max_pages=3)
 
+    def test_child_sessions_pages_children_of_parent(self):
+        c, opener = client([
+            json_response({"object": "list", "data": [{"id": "k2", "updated_at": 5}], "last_id": "k2", "has_more": True}),
+            json_response({"object": "list", "data": [{"id": "k1", "updated_at": 4}], "last_id": "k1", "has_more": False}),
+        ])
+        self.assertEqual([s["id"] for s in c.child_sessions("p1")], ["k2", "k1"])
+        self.assertTrue(all(
+            r.full_url.startswith("https://omni.test/v1/sessions/p1/child_sessions?") for r in opener.requests
+        ))
+        queries = [parse_qs(r.full_url.split("?", 1)[1]) for r in opener.requests]
+        self.assertEqual(queries[0], {"limit": ["100"], "order": ["desc"]})
+        self.assertEqual(queries[1]["after"], ["k2"])
+
+    def test_child_sessions_fails_closed(self):
+        page = {"data": [{"id": "k"}], "last_id": "k", "has_more": True}
+        cases = [
+            [json_response({"has_more": False})],
+            [json_response({"data": [1], "has_more": False})],
+            [json_response({"data": [], "has_more": True})],
+            [json_response(page) for _ in range(3)],
+            [http_error(404)],
+        ]
+        for responses in cases:
+            with self.subTest(responses=responses):
+                c, _ = client(responses)
+                with self.assertRaises(OmnigentError):
+                    c.child_sessions("p1", max_pages=3)
+
     def test_stream_uses_read_timeout_and_yields_events(self):
         body = b'event: session.status\ndata: {"status": "idle"}\n\ndata: [DONE]\n\n'
         c, opener = client([FakeResponse(body)])
