@@ -13,20 +13,13 @@ class SecurityReviewProfileTest(unittest.TestCase):
     def setUp(self):
         self.profile = load("security-review.config.toml")
 
-    def test_never_asks_and_uses_its_permission_profile(self):
+    def test_never_asks_and_turns_the_codex_sandbox_off(self):
         self.assertEqual(self.profile["approval_policy"], "never")
-        self.assertEqual(self.profile["default_permissions"], "security-review")
-        self.assertNotIn("sandbox_mode", self.profile)
+        self.assertEqual(self.profile["sandbox_mode"], "danger-full-access")
 
-    def test_filesystem_reads_are_narrow_and_only_tmp_is_writable(self):
-        filesystem = self.profile["permissions"]["security-review"]["filesystem"]
-        self.assertNotIn(":root", filesystem)
-        self.assertEqual({path for path, access in filesystem.items() if access == "write"}, {"/tmp"})
-        secrets = {path: access for path, access in filesystem.items() if path.startswith("/agent-secrets")}
-        self.assertEqual(secrets, {"/agent-secrets/github/review": "read"})
-        self.assertEqual(filesystem[":workspace_roots"], "read")
-        readable = {path for path, access in filesystem.items() if access == "read"}
-        self.assertFalse({p for p in readable if p.startswith(("/home", "/sandbox", "/root", "~"))})
+    def test_no_permission_profile_to_conflict_with_the_sandbox_mode(self):
+        self.assertNotIn("default_permissions", self.profile)
+        self.assertNotIn("permissions", self.profile)
 
     def test_secret_env_vars_dropped(self):
         policy = self.profile["shell_environment_policy"]
@@ -34,9 +27,6 @@ class SecurityReviewProfileTest(unittest.TestCase):
         self.assertLessEqual(
             {"*_KEY", "*_TOKEN", "*_SECRET", "LITELLM_*", "GH_*", "GITHUB_TOKEN"}, set(policy["exclude"])
         )
-
-    def test_network_enabled(self):
-        self.assertIs(self.profile["permissions"]["security-review"]["network"]["enabled"], True)
 
     def test_unhooked_tools_disabled(self):
         self.assertEqual(self.profile["features"], {"unified_exec": False, "multi_agent": False})

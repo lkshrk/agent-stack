@@ -161,6 +161,13 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.process_secrets.no_process_secrets",
+        "kind": "factory",
+        "name": "no_process_secrets",
+        "description": "Best-effort: deny shell commands that read /proc, the Codex home or the environment.",
+        "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "handler": "agent_stack_policies.secret_files.no_secret_reads",
         "kind": "factory",
         "name": "no_secret_reads",

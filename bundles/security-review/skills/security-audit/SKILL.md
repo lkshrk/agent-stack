@@ -89,7 +89,7 @@ redacted scanner line, `fix` the change you recommend, in words. Number
 findings `S-1`, `S-2`, …
 
 `verdict` is `fail` exactly when a finding is `critical` or `high`,
-otherwise `pass`. `status` is `DONE`, or `DONE_WITH_CONCERNS` when a part
+otherwise `pass`; a `pass` also lists in `reviewed` the files and commands you actually reviewed, and a `BLOCKED` result omits `verdict`. `status` is `DONE`, or `DONE_WITH_CONCERNS` when a part
 of the diff could not be judged (say which in the prose). An open question
 about intent is a gap under the prompt's no-assumptions rule, never a
 guessed severity, and any gap means `BLOCKED`.
