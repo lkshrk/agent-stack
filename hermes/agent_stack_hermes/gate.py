@@ -18,6 +18,8 @@ from agent_stack_hermes.runspec import LinearLink, parse_card_body, render_card_
 ASSIGNEE = "delivery"
 MAX_BODY_BYTES = 64 * 1024
 MAX_EVENTS = 500
+MAX_CURSOR = 2**63 - 1
+SOCKET_TIMEOUT = 30
 DEFAULT_EVENTS = 100
 TERMINAL = ("done", "archived")
 DEFAULT_LISTEN = "0.0.0.0:8091"
@@ -202,6 +204,7 @@ class Gate:
         self._omni = omni
         self._state = Path(state_dir)
         self._cursor_lock = threading.Lock()
+        self._create_lock = threading.Lock()
         self._routes = (
             (re.compile(r"/v1/cards"), {"POST": self._create, "GET": self._find}),
             (re.compile(rf"/v1/cards/{_CARD_ID}"), {"GET": self._get}),
@@ -230,11 +233,15 @@ class Gate:
         if not isinstance(description, str):
             return _bad("description must be a string")
         link = LinearLink(fields["issue_id"], fields["identifier"], fields["session_id"], fields["issue_id"])
-        task_id = self._kanban.create(
-            title=fields["title"],
-            body=render_card_body(link, None, description),
-            idempotency_key=f"linear:{fields['issue_id']}",
-        )
+        with self._create_lock:
+            existing = self._kanban.find_by_issue(fields["issue_id"])
+            if existing is not None:
+                return 200, existing
+            task_id = self._kanban.create(
+                title=fields["title"],
+                body=render_card_body(link, None, description),
+                idempotency_key=f"linear:{fields['issue_id']}",
+            )
         return self._card(task_id)
 
     def _card(self, task_id: str):
@@ -259,11 +266,19 @@ class Gate:
         cards = self._kanban.tree(root) if root else [card]
         cards = [c for c in cards if c["status"] not in TERMINAL]
         errors = self._interrupt(cards)
-        stopped = [c["id"] for c in cards if self._kanban.archive(c["id"])]
+        stopped, archive_errors = [], []
+        for c in cards:
+            try:
+                if self._kanban.archive(c["id"]):
+                    stopped.append(c["id"])
+            except Exception as exc:
+                archive_errors.append(f"{c['id']}: {type(exc).__name__}")
         result = {"stopped": stopped}
         if errors:
             result["interrupt_errors"] = errors
-        return 200, result
+        if archive_errors:
+            result["archive_errors"] = archive_errors
+        return (500 if archive_errors and not stopped else 200), result
 
     def _interrupt(self, cards: list[dict]) -> list[str]:
         sessions: list[str] = []
@@ -283,7 +298,7 @@ class Gate:
         return errors
 
     def _events(self, _args, query, _body):
-        after = _int_param(query, "after", 0, 0)
+        after = _int_param(query, "after", 0, 0, MAX_CURSOR)
         limit = _int_param(query, "limit", DEFAULT_EVENTS, 1, MAX_EVENTS)
         if after is None or limit is None:
             return _bad(f"after must be >= 0 and limit within 1..{MAX_EVENTS}")
@@ -329,6 +344,8 @@ def make_server(gate: Gate, token: str, listen: str) -> http.server.ThreadingHTT
     expected = token.encode()
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = SOCKET_TIMEOUT
+
         def log_message(self, format, *args):
             pass
 

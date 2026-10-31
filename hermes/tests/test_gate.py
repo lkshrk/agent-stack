@@ -22,10 +22,11 @@ class FakeKanban:
         self.events = []
         self.calls = calls if calls is not None else []
         self.creates = 0
+        self.recheck = True
 
     def create(self, *, title, body, idempotency_key):
         for task_id, card in self.cards.items():
-            if card["key"] == idempotency_key and card["status"] != "archived":
+            if self.recheck and card["key"] == idempotency_key and card["status"] != "archived":
                 return task_id
         self.creates += 1
         task_id = f"t_{self.creates}"
@@ -102,6 +103,67 @@ class GateTest(unittest.TestCase):
         self.assertEqual((s1, s2, self.kanban.creates), (200, 200, 1))
         self.assertEqual(c1["id"], c2["id"])
         self.assertEqual(self.kanban.cards[c1["id"]]["key"], "linear:i1")
+
+    def test_concurrent_creates_for_one_issue_make_one_card(self):
+        import time
+
+        class SlowKanban(FakeKanban):
+            def create(self, **kwargs):
+                exists = self.find_by_issue(kwargs["idempotency_key"].removeprefix("linear:")) is not None
+                time.sleep(0.1)
+                if exists:
+                    return "t_1"
+                self.recheck = False
+                return super().create(**kwargs)
+
+        kanban = SlowKanban()
+        gate = Gate(kanban, None, self.tmp.name)
+        results = []
+        threads = [
+            threading.Thread(target=lambda: results.append(gate.handle("POST", "/v1/cards", {}, new_card())))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(kanban.creates, 1)
+        self.assertEqual({r[1]["id"] for r in results}, {"t_1"})
+
+    def test_repost_with_other_session_returns_existing_link_unchanged(self):
+        _, first = self.call("POST", "/v1/cards", body=new_card())
+        status, second = self.call("POST", "/v1/cards", body=new_card(session_id="ls_other", title="new"))
+        self.assertEqual((status, second), (200, first))
+        self.assertEqual(second["link"]["session_id"], "ls_1")
+        self.assertEqual(self.kanban.creates, 1)
+
+    def test_stop_continues_after_archive_failure(self):
+        ids = []
+        for n in ("a", "b"):
+            ids.append(self.kanban.create(
+                title=n,
+                body=f'agent-stack-link: {json.dumps({"issue_id": n, "identifier": n, "session_id": "s", "root_issue_id": "r"})}\nagent-stack-run: null\n',
+                idempotency_key=f"linear:{n}",
+            ))
+        real = self.kanban.archive
+
+        def flaky(task_id):
+            if task_id == ids[0]:
+                raise RuntimeError("db locked")
+            return real(task_id)
+
+        self.kanban.archive = flaky
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"})
+        self.assertEqual((status, body["stopped"]), (200, [ids[1]]))
+        self.assertEqual(len(body["archive_errors"]), 1)
+        self.kanban.archive = lambda task_id: (_ for _ in ()).throw(RuntimeError("x"))
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"})
+        self.assertEqual((status, body["stopped"]), (500, []))
+
+    def test_events_huge_numbers_are_400(self):
+        self.assertEqual(self.call("GET", "/v1/events", {"after": str(2**70)})[0], 400)
+        self.assertEqual(self.call("GET", "/v1/events", {"limit": "9" * 5000})[0], 400)
+        self.assertEqual(self.call("GET", "/v1/events", {"after": str(2**63 - 1)})[0], 200)
 
     def test_create_assignee_always_delivery(self):
         status, card = self.call("POST", "/v1/cards", body=new_card(assignee="evil", root_issue_id="other"))
@@ -237,6 +299,9 @@ class ServerTest(unittest.TestCase):
         status, _ = self.request("GET", "/v1/events", headers={"Authorization": f"Basic {TOKEN}"}, token=None)
         self.assertEqual(status, 401)
         self.assertEqual(self.request("GET", "/v1/events")[0], 200)
+
+    def test_handler_has_socket_timeout(self):
+        self.assertEqual(self.server.RequestHandlerClass.timeout, gate_mod.SOCKET_TIMEOUT)
 
     def test_token_compared_in_constant_time(self):
         import inspect
