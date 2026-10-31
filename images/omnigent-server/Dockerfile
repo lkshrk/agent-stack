@@ -26,7 +26,7 @@ RUN if [ -n "$AGENT_STACK_VERSION" ]; then \
     fi
 
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
-CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly", "--agent", "/agents/planner"]
+CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml", "--agent", "/agents/polly", "--agent", "/agents/planner", "--agent", "/agents/security-review", "--agent", "/agents/documenter"]
 
 FROM image AS test
 ARG AGENT_STACK_VERSION=""
@@ -37,7 +37,7 @@ COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 COPY images/omnigent-server/test/ /src/images/omnigent-server/test/
-RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py /agents/polly /agents/planner
+RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py /agents/polly /agents/planner /agents/security-review /agents/documenter
 RUN pin='^    image: ghcr\.io/lkshrk/agent-stack/omnigent-host:' \
  && got=$(grep -E "$pin" /etc/omnigent/config.yaml) \
  && if [ -n "$AGENT_STACK_VERSION" ]; then want="    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}"; \
