@@ -78,9 +78,18 @@ def platform_lists(cfg: dict) -> dict:
     return cfg.get("platform_toolsets") or {}
 
 
+DISPATCHER_KANBAN = {"auto_decompose": False, "review_dispatch": False, "failure_limit": 2}
+
+
 def strip_multiplex(cfg: dict) -> dict:
     cfg = copy.deepcopy(cfg)
     cfg.pop("multiplex_profiles", None)
+    kanban = cfg.get("kanban")
+    if isinstance(kanban, dict):
+        for key in DISPATCHER_KANBAN:
+            kanban.pop(key, None)
+        if not kanban:
+            cfg.pop("kanban")
     gateway = cfg.get("gateway")
     if isinstance(gateway, dict):
         gateway.pop("multiplex_profiles", None)
@@ -113,6 +122,12 @@ class ProfilesTest(unittest.TestCase):
         self.assertIs(kanban["auto_decompose"], False)
         self.assertIs(kanban["review_dispatch"], False)
         self.assertEqual(kanban["failure_limit"], 2)
+
+    def test_dispatcher_kanban_settings(self):
+        kanban = effective("default")["kanban"]
+        self.assertEqual(kanban, DISPATCHER_KANBAN)
+        for key, value in DISPATCHER_KANBAN.items():
+            self.assertIs(type(kanban[key]), type(value), key)
 
     def test_delivery_has_no_terminal_or_file_write(self):
         cfg = effective("delivery")

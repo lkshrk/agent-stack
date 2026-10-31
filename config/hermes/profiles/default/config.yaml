@@ -28,6 +28,12 @@ approvals:
   cron_mode: deny
   unattended_mode: deny
 
+# The gateway's dispatcher reads these from this profile for every assignee's cards.
+kanban:
+  auto_decompose: false
+  review_dispatch: false
+  failure_limit: 2
+
 mcp_servers:
   linear_read:
     url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_read
