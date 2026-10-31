@@ -84,6 +84,18 @@ class PluginTest(unittest.TestCase):
         self.assertEqual((out["state"], out["call_again"]), ("running", False))
         self.assertIn("database is locked", out["reason"])
 
+    def test_handler_reads_agent_actors(self):
+        env = {**{name: "x" for name in runner.REQUIRED_ENV}, "GITHUB_AGENT_ACTORS": "app-a[bot],app-b[bot]"}
+        seen = mock.Mock(return_value={})
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
+                mock.patch.object(runner, "run_slice", seen):
+            runner.handle({})
+        self.assertEqual(seen.call_args.args[3].agents, frozenset({"app-a[bot]", "app-b[bot]"}))
+        with mock.patch.dict(os.environ, {name: "x" for name in runner.REQUIRED_ENV}, clear=True), \
+                mock.patch.object(runner, "HermesKanban"), mock.patch.object(runner, "run_slice", seen):
+            runner.handle({})
+        self.assertEqual(seen.call_args.args[3].agents, frozenset())
+
     def test_handler_without_config_blocks_the_card(self):
         RecordingKanban.blocks = []
         env = {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7", "HERMES_KANBAN_CLAIM_LOCK": "h:1"}

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import urllib.error
 
-from agent_stack_hermes.postrun import GitHubError, GitHubReader, PullHead, violations
+from agent_stack_hermes.postrun import MAX_PAGES, Activity, GitHubError, GitHubReader, PullHead, agent_actors, violations
 
 API = "https://api.github.com"
 REPO = "acme/app"
@@ -56,78 +56,186 @@ class ReaderCase(unittest.TestCase):
         return GitHubReader(self.token_file, opener=self.opener)
 
 
+AGENT = "h-cloud-npa[bot]"
+AGENTS = frozenset({AGENT})
+
+
+def entry(ref, actor, ts=1000.0):
+    return Activity(ref, ts, actor)
+
+
+class Lookup:
+    def __init__(self, *entries):
+        self.entries = entries
+        self.asked = []
+
+    def __call__(self, ref):
+        self.asked.append(ref)
+        return [e for e in self.entries if e.ref == ref]
+
+
+class Releases:
+    def __init__(self, **authors):
+        self.authors = authors
+        self.asked = []
+
+    def __call__(self, tag):
+        self.asked.append(tag)
+        return self.authors.get(tag)
+
+
 class ViolationsTest(unittest.TestCase):
     base = {"refs/heads/main": "a", "refs/heads/feat/x": "b", "refs/tags/v1": "t"}
 
+    def check(self, after, before=None, pull=HEAD, files=(), bundle="coder", lookup=None, agents=AGENTS, branches=(),
+              releases=None):
+        self.lookup = lookup or Lookup()
+        self.releases = releases or Releases()
+        before = self.base if before is None else before
+        return violations(bundle, REPO, before, after, pull, list(files), self.lookup, self.releases, agents, branches)
+
     def test_head_branch_move_allowed(self):
-        after = {**self.base, "refs/heads/feat/x": "c"}
-        self.assertEqual(violations("coder", REPO, self.base, after, HEAD, []), [])
+        self.assertEqual(self.check({**self.base, "refs/heads/feat/x": "c"}), [])
+        self.assertEqual(self.lookup.asked, [])
 
     def test_head_branch_creation_allowed(self):
         before = {k: v for k, v in self.base.items() if k != "refs/heads/feat/x"}
-        self.assertEqual(violations("coder", REPO, before, self.base, HEAD, []), [])
+        self.assertEqual(self.check(self.base, before=before), [])
 
-    def test_second_branch_is_violation(self):
-        after = {**self.base, "refs/heads/other": "z"}
-        self.assertEqual(violations("coder", REPO, self.base, after, HEAD, []), ["ref moved: refs/heads/other"])
+    def test_other_agent_branch_move_allowed(self):
+        after = {**self.base, "refs/heads/polly/x": "z", "refs/heads/feat/y": "q"}
+        self.assertEqual(self.check(after), [])
+        self.assertEqual(self.lookup.asked, [])
 
-    def test_tag_move_is_violation(self):
-        after = {**self.base, "refs/tags/v1": "t2"}
-        self.assertEqual(violations("coder", REPO, self.base, after, HEAD, []), ["ref moved: refs/tags/v1"])
+    def test_owner_merge_to_main_allowed(self):
+        lookup = Lookup(entry("refs/heads/main", "lkshrk"))
+        self.assertEqual(self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup), [])
+        self.assertEqual(lookup.asked, ["refs/heads/main"])
 
-    def test_deleted_branch_is_violation(self):
-        after = {k: v for k, v in self.base.items() if k != "refs/heads/main"}
-        self.assertEqual(violations("coder", REPO, self.base, after, HEAD, []), ["ref moved: refs/heads/main"])
+    def test_agent_moves_main_is_violation(self):
+        lookup = Lookup(entry("refs/heads/main", "lkshrk"), entry("refs/heads/main", AGENT))
+        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved by agent: refs/heads/main"])
 
-    def test_no_pr_any_move_is_violation(self):
-        after = {**self.base, "refs/heads/feat/x": "c"}
-        self.assertEqual(violations("coder", REPO, self.base, after, None, []), ["ref moved: refs/heads/feat/x"])
+    def test_agent_login_compare_case_insensitive(self):
+        lookup = Lookup(entry("refs/heads/main", "H-Cloud-NPA[bot]"))
+        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved by agent: refs/heads/main"])
+
+    def test_release_tag_by_non_agent_allowed(self):
+        releases = Releases(v2="github-actions[bot]")
+        self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, releases=releases), [])
+        self.assertEqual((releases.asked, self.lookup.asked), (["v2"], []))
+
+    def test_agent_release_on_moved_tag_is_violation(self):
+        out = self.check({**self.base, "refs/tags/v1": "t2"}, releases=Releases(v1="H-Cloud-NPA[bot]"))
+        self.assertEqual(out, ["ref moved by agent: refs/tags/v1"])
+
+    def test_tag_without_release_is_unattributed(self):
+        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]"))
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
+        self.assertEqual((self.releases.asked, lookup.asked), (["v2"], []))
+
+    def test_release_without_author_is_unattributed(self):
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""))
+        self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
+
+    def test_deleted_tag_is_unattributed(self):
+        releases = Releases(v1="github-actions[bot]")
+        out = self.check({k: v for k, v in self.base.items() if k != "refs/tags/v1"}, releases=releases)
+        self.assertEqual(out, ["ref moved (unattributed): refs/tags/v1"])
+        self.assertEqual(releases.asked, [])
+
+    def test_nested_tag_name_passed_to_release_lookup(self):
+        releases = Releases(**{"release/1.0": "github-actions[bot]"})
+        self.assertEqual(self.check({**self.base, "refs/tags/release/1.0": "r"}, releases=releases), [])
+        self.assertEqual(releases.asked, ["release/1.0"])
+
+    def test_protected_move_without_activity_is_unattributed(self):
+        after = {k: v for k, v in self.base.items() if k != "refs/heads/main"} | {"refs/tags/v1": "t2"}
+        self.assertEqual(
+            self.check(after), ["ref moved (unattributed): refs/heads/main", "ref moved (unattributed): refs/tags/v1"]
+        )
+
+    def test_null_actor_is_unattributed(self):
+        lookup = Lookup(entry("refs/heads/main", "lkshrk"), entry("refs/heads/main", ""))
+        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
+
+    def test_base_branch_is_protected(self):
+        pull = PullHead("feat/x", "acme/app", "release", "acme/app", "main")
+        before = {**self.base, "refs/heads/release": "r"}
+        out = self.check({**before, "refs/heads/release": "r2"}, before=before, pull=pull)
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/release"])
+
+    def test_no_agent_actors_protected_move_is_violation(self):
+        lookup = Lookup(entry("refs/heads/main", "lkshrk"))
+        for agents in (frozenset(), frozenset({""})):
+            with self.subTest(agents=agents):
+                after = {**self.base, "refs/heads/main": "m", "refs/tags/v2": "t2"}
+                out = self.check(after, lookup=lookup, agents=agents, releases=Releases(v2="github-actions[bot]"))
+                self.assertEqual(out, ["ref moved: refs/heads/main", "ref moved: refs/tags/v2"])
+
+    def test_no_pr_protects_given_branches(self):
+        after = {**self.base, "refs/heads/main": "m", "refs/heads/feat/x": "c"}
+        out = self.check(after, pull=None, branches=("main",))
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
 
     def test_no_change_no_pr_passes(self):
-        self.assertEqual(violations("coder", REPO, self.base, dict(self.base), None, []), [])
+        self.assertEqual(self.check(dict(self.base), pull=None, branches=("main",)), [])
 
     def test_fork_head_is_violation(self):
         pull = PullHead("feat/x", "evil/app", "main", "acme/app", "main")
-        self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR head is not in {REPO}"])
+        self.assertEqual(self.check(self.base, pull=pull), [f"PR head is not in {REPO}"])
 
     def test_deleted_fork_head_is_violation(self):
         pull = PullHead("feat/x", "", "main", "acme/app", "main")
-        self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR head is not in {REPO}"])
+        self.assertEqual(self.check(self.base, pull=pull), [f"PR head is not in {REPO}"])
 
     def test_repo_compare_case_insensitive(self):
         pull = PullHead("feat/x", "Acme/App", "main", "ACME/app", "main")
-        self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [])
+        self.assertEqual(self.check(self.base, pull=pull), [])
 
     def test_protected_head_branch_is_violation(self):
         pull = PullHead("main", "acme/app", "release", "acme/app", "main")
-        after = {**self.base, "refs/heads/main": "z"}
+        lookup = Lookup(entry("refs/heads/main", AGENT))
         self.assertEqual(
-            violations("coder", REPO, self.base, after, pull, []),
-            ["ref moved: refs/heads/main", "PR head is a protected branch: main"],
+            self.check({**self.base, "refs/heads/main": "z"}, pull=pull, lookup=lookup),
+            ["ref moved by agent: refs/heads/main", "PR head is a protected branch: main"],
         )
 
     def test_head_equal_base_is_violation(self):
         pull = PullHead("dev", "acme/app", "dev", "acme/app", "main")
         before = {**self.base, "refs/heads/dev": "1"}
-        after = {**before, "refs/heads/dev": "2"}
         self.assertEqual(
-            violations("coder", REPO, before, after, pull, []),
-            ["ref moved: refs/heads/dev", "PR head is a protected branch: dev"],
+            self.check({**before, "refs/heads/dev": "2"}, before=before, pull=pull),
+            ["ref moved (unattributed): refs/heads/dev", "PR head is a protected branch: dev"],
         )
 
     def test_base_repo_elsewhere_is_violation(self):
         pull = PullHead("feat/x", "acme/app", "main", "other/app", "main")
-        self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR is not in {REPO}"])
+        self.assertEqual(self.check(self.base, pull=pull), [f"PR is not in {REPO}"])
 
     def test_documenter_code_file_is_violation(self):
-        out = violations("documenter", REPO, self.base, self.base, HEAD, ["README.md", "src/app.py"])
+        out = self.check(self.base, bundle="documenter", files=["README.md", "src/app.py"])
         self.assertEqual(out, ["non-doc file: src/app.py"])
 
     def test_documenter_docs_only_passes(self):
-        self.assertEqual(violations("documenter", REPO, self.base, self.base, HEAD, ["README.md", "docs/a.md"]), [])
+        self.assertEqual(self.check(self.base, bundle="documenter", files=["README.md", "docs/a.md"]), [])
 
     def test_non_documenter_ignores_files(self):
-        self.assertEqual(violations("coder", REPO, self.base, self.base, HEAD, ["src/app.py"]), [])
+        self.assertEqual(self.check(self.base, files=["src/app.py"]), [])
+
+
+class AgentActorsTest(unittest.TestCase):
+    def test_parsed(self):
+        self.assertEqual(agent_actors(" a[bot], ,B "), frozenset({"a[bot]", "b"}))
+
+    def test_empty_or_missing(self):
+        for value in (None, "", " , "):
+            with self.subTest(value=value):
+                self.assertEqual(agent_actors(value), frozenset())
 
 
 class RefsTest(ReaderCase):
@@ -211,6 +319,118 @@ class RefsTest(ReaderCase):
         for body in ({"a": 1}, [{"ref": "refs/heads/a"}], [{"ref": "refs/heads/a", "object": {}}], ["x"]):
             with self.subTest(body=body), self.assertRaises(GitHubError):
                 self.reader([jr(body)]).refs(REPO)
+
+
+class ActivityTest(ReaderCase):
+    SINCE = 1_700_000_000.0
+
+    def item(self, ts, login="lkshrk", ref="refs/heads/main"):
+        return {"id": 1, "node_id": "n", "before": "a", "after": "b", "ref": ref, "timestamp": ts,
+                "activity_type": "push", "actor": None if login is None else {"login": login}}
+
+    def test_entries_in_window_returned(self):
+        nxt = f'<{API}/repositories/1/activity?ref=refs%2Fheads%2Fmain&per_page=100&after=c1>; rel="next"'
+        r = self.reader(
+            [
+                jr([self.item("2023-11-14T22:20:00Z", "h-cloud-npa[bot]")], {"Link": nxt}),
+                jr([self.item("2023-11-14T22:13:21Z"), self.item("2023-11-14T22:13:19Z", "old")]),
+            ]
+        )
+        got = r.activity(REPO, "refs/heads/main", self.SINCE)
+        self.assertEqual(
+            got,
+            [Activity("refs/heads/main", 1_700_000_400.0, "h-cloud-npa[bot]"),
+             Activity("refs/heads/main", 1_700_000_001.0, "lkshrk")],
+        )
+        first = self.opener.requests[0].full_url
+        self.assertIn("/repos/acme/app/activity?", first)
+        self.assertIn("ref=refs%2Fheads%2Fmain", first)
+        self.assertIn("per_page=100", first)
+        self.assertIn("direction=desc", first)
+        self.assertIn("after=c1", self.opener.requests[1].full_url)
+
+    def test_stops_paging_once_older_than_window(self):
+        nxt = f'<{API}/repositories/1/activity?after=c1>; rel="next"'
+        r = self.reader([jr([self.item("2023-11-14T22:00:00Z")], {"Link": nxt})])
+        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [])
+        self.assertEqual(len(self.opener.requests), 1)
+
+    def test_null_actor_and_offset_timestamp(self):
+        r = self.reader([jr([self.item("2023-11-15T00:13:21+02:00", None)])])
+        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [Activity("refs/heads/main", 1_700_000_001.0, "")])
+
+    def test_other_refs_dropped(self):
+        r = self.reader([jr([self.item("2023-11-14T22:20:00Z", ref="refs/heads/main-x")])])
+        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [])
+
+    def test_error_raises(self):
+        err = urllib.error.HTTPError(API, 422, "spam", {}, io.BytesIO(b"x"))
+        for item in (err, OSError("reset"), FakeResponse(b"<html>")):
+            with self.subTest(item=item), self.assertRaises(GitHubError):
+                self.reader([item]).activity(REPO, "refs/heads/main", self.SINCE)
+
+    def test_wrong_shape_raises(self):
+        bad = (
+            {"a": 1},
+            ["x"],
+            [{**self.item("2023-11-14T22:20:00Z"), "timestamp": "soon"}],
+            [{**self.item("2023-11-14T22:20:00Z"), "timestamp": None}],
+            [{**self.item("2023-11-14T22:20:00Z"), "timestamp": "2023-11-14T22:20:00"}],
+            [{**self.item("2023-11-14T22:20:00Z"), "actor": "lkshrk"}],
+            [{**self.item("2023-11-14T22:20:00Z"), "actor": {"login": 5}}],
+            [{**self.item("2023-11-14T22:20:00Z"), "ref": None}],
+        )
+        for body in bad:
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).activity(REPO, "refs/heads/main", self.SINCE)
+
+    def test_next_link_off_host_raises(self):
+        link = '<https://evil.test/activity?after=c1>; rel="next"'
+        with self.assertRaises(GitHubError):
+            self.reader([jr([self.item("2023-11-14T22:20:00Z")], {"Link": link})]).activity(REPO, "refs/heads/main", self.SINCE)
+
+    def test_too_many_pages_raises(self):
+        link = {"Link": f'<{API}/repositories/1/activity?after=c>; rel="next"'}
+        pages = [jr([self.item("2023-11-14T22:20:00Z")], link) for _ in range(MAX_PAGES)]
+        with self.assertRaises(GitHubError):
+            self.reader(pages).activity(REPO, "refs/heads/main", self.SINCE)
+
+
+class ReleaseAuthorTest(ReaderCase):
+    def test_author_returned(self):
+        r = self.reader([jr({"tag_name": "release/1.0", "author": {"login": "github-actions[bot]"}})])
+        self.assertEqual(r.release_author(REPO, "release/1.0"), "github-actions[bot]")
+        self.assertTrue(self.opener.requests[0].full_url.endswith("/repos/acme/app/releases/tags/release%2F1.0"))
+
+    def test_no_release_is_none(self):
+        err = urllib.error.HTTPError(API, 404, "missing", {}, io.BytesIO(b"{}"))
+        self.assertIsNone(self.reader([err]).release_author(REPO, "v1"))
+
+    def test_null_author_is_empty(self):
+        self.assertEqual(self.reader([jr({"tag_name": "v1", "author": None})]).release_author(REPO, "v1"), "")
+
+    def test_error_raises(self):
+        err = urllib.error.HTTPError(API, 403, "no", {}, io.BytesIO(b"x"))
+        for item in (err, OSError("reset"), FakeResponse(b"<html>")):
+            with self.subTest(item=item), self.assertRaises(GitHubError):
+                self.reader([item]).release_author(REPO, "v1")
+
+    def test_wrong_shape_raises(self):
+        for body in ([], {"author": "x"}, {"author": {"login": 5}}, {"author": {}}):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).release_author(REPO, "v1")
+
+
+class DefaultBranchTest(ReaderCase):
+    def test_default_branch(self):
+        r = self.reader([jr({"full_name": "acme/app", "default_branch": "trunk"})])
+        self.assertEqual(r.default_branch(REPO), "trunk")
+        self.assertTrue(self.opener.requests[0].full_url.endswith("/repos/acme/app"))
+
+    def test_missing_default_branch_raises(self):
+        for body in ({}, [], {"default_branch": ""}):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).default_branch(REPO)
 
 
 class PullTest(ReaderCase):

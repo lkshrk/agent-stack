@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
-from agent_stack_hermes.postrun import GitHubReader, violations
+from agent_stack_hermes.postrun import GitHubReader, agent_actors, violations
 from agent_stack_hermes.runspec import (
     MAX_RUNTIME,
     RunSpec,
@@ -46,6 +46,7 @@ TOOL_SCHEMA = {
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 MAX_REASON_CHARS = 300
+ACTIVITY_SLACK_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -99,14 +100,15 @@ def _first_note(comments: tuple[str, ...], prefix: str) -> str | None:
     return notes[0] if notes else None
 
 
-def _refs_before(comments: tuple[str, ...]) -> dict[str, str]:
+def _refs_before(comments: tuple[str, ...]) -> tuple[float, dict[str, str]]:
     raw = _first_note(comments, REFS_NOTE)
     if raw is None:
         raise ValueError("no refs-before note on the card")
-    refs = json.loads(raw)
+    note = json.loads(raw)
+    refs = note.get("refs") if isinstance(note, dict) else None
     if not isinstance(refs, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in refs.items()):
         raise ValueError("unparseable refs-before note")
-    return refs
+    return _epoch(note, "at"), refs
 
 
 def _epoch(snap: dict, key: str) -> float:
@@ -151,11 +153,12 @@ def _recover(omni, task_id: str) -> str | None:
     return matches.pop() if matches else None
 
 
-def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link, comments) -> tuple[str, tuple]:
+def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link, comments, now) -> tuple[str, tuple]:
     notes: tuple[str, ...] = ()
     session_id = None
     if _first_note(comments, REFS_NOTE) is None:
-        refs_note = REFS_NOTE + json.dumps(gh.refs(spec.repo), sort_keys=True, separators=(",", ":"))
+        baseline = {"at": now(), "refs": gh.refs(spec.repo)}
+        refs_note = REFS_NOTE + json.dumps(baseline, sort_keys=True, separators=(",", ":"))
         kanban.note(task_id, refs_note)
         notes = (refs_note,)
     else:
@@ -238,10 +241,14 @@ def _judge(spec: RunSpec, session_id: str, snap: dict, comments: tuple[str, ...]
     outcome = evaluate(spec.bundle, snap)
     result = outcome.result if isinstance(outcome.result, dict) else {}
     pr_url = _pr_url(result, omni, session_id)
-    before = _refs_before(comments)
+    at, before = _refs_before(comments)
     pull = gh.pull(pr_url) if pr_url else None
     files = gh.changed_files(spec.repo, pull.base_ref, pull.head_ref) if pull and spec.bundle == "documenter" else []
-    found = violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files)
+    branches = () if pull else (spec.ref, gh.default_branch(spec.repo))
+    since = at - ACTIVITY_SLACK_SECONDS
+    found = violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
+                       lambda ref: gh.activity(spec.repo, ref, since), lambda tag: gh.release_author(spec.repo, tag),
+                       gh.agents, branches)
     if found:
         return _blocked("permission", "post-run check: " + "; ".join(found))
     if not outcome.done:
@@ -333,7 +340,7 @@ def run_slice(
     deadline = now() + slice_seconds
     try:
         if session_id is None:
-            session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link, comments)
+            session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link, comments, now)
             comments = comments + notes
         heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, now)
         if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, now, deadline):
@@ -372,7 +379,7 @@ def handle(args: dict | None = None, **kw) -> str:
             return json.dumps(_result("blocked", None, "runner not configured: missing " + ", ".join(missing)))
         creds = MachineCredentials(env["OMNIGENT_TOKEN_URL"], env["OMNIGENT_CLIENT_ID"], env["OMNIGENT_CLIENT_SECRET"])
         omni = OmnigentClient(env["OMNIGENT_URL"], TokenSource(creds))
-        gh = GitHubReader(env["GITHUB_RO_TOKEN_FILE"])
+        gh = GitHubReader(env["GITHUB_RO_TOKEN_FILE"], agents=agent_actors(env.get("GITHUB_AGENT_ACTORS")))
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
         return json.dumps(run_slice(env, kanban, omni, gh))
     except Exception as exc:

@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_stack_hermes import runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent
-from agent_stack_hermes.postrun import GitHubError, PullHead
+from agent_stack_hermes.postrun import Activity, GitHubError, PullHead
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -20,7 +20,15 @@ BEFORE = {"refs/heads/main": "a" * 40}
 AFTER = {"refs/heads/main": "a" * 40, f"refs/heads/{BRANCH}": "b" * 40}
 ENV = {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7"}
 DONE_EVENT = StreamEvent("message", None)
-RECORDED = (runner.REFS_NOTE + json.dumps(BEFORE), runner.SESSION_NOTE + "conv_old")
+AT = T0 - 600
+AGENT = "h-cloud-npa[bot]"
+
+
+def refs_note(refs, at=AT):
+    return runner.REFS_NOTE + json.dumps({"at": at, "refs": refs})
+
+
+RECORDED = (refs_note(BEFORE), runner.SESSION_NOTE + "conv_old")
 
 
 def card_body(bundle="polly"):
@@ -126,8 +134,14 @@ class FakeOmnigent:
 
 
 class FakeGitHub:
-    def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None):
+    def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
+                 agents=frozenset({AGENT})):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
+        self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
+
+    def release_author(self, repo, tag):
+        self._call("release_author", repo, tag)
+        return self.releases.get(tag)
 
     def _call(self, name, *args):
         self.log.append((name, *args))
@@ -146,6 +160,14 @@ class FakeGitHub:
         self._call("changed_files", repo, base, head)
         return self.files
 
+    def activity(self, repo, ref, since):
+        self._call("activity", repo, ref, since)
+        return [Activity(ref, since + 1, login) for login in self.entries.get(ref, ())]
+
+    def default_branch(self, repo):
+        self._call("default_branch", repo)
+        return "trunk"
+
 
 class RunnerTest(unittest.TestCase):
     def setUp(self):
@@ -153,12 +175,12 @@ class RunnerTest(unittest.TestCase):
         self.clock = Clock()
 
     def run_slice(self, snap, comments=RECORDED, bundle="polly", body=None, ok=True, env=ENV, refs=None,
-                  gh_fail=None, files=(), slice_seconds=runner.SLICE_SECONDS, note_fail=None, **omni):
+                  gh_fail=None, files=(), slice_seconds=runner.SLICE_SECONDS, note_fail=None, gh=None, **omni):
         self.kanban = FakeKanban(self.log, card_body(bundle) if body is None else body, comments, ok, note_fail)
         self.omni = FakeOmnigent(self.log, self.clock, snap, **omni)
         if refs is None:
             refs = (AFTER,) if comments else (BEFORE, AFTER)
-        self.gh = FakeGitHub(self.log, refs, files, gh_fail)
+        self.gh = FakeGitHub(self.log, refs, files, gh_fail, **(gh or {}))
         return runner.run_slice(env, self.kanban, self.omni, self.gh, now=self.clock, slice_seconds=slice_seconds,
                                 sleep=self.sleep)
 
@@ -188,7 +210,8 @@ class RunnerTest(unittest.TestCase):
         self.assertLess(names.index("create"), names.index("omnigent-session"))
         self.assertLess(names.index("omnigent-session"), names.index("stream"))
         notes = [c[1] for c in self.calls("note")]
-        self.assertEqual(notes, [runner.REFS_NOTE + json.dumps(BEFORE, sort_keys=True, separators=(",", ":")),
+        self.assertEqual(notes, [runner.REFS_NOTE + json.dumps({"at": T0, "refs": BEFORE}, sort_keys=True,
+                                                               separators=(",", ":")),
                                  runner.SESSION_NOTE + "conv_new"])
         [create] = self.calls("create")
         self.assertEqual(create[1]["labels"]["agent-stack/card"], "t_1")
@@ -357,7 +380,40 @@ class RunnerTest(unittest.TestCase):
         moved = {**AFTER, "refs/heads/main": "c" * 40}
         out = self.run_slice(snapshot(), refs=(moved,))
         self.assertTrue(out["reason"].startswith("post-run check: "), out["reason"])
+        self.assertEqual(self.calls("activity"), [("activity", REPO, "refs/heads/main", AT - 60)])
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/heads/main")
+
+    def test_owner_merge_during_run_completes(self):
+        moved = {**AFTER, "refs/heads/main": "c" * 40, "refs/heads/polly/x": "d" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh={"activity": {"refs/heads/main": ["lkshrk"]}})
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main"])
+
+    def test_agent_move_of_main_blocks_permission(self):
+        moved = {**AFTER, "refs/heads/main": "c" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh={"activity": {"refs/heads/main": ["lkshrk", AGENT]}})
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main")
+
+    def test_no_agent_actors_blocks_protected_move(self):
+        moved = {**AFTER, "refs/heads/main": "c" * 40}
+        gh = {"activity": {"refs/heads/main": ["lkshrk"]}, "agents": frozenset()}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/heads/main")
+
+    def test_no_pr_protects_default_and_workspace_ref(self):
+        result = {"status": "BLOCKED", "pr": None, "branch": None, "gaps": [], "assumptions": [],
+                  "blocked": {"class": "decision", "question": "Which API?"}}
+        moved = {**BEFORE, "refs/heads/trunk": "t" * 40, "refs/heads/polly/x": "d" * 40}
+        out = self.run_slice(snapshot(result), refs=(moved,))
+        self.assertEqual(self.calls("default_branch"), [("default_branch", REPO)])
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/heads/trunk")
+
+    def test_activity_error_blocks_environment(self):
+        moved = {**AFTER, "refs/heads/main": "c" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh_fail={"activity": GitHubError("HTTP 422", 422)})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
     def test_documenter_checks_changed_files(self):
         result = {"status": "DONE", "mode": "delta", "changed_files": ["src/app.py"], "stale": [], "pr": PR}
@@ -416,13 +472,31 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(len(self.calls("create")), 1)
         self.assertEqual(self.calls("refs"), [("refs", REPO)])
         self.assertEqual([c[1] for c in self.calls("note")], [runner.SESSION_NOTE + "conv_new"])
-        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/tags/v1")
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/v1")
 
     def test_earliest_refs_note_is_the_baseline(self):
-        later = {**BEFORE, "refs/tags/v1": "d" * 40}
-        comments = (runner.REFS_NOTE + json.dumps(BEFORE), runner.REFS_NOTE + json.dumps(later), RECORDED[1])
-        out = self.run_slice(snapshot(), comments=comments, refs=({**AFTER, "refs/tags/v1": "d" * 40},))
-        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/tags/v1")
+        later = {**BEFORE, "refs/heads/main": "d" * 40}
+        comments = (refs_note(BEFORE), refs_note(later, AT + 60), RECORDED[1])
+        out = self.run_slice(snapshot(), comments=comments, refs=({**AFTER, "refs/heads/main": "d" * 40},))
+        self.assertEqual(self.calls("activity"), [("activity", REPO, "refs/heads/main", AT - 60)])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/heads/main")
+
+    def test_release_tag_by_non_agent_completes(self):
+        moved = {**AFTER, "refs/tags/v2": "d" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh={"releases": {"v2": "github-actions[bot]"}})
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(self.calls("release_author"), [("release_author", REPO, "v2")])
+        self.assertFalse(self.calls("activity"))
+
+    def test_agent_release_blocks_permission(self):
+        moved = {**AFTER, "refs/tags/v2": "d" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh={"releases": {"v2": AGENT}})
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/tags/v2")
+
+    def test_release_error_blocks_environment(self):
+        moved = {**AFTER, "refs/tags/v2": "d" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh_fail={"release_author": GitHubError("HTTP 403", 403)})
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
     def test_multiple_sessions_for_card_blocks_environment(self):
         sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
@@ -443,9 +517,13 @@ class RunnerTest(unittest.TestCase):
         self.assert_blocked(out, "transient", "BLOCKED{environment}: OSError: database is locked")
 
     def test_unparseable_refs_note_blocks_environment(self):
-        comments = (runner.REFS_NOTE + "{not json", runner.SESSION_NOTE + "conv_old")
-        out = self.run_slice(snapshot(), comments=comments)
-        self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
+        bad = ("{not json", json.dumps(BEFORE), json.dumps({"at": True, "refs": BEFORE}), json.dumps({"at": AT}),
+               json.dumps({"at": "now", "refs": BEFORE}), json.dumps({"at": AT, "refs": {"refs/heads/main": 1}}))
+        for raw in bad:
+            with self.subTest(raw=raw):
+                self.log.clear()
+                out = self.run_slice(snapshot(), comments=(runner.REFS_NOTE + raw, runner.SESSION_NOTE + "conv_old"))
+                self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
     def test_stale_run_does_not_retry(self):
         out = self.run_slice(snapshot(), ok=False)

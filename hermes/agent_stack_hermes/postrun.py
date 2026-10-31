@@ -1,9 +1,11 @@
+import datetime
 import http.client
 import json
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 
 TIMEOUT_SECONDS = 30
@@ -33,6 +35,17 @@ class PullHead:
     default_branch: str
 
 
+@dataclass(frozen=True)
+class Activity:
+    ref: str
+    timestamp: float
+    actor: str
+
+
+def agent_actors(value: str | None) -> frozenset[str]:
+    return frozenset(login.strip().lower() for login in (value or "").split(",") if login.strip())
+
+
 def _str(value, what: str) -> str:
     if not isinstance(value, str) or not value:
         raise GitHubError(f"{what} missing or not a string")
@@ -40,8 +53,11 @@ def _str(value, what: str) -> str:
 
 
 class GitHubReader:
-    def __init__(self, token_file: str, api: str = "https://api.github.com", opener=urllib.request.urlopen):
+    def __init__(
+        self, token_file: str, api: str = "https://api.github.com", opener=urllib.request.urlopen, agents=frozenset()
+    ):
         self._token_file = token_file
+        self.agents = frozenset(agents)
         self._api = api.rstrip("/")
         self._opener = opener
 
@@ -92,13 +108,23 @@ class GitHubReader:
             out.update(self._refs_under(repo, kind))
         return out
 
-    def _refs_under(self, repo: str, kind: str) -> RefMap:
-        url = f"{self._api}/repos/{repo}/git/matching-refs/{kind}?per_page=100"
-        out: RefMap = {}
+    def _pages(self, url: str, what: str):
         for _ in range(MAX_PAGES):
             body, link = self._get(url)
             if not isinstance(body, list):
-                raise GitHubError("refs response is not a list")
+                raise GitHubError(f"{what} response is not a list")
+            yield body
+            match = NEXT_LINK.search(link)
+            if not match:
+                return
+            url = match.group(1)
+            if not url.startswith(self._api + "/"):
+                raise GitHubError("pagination link leaves the API host")
+        raise GitHubError(f"too many {what} pages")
+
+    def _refs_under(self, repo: str, kind: str) -> RefMap:
+        out: RefMap = {}
+        for body in self._pages(f"{self._api}/repos/{repo}/git/matching-refs/{kind}?per_page=100", "refs"):
             for item in body:
                 if not isinstance(item, dict) or not isinstance(item.get("object"), dict):
                     raise GitHubError("ref entry has the wrong shape")
@@ -106,13 +132,41 @@ class GitHubReader:
                 sha = _str(item["object"].get("sha"), "ref sha")
                 if name.startswith(f"refs/{kind}/"):
                     out[name] = sha
-            match = NEXT_LINK.search(link)
-            if not match:
-                return out
-            url = match.group(1)
-            if not url.startswith(self._api + "/"):
-                raise GitHubError("pagination link leaves the API host")
-        raise GitHubError("too many ref pages")
+        return out
+
+    def activity(self, repo: str, ref: str, since: float) -> list[Activity]:
+        query = urllib.parse.urlencode({"ref": ref, "direction": "desc", "per_page": 100})
+        out: list[Activity] = []
+        for body in self._pages(f"{self._api}/repos/{repo}/activity?{query}", "activity"):
+            for item in body:
+                entry = _activity(item)
+                if entry.timestamp < since:
+                    return out
+                if entry.ref == ref:
+                    out.append(entry)
+        return out
+
+    def release_author(self, repo: str, tag: str) -> str | None:
+        try:
+            body, _ = self._get(f"{self._api}/repos/{repo}/releases/tags/{urllib.parse.quote(tag, safe='')}")
+        except GitHubError as exc:
+            if exc.status == 404:
+                return None
+            raise
+        if not isinstance(body, dict):
+            raise GitHubError("release response has the wrong shape")
+        author = body.get("author")
+        if author is None:
+            return ""
+        if not isinstance(author, dict):
+            raise GitHubError("release author has the wrong shape")
+        return _str(author.get("login"), "release author login")
+
+    def default_branch(self, repo: str) -> str:
+        body, _ = self._get(f"{self._api}/repos/{repo}")
+        if not isinstance(body, dict):
+            raise GitHubError("repo response has the wrong shape")
+        return _str(body.get("default_branch"), "default branch")
 
     def pull(self, pr_url: str) -> PullHead:
         match = PR_URL.match(pr_url or "")
@@ -162,19 +216,65 @@ class GitHubReader:
         return out
 
 
+def _activity(item) -> Activity:
+    if not isinstance(item, dict):
+        raise GitHubError("activity entry has the wrong shape")
+    actor = item.get("actor")
+    if actor is None:
+        login = ""
+    elif isinstance(actor, dict):
+        login = _str(actor.get("login"), "activity actor login")
+    else:
+        raise GitHubError("activity actor has the wrong shape")
+    stamp = _str(item.get("timestamp"), "activity timestamp")
+    try:
+        when = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        raise GitHubError("activity timestamp unparseable") from None
+    if when.tzinfo is None:
+        raise GitHubError("activity timestamp has no zone")
+    return Activity(_str(item.get("ref"), "activity ref"), when.timestamp(), login)
+
+
+def _moved_by(ref: str, actors: list[str], agents: frozenset[str]) -> str | None:
+    if any(a.lower() in agents for a in actors if a):
+        return f"ref moved by agent: {ref}"
+    if not actors or not all(actors):
+        return f"ref moved (unattributed): {ref}"
+    return None
+
+
+def _actors(ref: str, after: RefMap, activity, release) -> list[str]:
+    if not ref.startswith("refs/tags/"):
+        return [e.actor for e in activity(ref)]
+    author = release(ref.removeprefix("refs/tags/")) if ref in after else None
+    return [] if author is None else [author]
+
+
 def violations(
-    bundle: str, repo: str, before: RefMap, after: RefMap, pull: PullHead | None, files: list[str]
+    bundle: str,
+    repo: str,
+    before: RefMap,
+    after: RefMap,
+    pull: PullHead | None,
+    files: list[str],
+    activity: Callable[[str], list[Activity]],
+    release: Callable[[str], str | None],
+    agents: frozenset[str],
+    branches: tuple[str, ...] = (),
 ) -> list[str]:
     from agent_stack_policies import vcs
 
-    protected = bool(pull) and pull.head_ref in (pull.base_ref, pull.default_branch)
-    allowed = {"refs/heads/" + pull.head_ref} if pull and not protected else set()
-    found = [
-        f"ref moved: {ref}"
-        for ref in sorted(set(before) | set(after))
-        if before.get(ref) != after.get(ref) and ref not in allowed
-    ]
-    if pull and protected:
+    agents = frozenset(a.lower() for a in agents if a)
+    heads = set(branches) | ({pull.base_ref, pull.default_branch} if pull else set())
+    protected = {"refs/heads/" + name for name in heads}
+    found = []
+    for ref in sorted(set(before) | set(after)):
+        if before.get(ref) != after.get(ref) and (ref.startswith("refs/tags/") or ref in protected):
+            reason = _moved_by(ref, _actors(ref, after, activity, release), agents) if agents else f"ref moved: {ref}"
+            if reason:
+                found.append(reason)
+    if pull and pull.head_ref in heads:
         found.append(f"PR head is a protected branch: {pull.head_ref}")
     if pull and pull.head_repo.lower() != repo.lower():
         found.append(f"PR head is not in {repo}")
