@@ -24,8 +24,9 @@ func main() {
 	httpClient := &http.Client{Timeout: callTimeout}
 	b := &bridge{
 		linear: &graphQL{
-			endpoint: graphQLURL,
-			http:     httpClient,
+			endpoint:    graphQLURL,
+			cardURLBase: os.Getenv("KANBAN_CARD_URL_BASE"),
+			http:        httpClient,
 			tokens: &tokenSource{
 				tokenURL:     tokenURL,
 				clientID:     mustEnv("LINEAR_APP_CLIENT_ID"),

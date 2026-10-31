@@ -321,3 +321,24 @@ func TestGraphQLProjectionMutations(t *testing.T) {
 		t.Fatalf("vars = %v", (*calls)[2].req.Variables)
 	}
 }
+
+func TestGraphQLLinkCardURLBase(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"attachmentCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient, cardURLBase: "https://kanban.example/"}
+	if err := g.LinkCard(context.Background(), "i", "c1"); err != nil {
+		t.Fatal(err)
+	}
+	g.cardURLBase = ""
+	if err := g.LinkCard(context.Background(), "i", "c1"); err != nil {
+		t.Fatal(err)
+	}
+	if u := (*calls)[0].req.Variables["u"]; u != "https://kanban.example/cards/c1" {
+		t.Fatalf("url = %v", u)
+	}
+	if u := (*calls)[1].req.Variables["u"]; u != "kanban://card/c1" {
+		t.Fatalf("url = %v", u)
+	}
+}

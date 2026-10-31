@@ -112,12 +112,16 @@ type projector struct {
 	done   map[string]string
 	batch  int
 
-	linked map[string]bool
-	warned map[string]bool
+	steps       map[string]bool
+	identifiers map[string]string
+	fails       map[string]int
+	warned      map[string]bool
 }
 
+const maxCardFailures = 3
+
 func newProjector(k kanbanAPI, l linearAPI, n notifier) *projector {
-	return &projector{kanban: k, linear: l, notify: n, done: map[string]string{}, batch: defaultBatch}
+	return &projector{kanban: k, linear: l, notify: n, done: map[string]string{}, batch: defaultBatch, identifiers: map[string]string{}}
 }
 
 func (p *projector) run(ctx context.Context) {
@@ -139,8 +143,14 @@ func (p *projector) tick(ctx context.Context) error {
 	if p.done == nil {
 		p.done = map[string]string{}
 	}
-	if p.linked == nil {
-		p.linked = map[string]bool{}
+	if p.identifiers == nil {
+		p.identifiers = map[string]string{}
+	}
+	if p.steps == nil {
+		p.steps = map[string]bool{}
+	}
+	if p.fails == nil {
+		p.fails = map[string]int{}
 	}
 	if p.warned == nil {
 		p.warned = map[string]bool{}
@@ -165,14 +175,35 @@ func (p *projector) tick(ctx context.Context) error {
 		return nil
 	}
 	seen := map[string]bool{}
+	var firstErr error
 	for _, ev := range events {
 		if seen[ev.CardID] {
 			continue
 		}
 		seen[ev.CardID] = true
-		if err := p.project(ctx, ev.CardID); err != nil {
-			return fmt.Errorf("card %s: %w", ev.CardID, err)
+		err := p.project(ctx, ev.CardID)
+		if err == nil {
+			delete(p.fails, ev.CardID)
+			continue
 		}
+		p.fails[ev.CardID]++
+		if p.fails[ev.CardID] < maxCardFailures {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("card %s: %w", ev.CardID, err)
+			}
+			continue
+		}
+		delete(p.fails, ev.CardID)
+		ident := p.identifiers[ev.CardID]
+		if ident == "" {
+			ident = "unlinked"
+		}
+		msg := fmt.Sprintf("⚠️ projection skipped for card %s (%s): %s", ev.CardID, ident, shortErr(err))
+		log.Print("linear-bridge: " + msg)
+		p.alert(msg)
+	}
+	if firstErr != nil {
+		return firstErr
 	}
 	cctx, cancel = context.WithTimeout(ctx, cardTimeout)
 	defer cancel()
@@ -182,58 +213,81 @@ func (p *projector) tick(ctx context.Context) error {
 	return nil
 }
 
-func (p *projector) project(ctx context.Context, cardID string) error {
+func (p *projector) step(key, name string, fn func() error) error {
+	k := key + "|" + name
+	if p.steps[k] {
+		return nil
+	}
+	if err := fn(); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	p.steps[k] = true
+	return nil
+}
+
+func callWith(ctx context.Context, fn func(context.Context) error) error {
 	cctx, cancel := context.WithTimeout(ctx, cardTimeout)
-	card, err := p.kanban.Card(cctx, cardID)
-	cancel()
+	defer cancel()
+	return fn(cctx)
+}
+
+func (p *projector) project(ctx context.Context, cardID string) error {
+	var card Card
+	err := callWith(ctx, func(c context.Context) (err error) {
+		card, err = p.kanban.Card(c, cardID)
+		return
+	})
 	if err != nil {
 		return err
 	}
 	if card.Link == nil {
 		return nil
 	}
-	key := card.Status + "|" + strconv.FormatInt(card.RunID, 10) + "|" + card.Outcome
+	p.identifiers[cardID] = card.Link.Identifier
+	key := strings.Join([]string{cardID, card.Status, strconv.FormatInt(card.RunID, 10), card.Outcome, card.BlockReason}, "|")
 	if p.done[cardID] == key {
 		return nil
 	}
-	cctx, cancel = context.WithTimeout(ctx, cardTimeout)
-	issue, err := p.linear.Issue(cctx, card.Link.IssueID)
-	cancel()
+	var issue IssueInfo
+	err = callWith(ctx, func(c context.Context) (err error) {
+		issue, err = p.linear.Issue(c, card.Link.IssueID)
+		return
+	})
 	if err != nil {
 		return fmt.Errorf("issue lookup: %w", err)
 	}
-	if err := p.setState(ctx, card, issue); err != nil {
+	if err := p.step(key, "set state", func() error { return p.setState(ctx, card, issue) }); err != nil {
 		return err
 	}
-	if !p.linked[cardID] {
-		cctx, cancel = context.WithTimeout(ctx, cardTimeout)
-		err = p.linear.LinkCard(cctx, card.Link.IssueID, cardID)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("link card: %w", err)
-		}
-		p.linked[cardID] = true
+	err = p.step(cardID, "link card", func() error {
+		return callWith(ctx, func(c context.Context) error { return p.linear.LinkCard(c, card.Link.IssueID, cardID) })
+	})
+	if err != nil {
+		return err
 	}
 	if a, ok := sessionActivity(card); ok && card.Link.SessionID != "" {
-		cctx, cancel = context.WithTimeout(ctx, cardTimeout)
-		err = p.linear.Activity(cctx, card.Link.SessionID, a)
-		cancel()
+		err = p.step(key, "activity", func() error {
+			return callWith(ctx, func(c context.Context) error { return p.linear.Activity(c, card.Link.SessionID, a) })
+		})
 		if err != nil {
-			return fmt.Errorf("activity: %w", err)
+			return err
 		}
 	}
 	if body, ok := evidenceComment(card); ok {
-		cctx, cancel = context.WithTimeout(ctx, cardTimeout)
-		err = p.linear.Comment(cctx, card.Link.IssueID, body)
-		cancel()
+		err = p.step(key, "comment", func() error {
+			return callWith(ctx, func(c context.Context) error { return p.linear.Comment(c, card.Link.IssueID, body) })
+		})
 		if err != nil {
-			return fmt.Errorf("comment: %w", err)
+			return err
 		}
 	}
-	p.done[cardID] = key
 	if strings.HasPrefix(card.BlockReason, postRunPrefix) {
-		p.alert("🔴 " + card.Link.Identifier + ": " + card.BlockReason)
+		_ = p.step(key, "alert", func() error {
+			p.alert("🔴 " + card.Link.Identifier + ": " + card.BlockReason)
+			return nil
+		})
 	}
+	p.done[cardID] = key
 	return nil
 }
 

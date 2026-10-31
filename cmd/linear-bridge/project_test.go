@@ -205,7 +205,6 @@ func TestPostRunViolationNotifies(t *testing.T) {
 	}
 	c.BlockReason = "needs input"
 	k.cards["a"] = c
-	c.Status = "blocked"
 	p2, n2 := newProj(k, l)
 	if err := p2.tick(context.Background()); err != nil {
 		t.Fatal(err)
@@ -228,5 +227,98 @@ func TestMissingStateNameSkipped(t *testing.T) {
 	}
 	if len(l.states) != 0 || len(l.activities) != 1 {
 		t.Fatalf("states=%v activities=%v", l.states, l.activities)
+	}
+}
+
+func TestPoisonCardSkippedAfterThreeFailures(t *testing.T) {
+	good := linkedCard("b", "todo")
+	k := &projKanban{
+		events: []CardEvent{{ID: 1, CardID: "a"}, {ID: 2, CardID: "b"}},
+		cards:  map[string]Card{"a": linkedCard("a", "todo"), "b": good},
+	}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": errors.New("issue not found")}}
+	p, n := newProj(k, l)
+	for i := 0; i < 2; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatalf("tick %d: want error", i)
+		}
+		if len(k.setCursor) != 0 || len(n.msgs) != 0 {
+			t.Fatalf("tick %d: cursor=%v msgs=%q", i, k.setCursor, n.msgs)
+		}
+	}
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(k.setCursor) != 1 || k.setCursor[0] != 2 {
+		t.Fatalf("cursor = %v", k.setCursor)
+	}
+	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "⚠️ projection skipped for card a (HCL-a): ") {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+	if len(l.states) != 1 || l.states[0][0] != "iss" {
+		t.Fatalf("good card not projected: %v", l.states)
+	}
+}
+
+func TestFailureCounterResetsOnSuccess(t *testing.T) {
+	k := &projKanban{events: []CardEvent{{ID: 1, CardID: "a"}}, cards: map[string]Card{"a": linkedCard("a", "todo")}}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": errors.New("x")}}
+	p, n := newProj(k, l)
+	for i := 0; i < 2; i++ {
+		_ = p.tick(context.Background())
+	}
+	l.issueErrFor = nil
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	l.issueErrFor = map[string]error{"iss-a": errors.New("x")}
+	k.cards["a"] = linkedCard("a", "ready")
+	for i := 0; i < 2; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatal("want error")
+		}
+	}
+	if len(n.msgs) != 0 {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestRetrySkipsCompletedSteps(t *testing.T) {
+	c := linkedCard("a", "done")
+	c.Summary = "ok"
+	c.RunID = 1
+	c.Metadata = map[string]any{"bundle": "coder"}
+	k := &projKanban{events: []CardEvent{{ID: 1, CardID: "a"}}, cards: map[string]Card{"a": c}}
+	l := &fakeLinear{issue: projIssue("s-todo"), commentErr: errors.New("boom")}
+	p, _ := newProj(k, l)
+	if err := p.tick(context.Background()); err == nil {
+		t.Fatal("want error")
+	}
+	l.commentErr = nil
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.activities) != 1 || len(l.states) != 1 || len(l.links) != 1 || len(l.comments) != 2 {
+		t.Fatalf("states=%d links=%d activities=%d comments=%d", len(l.states), len(l.links), len(l.activities), len(l.comments))
+	}
+}
+
+func TestNewBlockReasonReprojectsAndAlerts(t *testing.T) {
+	c := linkedCard("a", "blocked")
+	c.RunID = 2
+	c.BlockReason = "needs input"
+	k := &projKanban{events: []CardEvent{{ID: 1, CardID: "a"}}, cards: map[string]Card{"a": c}}
+	l := &fakeLinear{issue: projIssue("s-blk")}
+	p, n := newProj(k, l)
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c.BlockReason = postRunPrefix + "bad"
+	k.cards["a"] = c
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.activities) != 2 || len(n.msgs) != 1 {
+		t.Fatalf("activities=%d msgs=%q", len(l.activities), n.msgs)
 	}
 }

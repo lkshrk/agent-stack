@@ -101,9 +101,10 @@ func (t *tokenSource) Invalidate() {
 }
 
 type graphQL struct {
-	endpoint string
-	tokens   *tokenSource
-	http     *http.Client
+	endpoint    string
+	cardURLBase string
+	tokens      *tokenSource
+	http        *http.Client
 }
 
 const (
@@ -138,7 +139,11 @@ func (g *graphQL) Comment(ctx context.Context, issueID, body string) error {
 }
 
 func (g *graphQL) LinkCard(ctx context.Context, issueID, cardID string) error {
-	vars := map[string]any{"id": issueID, "t": "Kanban card " + cardID, "u": "kanban://card/" + cardID}
+	u := "kanban://card/" + cardID
+	if g.cardURLBase != "" {
+		u = strings.TrimRight(g.cardURLBase, "/") + "/cards/" + cardID
+	}
+	vars := map[string]any{"id": issueID, "t": "Kanban card " + cardID, "u": u}
 	return g.run(ctx, linkMutation, vars, "attachmentCreate")
 }
 

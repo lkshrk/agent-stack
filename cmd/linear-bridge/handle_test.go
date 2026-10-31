@@ -35,10 +35,15 @@ type fakeLinear struct {
 	thoughtAfterNotify                  bool
 	states, activities, comments, links [][2]string
 	writeErr                            error
+	commentErr                          error
+	issueErrFor                         map[string]error
 }
 
 func (f *fakeLinear) Issue(_ context.Context, id string) (IssueInfo, error) {
 	f.issueCalls = append(f.issueCalls, id)
+	if err := f.issueErrFor[id]; err != nil {
+		return IssueInfo{}, err
+	}
 	return f.issue, f.issueErr
 }
 
@@ -556,6 +561,9 @@ func (f *fakeLinear) Activity(_ context.Context, s string, a Activity) error {
 
 func (f *fakeLinear) Comment(_ context.Context, issueID, body string) error {
 	f.comments = append(f.comments, [2]string{issueID, body})
+	if f.commentErr != nil {
+		return f.commentErr
+	}
 	return f.writeErr
 }
 
