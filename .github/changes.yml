@@ -3,7 +3,10 @@ ci: &ci
   - '.github/workflows/ci.yml'
   - '.github/actions/test-image/**'
   - '.github/changes.yml'
-  - &docs '!{README.md,*/README.md}'
+  - '!README.md'
+  - '!bundles/README.md'
+  - '!plugins/README.md'
+  - '!cmd/README.md'
 shared: &shared
   - *ci
   - '.github/workflows/images.yml'

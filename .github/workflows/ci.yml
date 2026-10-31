@@ -21,6 +21,9 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     outputs:
       go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
       images: ${{ steps.images.outputs.images }}
@@ -33,15 +36,24 @@ jobs:
       - name: hermes and hermes-webui pin the same Hermes image
         run: |
           [ "$(grep -h '^ARG HERMES_IMAGE=' images/hermes/Dockerfile)" = "$(grep -h '^ARG HERMES_IMAGE=' images/hermes-webui/Dockerfile)" ]
-      - name: Commit the push is compared against, empty to build everything
+      - name: omnigent-host and omnigent-server use the same Omnigent version
+        run: |
+          host=$(sed -nE 's/^ARG OMNIGENT_HOST_IMAGE=[^@]*:(v[^:@]+)@.*/\1/p' images/omnigent-host/Dockerfile)
+          server=$(sed -nE 's/^ARG OMNIGENT_SERVER_IMAGE=[^@]*:(v[^:@]+)@.*/\1/p' images/omnigent-server/Dockerfile)
+          echo "omnigent-host ${host:-?}, omnigent-server ${server:-?}"
+          [ -n "$host" ] && [ "$host" = "$server" ]
+      - name: Last commit main passed ci on, empty to build everything
         id: before
         if: github.event_name == 'push'
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ $BEFORE =~ ^[0-9a-f]{40}$ && $BEFORE != 0000000000000000000000000000000000000000 ]] \
-            && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            echo "sha=$BEFORE" >>"$GITHUB_OUTPUT"
+          sha=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci --branch main --event push --status success \
+            --limit 1 --json headSha --jq '.[0].headSha // empty' || true)
+          if [[ $sha =~ ^[0-9a-f]{40}$ ]] && git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
+            echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice::no successful ci run on an ancestor of HEAD; building every image"
           fi
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         if: github.event_name == 'pull_request' || steps.before.outputs.sha != ''
