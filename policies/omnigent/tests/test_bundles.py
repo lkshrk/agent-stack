@@ -1373,8 +1373,25 @@ class BundleVerdictTest(unittest.TestCase):
                 "codex-native": "openai-auto",
             },
         )
-        for config in harnesses.values():
-            self.assertIn("smart-auto", config["model_allowlist"])
+        self.assertEqual(
+            {name: config["model_allowlist"] for name, config in harnesses.items()},
+            {
+                "claude-sdk": [
+                    "anthropic-auto",
+                    "smart-auto",
+                    "anthropic/claude-fable",
+                    "anthropic/claude-opus",
+                    "anthropic/claude-sonnet",
+                ],
+                "claude-native": [
+                    "anthropic-auto",
+                    "smart-auto",
+                    "anthropic/claude-sonnet",
+                    "anthropic/claude-opus",
+                ],
+                "codex-native": ["openai-auto", "smart-auto", "openai/gpt-astra", "openai/gpt-sol"],
+            },
+        )
 
     def test_planner_critic_rounds(self):
         plan = infra_plan()
