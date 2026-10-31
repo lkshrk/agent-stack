@@ -342,7 +342,7 @@ func TestOutageDoesNotSkipCards(t *testing.T) {
 	if err := p.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(k.setCursor) != 1 || len(l.states) != 0 && len(l.links) != 2 {
+	if len(k.setCursor) != 1 || (len(l.states) != 0 && len(l.links) != 2) {
 		t.Fatalf("cursor=%v links=%v", k.setCursor, l.links)
 	}
 }
@@ -370,5 +370,145 @@ func TestSkippedCardNotRealertedWhileStalled(t *testing.T) {
 	}
 	if len(k.setCursor) != 1 || len(n.msgs) != 2 || !strings.Contains(n.msgs[0], "card a") || !strings.Contains(n.msgs[1], "card b") {
 		t.Fatalf("cursor=%v msgs=%q", k.setCursor, n.msgs)
+	}
+}
+
+func stallKanban(ids ...string) *projKanban {
+	k := &projKanban{cards: map[string]Card{}}
+	for i, id := range ids {
+		k.events = append(k.events, CardEvent{ID: int64(i + 1), CardID: id})
+		k.cards[id] = linkedCard(id, "todo")
+	}
+	return k
+}
+
+func failingLinear(ids ...string) *fakeLinear {
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{}}
+	for _, id := range ids {
+		l.issueErrFor["iss-"+id] = errors.New("linear issue not found")
+	}
+	return l
+}
+
+func TestLonePoisonCardAlertsThenIsSkipped(t *testing.T) {
+	k := stallKanban("a")
+	p, n := newProj(k, failingLinear("a"))
+	for i := 1; i <= 9; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatalf("tick %d: want error", i)
+		}
+	}
+	if len(n.msgs) != 0 || len(k.setCursor) != 0 {
+		t.Fatalf("before threshold: msgs=%q cursor=%v", n.msgs, k.setCursor)
+	}
+	_ = p.tick(context.Background())
+	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 linear-bridge projection stalled: ") ||
+		!strings.Contains(n.msgs[0], "issue not found") {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+	for i := 0; i < 2; i++ {
+		_ = p.tick(context.Background())
+	}
+	if len(k.setCursor) != 1 || k.setCursor[0] != 1 {
+		t.Fatalf("lone card not skipped: cursor=%v", k.setCursor)
+	}
+	if len(n.msgs) != 2 || !strings.HasPrefix(n.msgs[1], "⚠️ projection skipped for card a") {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestStallWithTwoFailingCardsAlertsOnceWithoutSkip(t *testing.T) {
+	k := stallKanban("a", "b")
+	p, n := newProj(k, failingLinear("a", "b"))
+	for i := 0; i < 15; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatal("want error")
+		}
+	}
+	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 linear-bridge projection stalled: ") {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+	if len(k.setCursor) != 0 || len(p.fails) != 0 || len(p.skipped) != 0 {
+		t.Fatalf("cursor=%v fails=%v skipped=%v", k.setCursor, p.fails, p.skipped)
+	}
+}
+
+func TestStallCounterResetsWhenTickSucceeds(t *testing.T) {
+	k := stallKanban("a", "b")
+	l := failingLinear("a", "b")
+	p, n := newProj(k, l)
+	for i := 0; i < 9; i++ {
+		_ = p.tick(context.Background())
+	}
+	l.issueErrFor = nil
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	l.issueErrFor = map[string]error{"iss-a": errors.New("x"), "iss-b": errors.New("x")}
+	k.cards["a"], k.cards["b"] = linkedCard("a", "ready"), linkedCard("b", "ready")
+	for i := 0; i < 9; i++ {
+		_ = p.tick(context.Background())
+	}
+	if len(n.msgs) != 0 {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestStallAlertsAgainAfterRecovery(t *testing.T) {
+	k := stallKanban("a", "b")
+	l := failingLinear("a", "b")
+	p, n := newProj(k, l)
+	for i := 0; i < 10; i++ {
+		_ = p.tick(context.Background())
+	}
+	l.issueErrFor = nil
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	l.issueErrFor = map[string]error{"iss-a": errors.New("x"), "iss-b": errors.New("x")}
+	k.cards["a"], k.cards["b"] = linkedCard("a", "ready"), linkedCard("b", "ready")
+	for i := 0; i < 10; i++ {
+		_ = p.tick(context.Background())
+	}
+	if len(n.msgs) != 2 {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+}
+
+func TestEvidenceRendersObjectGaps(t *testing.T) {
+	c := Card{Status: "done", Metadata: map[string]any{
+		"gaps": []any{
+			map[string]any{"id": "gap-1", "question": "which auth?", "class": "implementation", "stub": "TODO(gap-1): auth", "location": "a/b.go:12"},
+			map[string]any{"id": "gap-2", "question": "what quota?", "class": "decision", "stub": nil, "location": nil},
+		},
+		"doc_gaps": []any{map[string]any{"file": "docs/x.md", "reason": "no owner"}, 42.0},
+	}}
+	body, _ := evidenceComment(c)
+	for _, want := range []string{"- gap-1: which auth? (stub: a/b.go:12)", "- gap-2: what quota?\n", "- docs/x.md: no owner", "- 42"} {
+		if !strings.Contains(body+"\n", want) {
+			t.Errorf("missing %q in %q", want, body)
+		}
+	}
+	if strings.Contains(body, "map[") {
+		t.Errorf("Go map leaked: %q", body)
+	}
+}
+
+func TestProjectorLeavesOwnerSetFinalStatesAlone(t *testing.T) {
+	for _, typ := range []string{"completed", "canceled"} {
+		k := &projKanban{events: []CardEvent{{ID: 1, CardID: "a"}}, cards: map[string]Card{"a": linkedCard("a", "running")}}
+		iss := projIssue("s-final")
+		iss.States = append(iss.States, WorkflowState{ID: "s-final", Name: "Final", Type: typ})
+		l := &fakeLinear{issue: iss}
+		p, _ := newProj(k, l)
+		if err := p.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(l.states) != 0 {
+			t.Errorf("%s: projector moved the issue: %v", typ, l.states)
+		}
+		if len(l.links) != 1 {
+			t.Errorf("%s: other projection skipped: %v", typ, l.links)
+		}
 	}
 }

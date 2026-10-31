@@ -96,13 +96,38 @@ func evidenceComment(c Card) (string, bool) {
 		}
 		lines = append(lines, g.label+":")
 		for _, it := range items {
-			lines = append(lines, "- "+fmt.Sprint(it))
+			lines = append(lines, "- "+gapLine(it))
 		}
 	}
 	if len(lines) == 0 {
 		return "", false
 	}
 	return strings.Join(lines, "\n"), true
+}
+
+func gapLine(it any) string {
+	switch v := it.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if id, q := metaString(v, "id"), metaString(v, "question"); id != "" && q != "" {
+			line := id + ": " + q
+			if where := metaString(v, "location"); where != "" {
+				line += " (stub: " + where + ")"
+			} else if stub := metaString(v, "stub"); stub != "" {
+				line += " (stub: " + stub + ")"
+			}
+			return line
+		}
+		if f, r := metaString(v, "file"), metaString(v, "reason"); f != "" && r != "" {
+			return f + ": " + r
+		}
+	}
+	raw, err := json.Marshal(it)
+	if err != nil {
+		return fmt.Sprint(it)
+	}
+	return string(raw)
 }
 
 type projector struct {
@@ -117,9 +142,20 @@ type projector struct {
 	fails       map[string]int
 	skipped     map[string]bool
 	warned      map[string]bool
+
+	stallTicks   int
+	stallCards   map[string]bool
+	stallAlerted bool
 }
 
-const maxCardFailures = 3
+const (
+	maxCardFailures = 3
+	stallThreshold  = 10
+)
+
+func (p *projector) resetStall() {
+	p.stallTicks, p.stallCards, p.stallAlerted = 0, nil, false
+}
 
 func newProjector(k kanbanAPI, l linearAPI, n notifier) *projector {
 	return &projector{kanban: k, linear: l, notify: n, done: map[string]string{}, batch: defaultBatch, identifiers: map[string]string{}}
@@ -176,6 +212,7 @@ func (p *projector) tick(ctx context.Context) error {
 		return fmt.Errorf("events: %w", err)
 	}
 	if len(events) == 0 {
+		p.resetStall()
 		return nil
 	}
 	seen := map[string]bool{}
@@ -195,8 +232,23 @@ func (p *projector) tick(ctx context.Context) error {
 		succeeded = true
 		delete(p.fails, ev.CardID)
 	}
-	if len(errs) > 0 && !succeeded {
-		return fmt.Errorf("card %s: %w", order[0], errs[order[0]])
+	if succeeded || len(errs) == 0 {
+		p.resetStall()
+	} else {
+		p.stallTicks++
+		if p.stallCards == nil {
+			p.stallCards = map[string]bool{}
+		}
+		for id := range errs {
+			p.stallCards[id] = true
+		}
+		if p.stallTicks >= stallThreshold && !p.stallAlerted {
+			p.stallAlerted = true
+			p.alert("🔴 linear-bridge projection stalled: " + shortErr(errs[order[0]]))
+		}
+		if p.stallTicks < stallThreshold || len(p.stallCards) > 1 {
+			return fmt.Errorf("card %s: %w", order[0], errs[order[0]])
+		}
 	}
 	var firstErr error
 	for _, id := range order {
@@ -229,6 +281,7 @@ func (p *projector) tick(ctx context.Context) error {
 		return fmt.Errorf("set cursor: %w", err)
 	}
 	p.skipped = map[string]bool{}
+	p.resetStall()
 	return nil
 }
 
@@ -332,6 +385,11 @@ func (p *projector) setState(ctx context.Context, card Card, issue IssueInfo) er
 	}
 	if target.ID == issue.StateID {
 		return nil
+	}
+	for _, st := range issue.States {
+		if st.ID == issue.StateID && (st.Type == "completed" || st.Type == "canceled") {
+			return nil
+		}
 	}
 	cctx, cancel := context.WithTimeout(ctx, cardTimeout)
 	defer cancel()
