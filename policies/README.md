@@ -13,12 +13,11 @@ The shell gates are guardrails. They catch honest mistakes and tell the agent wh
 
 Today:
 
-- Every runner pod gets the same `code` token (`GIT_TOKEN`). It can push and merge, and main is not protected, so nothing outside these gates stops a push or merge to main. The owner accepts that risk.
+- Runner pods get their GitHub token per agent from h-cloud's Kyverno policy `agent-github-tokens`, keyed on the pod label `omnigent.ai/agent`: Polly and the documenter get the `code` and `knowledge` tokens, security-review only the read-only `review` token, every other pod none. The `code` token can push and merge, and main is not protected, so nothing outside these gates stops a Polly or documenter session from pushing or merging to main. The owner accepts that risk.
 - The owner reviews the PRs, and git history keeps every change revertible.
 
 Planned, not built yet:
 
-- per-bundle tokens, with no write token in read-only pods and `GIT_TOKEN` out of the shared env (Plan 2 Task 11b);
 - read-only shell startup files in runner pods (Task 11c);
 - launch configs moved out of the writable HOME (Task 11d);
 - a post-run ref and diff check that detects and reverts pushes outside the agent's branch and changes outside its scope (Plan 3).
@@ -35,4 +34,4 @@ The gates read tokens, not a running shell. A command named through a variable (
 
 The shell gates also don't see code that is decoded at runtime (`printf '%b' … | bash`, `$'\x67it'`, `source <(…)`) or put in a script file and run (`bash s.sh`, `make push`). Nothing in this package stops those; Guardrails, not the boundary lists what limits them today and what is planned.
 
-`no_secret_reads` (security-review) denies shell words naming `/agent-secrets`, other than the `GH_TOKEN_FILE=… gh` form, and the gh commands that print the token. It does not see paths built inside an interpreter (`python3 -c`, `node -e`, `awk`), reached by filesystem search (`find / … -exec cat`, `grep -r . /`), named relative to `/` after `cd /`, or matched by a glob that isn't normalised first (`/tmp/../agent-secret?/…`), and nothing else limits those reads today: no read-only review token is minted yet, and security-review pods get the shared `code` token (`GIT_TOKEN`) like every other pod (Plan 2 Task 11b is planned).
+`no_secret_reads` (security-review) denies shell words naming `/agent-secrets`, other than the `GH_TOKEN_FILE=… gh` form, and the gh commands that print the token. It does not see paths built inside an interpreter (`python3 -c`, `node -e`, `awk`), reached by filesystem search (`find / … -exec cat`, `grep -r . /`), named relative to `/` after `cd /`, or matched by a glob that isn't normalised first (`/tmp/../agent-secret?/…`), and nothing else limits those reads. What such a read reaches is limited by the pod: a security-review pod holds only the read-only `review` token, and no `code` or `knowledge` token.
