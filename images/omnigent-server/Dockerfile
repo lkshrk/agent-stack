@@ -2,6 +2,15 @@ ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.19.1
 
 FROM ${OMNIGENT_SERVER_IMAGE} AS image
 
+# Upstream gives --agent rows a random id, which its omnigent.ai/agent label gate never accepts.
+RUN f=$(/opt/venv/bin/python3 -c 'import omnigent.cli as c; print(c.__file__)') \
+ && [ "$(grep -cx '    from omnigent.db.utils import generate_agent_id' "$f")" = 1 ] \
+ && [ "$(grep -cx '    agent_id = generate_agent_id()' "$f")" = 1 ] \
+ && sed -i -e 's/^    from omnigent\.db\.utils import generate_agent_id$/    from omnigent.db.utils import builtin_agent_id/' \
+           -e 's/^    agent_id = generate_agent_id()$/    agent_id = builtin_agent_id(spec.name)/' "$f" \
+ && rm -f "$(dirname "$f")"/__pycache__/cli.*.pyc \
+ && /opt/venv/bin/python3 -c 'import omnigent.cli'
+
 COPY bundles/ /agents/
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
@@ -27,6 +36,8 @@ COPY config/omnigent/ /src/config/omnigent/
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+COPY images/omnigent-server/test/ /src/images/omnigent-server/test/
+RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py /agents/polly /agents/planner
 RUN pin='^    image: ghcr\.io/lkshrk/agent-stack/omnigent-host:' \
  && got=$(grep -E "$pin" /etc/omnigent/config.yaml) \
  && if [ -n "$AGENT_STACK_VERSION" ]; then want="    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}"; \
