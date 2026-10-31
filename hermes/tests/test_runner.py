@@ -46,6 +46,9 @@ class Clock:
     def __call__(self):
         return self.t
 
+    def sleep(self, seconds):
+        self.t += seconds
+
 
 class FakeKanban:
     def __init__(self, log, body, comments=(), ok=True):
@@ -98,7 +101,8 @@ class FakeOmnigent:
 
     def snapshot(self, session_id):
         self._call("snapshot", session_id)
-        return copy.deepcopy(self.snap)
+        snap = self.snap(self.clock.t) if callable(self.snap) else self.snap
+        return copy.deepcopy(snap)
 
     def pull_requests(self, session_id):
         self._call("pull_requests", session_id)
@@ -142,7 +146,12 @@ class RunnerTest(unittest.TestCase):
         if refs is None:
             refs = (AFTER,) if comments else (BEFORE, AFTER)
         self.gh = FakeGitHub(self.log, refs, files, gh_fail)
-        return runner.run_slice(env, self.kanban, self.omni, self.gh, now=self.clock, slice_seconds=slice_seconds)
+        return runner.run_slice(env, self.kanban, self.omni, self.gh, now=self.clock, slice_seconds=slice_seconds,
+                                sleep=self.sleep)
+
+    def sleep(self, seconds):
+        self.log.append(("sleep", seconds))
+        self.clock.sleep(seconds)
 
     def calls(self, name):
         return [c for c in self.log if c[0] == name]
@@ -204,14 +213,47 @@ class RunnerTest(unittest.TestCase):
     def test_stream_end_reconciles_from_snapshot(self):
         out = self.run_slice(running(), events=(DONE_EVENT, StreamEvent("session.status", {"status": "idle"})))
         self.assertTrue(out["call_again"])
-        self.assertEqual(len(self.calls("snapshot")), 1)
+        self.assertGreaterEqual(len(self.calls("snapshot")), 1)
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
         self.assertFalse(self.terminal_writes())
 
     def test_stream_error_reconciles_from_snapshot(self):
         out = self.run_slice(running(), events=(OmnigentError(0, "reset"),))
         self.assertTrue(out["call_again"])
-        self.assertEqual(len(self.calls("snapshot")), 1)
+        self.assertGreaterEqual(len(self.calls("snapshot")), 1)
         self.assertFalse(self.terminal_writes())
+
+    def test_early_stream_end_polls_until_slice_end(self):
+        out = self.run_slice(running(), events=(DONE_EVENT,))
+        self.assertEqual(len(self.calls("stream")), 1)
+        self.assertEqual(len(self.calls("snapshot")), runner.SLICE_SECONDS // runner.POLL_SECONDS + 1)
+        self.assertTrue(all(c[1] <= runner.POLL_SECONDS for c in self.calls("sleep")))
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertFalse(self.terminal_writes())
+
+    def test_polling_heartbeats_on_schedule(self):
+        out = self.run_slice(running(updated_at=T0 + 2400), events=(DONE_EVENT,), slice_seconds=2400)
+        self.assertEqual(len(self.calls("heartbeat")), 3)
+        self.assertTrue(out["call_again"])
+
+    def test_polling_stops_when_session_turns_terminal(self):
+        out = self.run_slice(lambda t: running() if t < T0 + 60 else snapshot(), events=(DONE_EVENT,))
+        self.assertEqual(self.clock.t, T0 + 60)
+        self.assertEqual(len(self.calls("complete")), 1)
+        self.assertEqual(out["state"], "completed")
+
+    def test_failed_sandbox_interrupts_and_blocks_transient(self):
+        sandbox = {"stage": "failed", "error": "managed sandbox launch failed: spend limit reached"}
+        out = self.run_slice(running(sandbox_status=sandbox))
+        self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_old")])
+        self.assert_blocked(out, "transient",
+                            "BLOCKED{environment}: sandbox failed: managed sandbox launch failed: spend limit reached")
+
+    def test_launching_sandbox_keeps_running(self):
+        out = self.run_slice(snapshot(updated_at=T0, sandbox_status={"stage": "cloning"}), slice_seconds=0)
+        self.assertTrue(out["call_again"])
+        self.assertFalse(self.terminal_writes() + self.calls("interrupt"))
 
     def test_heartbeat_every_15_minutes(self):
         events = [StreamEvent("session.heartbeat", {"server_time": None})] * 60

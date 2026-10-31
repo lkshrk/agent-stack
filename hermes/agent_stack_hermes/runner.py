@@ -13,6 +13,7 @@ from agent_stack_hermes.runspec import MAX_RUNTIME, RunSpec, evaluate, parse_car
 SLICE_SECONDS = 300
 HEARTBEAT_SECONDS = 900
 STALL_SECONDS = 2700
+POLL_SECONDS = 15
 SESSION_NOTE = "omnigent-session: "
 REFS_NOTE = "refs-before: "
 BLOCK_KIND = {"decision": "needs_input", "permission": "needs_input", "dependency": "dependency", "environment": "transient"}
@@ -130,13 +131,21 @@ def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link)
     return session_id, (refs_note, session_note)
 
 
-def _follow(kanban: KanbanPort, omni, task_id: str, run_id: int, session_id: str, now, slice_seconds: int) -> bool:
-    note = f"following Omnigent session {session_id}"
-    start = now()
-    deadline = start + slice_seconds
-    if not kanban.heartbeat(task_id, run_id, note):
-        return False
-    last_beat = start
+class _Heartbeat:
+    def __init__(self, kanban: KanbanPort, task_id: str, run_id: int, session_id: str, now):
+        self._kanban, self._task_id, self._run_id, self._now = kanban, task_id, run_id, now
+        self._note = f"following Omnigent session {session_id}"
+        self._last: float | None = None
+
+    def beat(self) -> bool:
+        t = self._now()
+        if self._last is not None and t - self._last < HEARTBEAT_SECONDS:
+            return True
+        self._last = t
+        return self._kanban.heartbeat(self._task_id, self._run_id, self._note)
+
+
+def _follow(omni, session_id: str, heartbeat: _Heartbeat, now, deadline: float) -> bool:
     events = iter(omni.stream(session_id, read_timeout=max(1.0, deadline - now())))
     try:
         while True:
@@ -144,13 +153,10 @@ def _follow(kanban: KanbanPort, omni, task_id: str, run_id: int, session_id: str
                 event = next(events)
             except Exception:
                 break
-            t = now()
-            if t >= deadline:
+            if now() >= deadline:
                 break
-            if t - last_beat >= HEARTBEAT_SECONDS:
-                if not kanban.heartbeat(task_id, run_id, note):
-                    return False
-                last_beat = t
+            if not heartbeat.beat():
+                return False
             if event.data is None:
                 break
             if event.name == "session.status" and _event_status(event.data) in ("idle", "failed"):
@@ -206,19 +212,30 @@ def _judge(spec: RunSpec, session_id: str, snap: dict, comments: tuple[str, ...]
     return _Verdict("completed", summary, metadata=metadata)
 
 
+def _sandbox_failure(snap: dict) -> str | None:
+    sandbox = snap.get("sandbox_status")
+    if isinstance(sandbox, dict) and sandbox.get("stage") == "failed":
+        return str(sandbox.get("error") or "failed")[:MAX_REASON_CHARS]
+    return None
+
+
 def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verdict:
     snap = omni.snapshot(session_id)
-    if _terminal(snap):
-        return _judge(spec, session_id, snap, comments, omni, gh)
+    sandbox_error = _sandbox_failure(snap)
     t = now()
-    created = _epoch(snap, "created_at")
-    updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
-    if t - updated > STALL_SECONDS:
-        reason = f"stalled: no session update for {int(t - updated)} s"
-    elif t - created > MAX_RUNTIME[spec.bundle]:
-        reason = f"runtime cap: {int(t - created)} s exceeds {MAX_RUNTIME[spec.bundle]} s"
+    if sandbox_error is not None:
+        reason = f"sandbox failed: {sandbox_error}"
+    elif _terminal(snap):
+        return _judge(spec, session_id, snap, comments, omni, gh)
     else:
-        return _RUNNING
+        created = _epoch(snap, "created_at")
+        updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
+        if t - updated > STALL_SECONDS:
+            reason = f"stalled: no session update for {int(t - updated)} s"
+        elif t - created > MAX_RUNTIME[spec.bundle]:
+            reason = f"runtime cap: {int(t - created)} s exceeds {MAX_RUNTIME[spec.bundle]} s"
+        else:
+            return _RUNNING
     try:
         omni.interrupt(session_id)
     except Exception as exc:
@@ -248,6 +265,7 @@ def run_slice(
     gh: GitHubReader,
     now=time.time,
     slice_seconds: int = SLICE_SECONDS,
+    sleep=time.sleep,
 ) -> dict:
     ids = _kanban_ids(env)
     if ids is None:
@@ -266,9 +284,17 @@ def run_slice(
         if session_id is None:
             session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link)
             comments = comments + notes
-        if not _follow(kanban, omni, task_id, run_id, session_id, now, slice_seconds):
+        deadline = now() + slice_seconds
+        heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, now)
+        if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, now, deadline):
             return _close(kanban, task_id, run_id, session_id, _STALE)
-        verdict = _reconcile(spec, session_id, comments, omni, gh, now)
+        while True:
+            verdict = _reconcile(spec, session_id, comments, omni, gh, now)
+            if verdict is not _RUNNING or now() >= deadline:
+                break
+            sleep(max(0.0, min(POLL_SECONDS, deadline - now())))
+            if not heartbeat.beat():
+                return _close(kanban, task_id, run_id, session_id, _STALE)
     except Exception as exc:
         verdict = _blocked("environment", _short(exc))
     return _close(kanban, task_id, run_id, session_id, verdict)
