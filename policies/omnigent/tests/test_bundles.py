@@ -1361,6 +1361,21 @@ class BundleVerdictTest(unittest.TestCase):
         harnesses = yaml.safe_load(SERVER_CONFIG.read_text())["sandbox"]["host_config"]["inference"]["harnesses"]
         self.assertIn(critic.executor.model, harnesses["claude-sdk"]["model_allowlist"])
 
+    def test_harnesses_allow_smart_auto_without_changing_defaults(self):
+        import yaml
+
+        harnesses = yaml.safe_load(SERVER_CONFIG.read_text())["sandbox"]["host_config"]["inference"]["harnesses"]
+        self.assertEqual(
+            {name: config["default_model"] for name, config in harnesses.items()},
+            {
+                "claude-sdk": "anthropic-auto",
+                "claude-native": "anthropic-auto",
+                "codex-native": "openai-auto",
+            },
+        )
+        for config in harnesses.values():
+            self.assertIn("smart-auto", config["model_allowlist"])
+
     def test_planner_critic_rounds(self):
         plan = infra_plan()
         plan["critic"]["rounds"] = 3
