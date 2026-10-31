@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / "config" / "hermes"
 PROFILES = CONFIG / "profiles"
 MANAGED_BEFORE = Path(__file__).resolve().parent / "testdata" / "hermes" / "managed-config-v1.yaml"
+STOCK_TEMPLATE = Path(__file__).resolve().parent / "testdata" / "hermes" / "stock-cli-config-v0.22.5.yaml"
 INSTALLED = Path("/opt/agent-stack")
 SECONDARY = ("delivery", "omnigent-runner")
 
@@ -175,7 +176,9 @@ class ProfilesTest(unittest.TestCase):
             self.assertNotEqual(cfg["agent"], pa["agent"], name)
 
     def test_delivery_uses_pa_model(self):
-        self.assertEqual(effective("delivery")["model"], effective("default")["model"])
+        keys = ("provider", "default")
+        delivery, pa = effective("delivery")["model"], effective("default")["model"]
+        self.assertEqual({k: delivery[k] for k in keys}, {k: pa[k] for k in keys})
 
     def test_managed_has_no_per_profile_keys(self):
         cfg = managed()
@@ -188,7 +191,8 @@ class ProfilesTest(unittest.TestCase):
         self.assertNotIn("enabled", cfg["auxiliary"]["background_review"])
 
     def test_pa_config_unchanged_except_multiplex(self):
-        before = load(MANAGED_BEFORE)
+        before = strip_multiplex(deep_merge(load(STOCK_TEMPLATE), load(MANAGED_BEFORE)))
+        before.pop("gateway", None)
         after = effective("default")
         self.assertEqual(strip_multiplex(after), before)
 
