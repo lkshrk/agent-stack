@@ -286,13 +286,16 @@ prompt: |
   "branch": "<head branch>", "gaps": [], "assumptions": [], "blocked": null}`.
   `pr` is the implementer's pull request URL
   (`https://github.com/<owner>/<repo>/pull/<n>`) and `branch` its head
-  branch; both are required unless `status` is `BLOCKED`. `gaps` and
-  `assumptions` carry the workers' open items: each gap is `{id: gap-<n>,
-  class, question, stub, location: path:line}` (`stub` and `location` null
-  for a gap that waits for the human), and each assumption starts with its
-  gap id, e.g. `gap-1: assumed snake_case names`. `DONE` needs both lists
-  empty. `BLOCKED` sets `blocked: {class: decision|permission|dependency|
-  environment, question}`, and a gap that waits for the human requires
+  branch; both are required unless `status` is `BLOCKED`. Each implementer
+  reports its gaps in its PR's `## Gaps` section: transcribe EVERY one into
+  `gaps[]`, none left only in PR text. A gap is `{id: gap-<n>, class,
+  question, stub, location: path:line}`: `stub` quotes the visible note
+  naming its gap id (e.g. `Open question (gap-1): ...`), and `stub` and
+  `location` are null for a gap that waits for the human. Each assumption
+  starts with its gap id, e.g. `gap-1: assumed snake_case names`. `DONE`
+  needs both lists empty. `BLOCKED` sets `blocked: {class:
+  decision|permission|dependency|environment, question}`, and a gap that
+  waits for the human requires
   `blocked.class: decision`.
 
 async: true
@@ -406,7 +409,7 @@ guardrails:
         path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
         arguments:
           allowed_purposes: [implement, review, explore, search]
-    # Last before result_contract: the engine keeps earlier policies' state on a later DENY.
+    # Last tool-call policy: the engine keeps earlier policies' state on a later DENY; result_contract only checks responses.
     max_dispatches_per_session:
       type: function
       function:
