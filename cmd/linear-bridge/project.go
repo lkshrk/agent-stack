@@ -153,6 +153,15 @@ const (
 	stallThreshold  = 10
 )
 
+func (p *projector) gateStall(err error) error {
+	p.stallTicks++
+	if p.stallTicks >= stallThreshold && !p.stallAlerted {
+		p.stallAlerted = true
+		p.alert("🔴 linear-bridge projection stalled: " + shortErr(err))
+	}
+	return err
+}
+
 func (p *projector) resetStall() {
 	p.stallTicks, p.stallCards, p.stallAlerted = 0, nil, false
 }
@@ -203,13 +212,13 @@ func (p *projector) tick(ctx context.Context) error {
 	after, err := p.kanban.Cursor(cctx, cursorName)
 	cancel()
 	if err != nil {
-		return fmt.Errorf("cursor: %w", err)
+		return p.gateStall(fmt.Errorf("cursor: %w", err))
 	}
 	cctx, cancel = context.WithTimeout(ctx, cardTimeout)
 	events, err := p.kanban.Events(cctx, after, batch)
 	cancel()
 	if err != nil {
-		return fmt.Errorf("events: %w", err)
+		return p.gateStall(fmt.Errorf("events: %w", err))
 	}
 	if len(events) == 0 {
 		p.resetStall()

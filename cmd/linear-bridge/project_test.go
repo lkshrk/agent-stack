@@ -91,11 +91,15 @@ type projKanban struct {
 	cards     map[string]Card
 	cursor    int64
 	setCursor []int64
+	cursorErr error
+	eventsErr error
 }
 
-func (k *projKanban) Events(context.Context, int64, int) ([]CardEvent, error) { return k.events, nil }
-func (k *projKanban) Cursor(context.Context, string) (int64, error)           { return k.cursor, nil }
-func (k *projKanban) Card(_ context.Context, id string) (Card, error)         { return k.cards[id], nil }
+func (k *projKanban) Events(context.Context, int64, int) ([]CardEvent, error) {
+	return k.events, k.eventsErr
+}
+func (k *projKanban) Cursor(context.Context, string) (int64, error)   { return k.cursor, k.cursorErr }
+func (k *projKanban) Card(_ context.Context, id string) (Card, error) { return k.cards[id], nil }
 func (k *projKanban) SetCursor(_ context.Context, _ string, v int64) error {
 	k.setCursor = append(k.setCursor, v)
 	return nil
@@ -509,6 +513,38 @@ func TestProjectorLeavesOwnerSetFinalStatesAlone(t *testing.T) {
 		}
 		if len(l.links) != 1 {
 			t.Errorf("%s: other projection skipped: %v", typ, l.links)
+		}
+	}
+}
+
+func TestGateOutageAlertsOnceAndResets(t *testing.T) {
+	for _, which := range []string{"cursor", "events"} {
+		k := stallKanban("a")
+		p, n := newProj(k, failingLinear())
+		if which == "cursor" {
+			k.cursorErr = errors.New("gate down")
+		} else {
+			k.eventsErr = errors.New("gate down")
+		}
+		for i := 0; i < 9; i++ {
+			_ = p.tick(context.Background())
+		}
+		if len(n.msgs) != 0 {
+			t.Fatalf("%s: early alert %q", which, n.msgs)
+		}
+		for i := 0; i < 5; i++ {
+			_ = p.tick(context.Background())
+		}
+		if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 linear-bridge projection stalled: ") ||
+			!strings.Contains(n.msgs[0], "gate down") {
+			t.Fatalf("%s: msgs = %q", which, n.msgs)
+		}
+		k.cursorErr, k.eventsErr = nil, nil
+		if err := p.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if p.stallTicks != 0 || p.stallAlerted {
+			t.Fatalf("%s: stall not reset", which)
 		}
 	}
 }
