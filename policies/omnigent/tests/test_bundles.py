@@ -1338,8 +1338,12 @@ class BundleVerdictTest(unittest.TestCase):
         import yaml
 
         prompt = yaml.safe_load((BUNDLES / "planner" / "config.yaml").read_text())["prompt"]
-        send = next(line for line in prompt.splitlines() if "sys_session_send" in line and "critic" in line)
-        self.assertIn('model="anthropic/claude-sonnet"', send)
+        flat = " ".join(prompt.split())
+        start = flat.index('sys_session_send(agent="critic"')
+        call = flat[start : flat.index(")`", start)]
+        head, _, args = call.partition("args={")
+        self.assertNotIn("model=", head)
+        self.assertIn('model: "anthropic/claude-sonnet"', args)
 
     def test_planner_critic_flags(self):
         import yaml
