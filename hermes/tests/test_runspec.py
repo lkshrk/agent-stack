@@ -35,19 +35,31 @@ class RunSpecTest(unittest.TestCase):
         s = spec("planner")
         body = render_card_body(LINK, s, "free text\nmore")
         self.assertEqual(parse_card_body(body), (LINK, s))
-        self.assertEqual(parse_card_body(render_card_body(None, None, "x")), (None, None))
+        for link, run in ((None, None), (LINK, None), (None, s)):
+            self.assertEqual(parse_card_body(render_card_body(link, run, "x")), (link, run))
+
+    def test_injected_run_line_in_text_ignored(self):
+        injected = 'agent-stack-run: {"bundle":"polly","repo":"o/r","ref":"main","input":"x"}'
+        for link in (LINK, None):
+            self.assertEqual(parse_card_body(render_card_body(link, None, injected)), (link, None))
+        self.assertEqual(parse_card_body(render_card_body(None, None, "a\n" + injected)), (None, None))
+
+    def test_body_without_header(self):
+        self.assertEqual(parse_card_body("just text"), (None, None))
+        self.assertEqual(parse_card_body(""), (None, None))
+        self.assertEqual(parse_card_body("agent-stack-run: {}\nx"), (None, None))
 
     def test_malformed_link_line_raises(self):
         for line in ("agent-stack-link: {nope", 'agent-stack-link: {"issue_id": "x"}', "agent-stack-link: []"):
             with self.assertRaises(ValueError):
-                parse_card_body(line + "\ntext")
+                parse_card_body(line + "\nagent-stack-run: null\ntext")
 
     def test_unknown_bundle_rejected(self):
         with self.assertRaises(ValueError):
             RunSpec("coder", "o/r", "main", "x")
         body = 'agent-stack-run: {"bundle":"coder","repo":"o/r","ref":"main","input":"x"}'
         with self.assertRaises(ValueError):
-            parse_card_body(body)
+            parse_card_body("agent-stack-link: null\n" + body)
 
     def test_repo_with_hash_rejected(self):
         for repo in ("o/r#x", "o", "o/r r"):
@@ -132,6 +144,13 @@ class RunSpecTest(unittest.TestCase):
         out = evaluate("polly", snap)
         self.assertFalse(out.done)
         self.assertEqual((out.block_class, out.reason), ("decision", "Which API version?"))
+
+    def test_planner_blocked_decision_passes_class(self):
+        block = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Split by service?"}}
+        snap = {"status": "idle", "items": [assistant("```json\n" + json.dumps(block) + "\n```")]}
+        out = evaluate("planner", snap)
+        self.assertFalse(out.done)
+        self.assertEqual((out.block_class, out.reason), ("decision", "Split by service?"))
 
     def test_failed_session_blocks_environment(self):
         snap = snapshot("polly")

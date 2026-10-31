@@ -56,18 +56,17 @@ class Outcome:
 
 
 def render_card_body(link: LinearLink | None, spec: RunSpec | None, text: str) -> str:
-    lines = []
-    if link is not None:
-        lines.append(LINK_PREFIX + json.dumps(asdict(link), separators=(",", ":")))
-    if spec is not None:
-        lines.append(RUN_PREFIX + json.dumps(asdict(spec), separators=(",", ":")))
-    lines.append(text)
-    return "\n".join(lines)
+    def dump(value):
+        return "null" if value is None else json.dumps(asdict(value), separators=(",", ":"))
+
+    return f"{LINK_PREFIX}{dump(link)}\n{RUN_PREFIX}{dump(spec)}\n{text}"
 
 
 def _load(line: str, prefix: str, cls):
     try:
         data = json.loads(line[len(prefix):])
+        if data is None:
+            return None
         if not isinstance(data, dict):
             raise ValueError("not an object")
         return cls(**data)
@@ -76,13 +75,10 @@ def _load(line: str, prefix: str, cls):
 
 
 def parse_card_body(body: str) -> tuple[LinearLink | None, RunSpec | None]:
-    link = spec = None
-    for line in body.split("\n")[:2]:
-        if line.startswith(LINK_PREFIX) and link is None:
-            link = _load(line, LINK_PREFIX, LinearLink)
-        elif line.startswith(RUN_PREFIX) and spec is None:
-            spec = _load(line, RUN_PREFIX, RunSpec)
-    return link, spec
+    lines = body.split("\n", 2)
+    if len(lines) < 2 or not lines[0].startswith(LINK_PREFIX) or not lines[1].startswith(RUN_PREFIX):
+        return None, None
+    return _load(lines[0], LINK_PREFIX, LinearLink), _load(lines[1], RUN_PREFIX, RunSpec)
 
 
 def builtin_agent_id(name: str) -> str:
