@@ -25,14 +25,16 @@ const (
 )
 
 type fakeLinear struct {
-	archived           []string
-	thoughts           [][2]string
-	archiveErr         error
-	issue              IssueInfo
-	issueErr           error
-	issueCalls         []string
-	notifier           *fakeNotifier
-	thoughtAfterNotify bool
+	archived                            []string
+	thoughts                            [][2]string
+	archiveErr                          error
+	issue                               IssueInfo
+	issueErr                            error
+	issueCalls                          []string
+	notifier                            *fakeNotifier
+	thoughtAfterNotify                  bool
+	states, activities, comments, links [][2]string
+	writeErr                            error
 }
 
 func (f *fakeLinear) Issue(_ context.Context, id string) (IssueInfo, error) {
@@ -540,4 +542,24 @@ func TestStopFailureNotifies(t *testing.T) {
 			t.Fatalf("%s msgs = %v", name, n.msgs)
 		}
 	}
+}
+
+func (f *fakeLinear) SetState(_ context.Context, issueID, stateID string) error {
+	f.states = append(f.states, [2]string{issueID, stateID})
+	return f.writeErr
+}
+
+func (f *fakeLinear) Activity(_ context.Context, s string, a Activity) error {
+	f.activities = append(f.activities, [2]string{s, a.Type + ": " + a.Body})
+	return f.writeErr
+}
+
+func (f *fakeLinear) Comment(_ context.Context, issueID, body string) error {
+	f.comments = append(f.comments, [2]string{issueID, body})
+	return f.writeErr
+}
+
+func (f *fakeLinear) LinkCard(_ context.Context, issueID, cardID string) error {
+	f.links = append(f.links, [2]string{issueID, cardID})
+	return f.writeErr
 }

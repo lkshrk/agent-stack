@@ -65,6 +65,14 @@ func main() {
 	})
 	srv := newServer(listen, mux)
 
+	projCtx, stopProject := context.WithCancel(context.Background())
+	projDone := make(chan struct{})
+	proj := newProjector(b.kanban, b.linear, b.notify)
+	go func() {
+		defer close(projDone)
+		proj.run(projCtx)
+	}()
+
 	workerDone := make(chan struct{})
 	abort := make(chan struct{})
 	go func() {
@@ -83,6 +91,7 @@ func main() {
 		log.Fatal(err)
 	case <-stop:
 	}
+	stopProject()
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
@@ -95,6 +104,10 @@ func main() {
 	case <-workerDone:
 	case <-ctx.Done():
 		log.Print("linear-bridge: shutdown grace expired with events still queued")
+	}
+	select {
+	case <-projDone:
+	case <-ctx.Done():
 	}
 }
 

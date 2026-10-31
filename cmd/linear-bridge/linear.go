@@ -24,6 +24,10 @@ type linearAPI interface {
 	ArchiveIssue(ctx context.Context, issueID string) error
 	Thought(ctx context.Context, sessionID, body string) error
 	Issue(ctx context.Context, id string) (IssueInfo, error)
+	SetState(ctx context.Context, issueID, stateID string) error
+	Activity(ctx context.Context, sessionID string, a Activity) error
+	Comment(ctx context.Context, issueID, body string) error
+	LinkCard(ctx context.Context, issueID, cardID string) error
 }
 
 type WorkflowState struct {
@@ -33,8 +37,8 @@ type WorkflowState struct {
 }
 
 type IssueInfo struct {
-	ID, Identifier, Title, Description, ParentID, DelegateID, TeamID string
-	States                                                           []WorkflowState
+	ID, Identifier, Title, Description, ParentID, DelegateID, TeamID, StateID string
+	States                                                                    []WorkflowState
 }
 
 type tokenSource struct {
@@ -103,9 +107,13 @@ type graphQL struct {
 }
 
 const (
-	archiveMutation = `mutation($id:String!){ issueArchive(id:$id){ success } }`
-	issueQuery      = `query($id:String!){ issue(id:$id){ id identifier title description parent{ id } delegate{ id } team{ id states{ nodes{ id name type } } } } }`
-	thoughtMutation = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: "thought", body:$b}}){ success } }`
+	archiveMutation  = `mutation($id:String!){ issueArchive(id:$id){ success } }`
+	issueQuery       = `query($id:String!){ issue(id:$id){ id identifier title description parent{ id } delegate{ id } state{ id } team{ id states{ nodes{ id name type } } } } }`
+	stateMutation    = `mutation($id:String!,$s:String!){ issueUpdate(id:$id, input:{stateId:$s}){ success } }`
+	activityMutation = `mutation($s:String!,$content:JSONObject!){ agentActivityCreate(input:{agentSessionId:$s, content:$content}){ success } }`
+	commentMutation  = `mutation($id:String!,$b:String!){ commentCreate(input:{issueId:$id, body:$b}){ success } }`
+	linkMutation     = `mutation($id:String!,$t:String!,$u:String!){ attachmentCreate(input:{issueId:$id, title:$t, url:$u}){ success } }`
+	thoughtMutation  = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: "thought", body:$b}}){ success } }`
 )
 
 func (g *graphQL) ArchiveIssue(ctx context.Context, issueID string) error {
@@ -114,6 +122,24 @@ func (g *graphQL) ArchiveIssue(ctx context.Context, issueID string) error {
 
 func (g *graphQL) Thought(ctx context.Context, sessionID, body string) error {
 	return g.run(ctx, thoughtMutation, map[string]any{"s": sessionID, "b": body}, "agentActivityCreate")
+}
+
+func (g *graphQL) SetState(ctx context.Context, issueID, stateID string) error {
+	return g.run(ctx, stateMutation, map[string]any{"id": issueID, "s": stateID}, "issueUpdate")
+}
+
+func (g *graphQL) Activity(ctx context.Context, sessionID string, a Activity) error {
+	content := map[string]string{"type": a.Type, "body": a.Body}
+	return g.run(ctx, activityMutation, map[string]any{"s": sessionID, "content": content}, "agentActivityCreate")
+}
+
+func (g *graphQL) Comment(ctx context.Context, issueID, body string) error {
+	return g.run(ctx, commentMutation, map[string]any{"id": issueID, "b": body}, "commentCreate")
+}
+
+func (g *graphQL) LinkCard(ctx context.Context, issueID, cardID string) error {
+	vars := map[string]any{"id": issueID, "t": "Kanban card " + cardID, "u": "kanban://card/" + cardID}
+	return g.run(ctx, linkMutation, vars, "attachmentCreate")
 }
 
 func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
@@ -134,6 +160,9 @@ func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
 				Delegate *struct {
 					ID string `json:"id"`
 				} `json:"delegate"`
+				State *struct {
+					ID string `json:"id"`
+				} `json:"state"`
 				Team struct {
 					ID     string `json:"id"`
 					States struct {
@@ -160,6 +189,9 @@ func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
 	}
 	if i.Parent != nil {
 		info.ParentID = i.Parent.ID
+	}
+	if i.State != nil {
+		info.StateID = i.State.ID
 	}
 	if i.Delegate != nil {
 		info.DelegateID = i.Delegate.ID

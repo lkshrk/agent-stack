@@ -279,3 +279,45 @@ func TestGraphQLIssueNotFound(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestGraphQLActivityTypes(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"agentActivityCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	for _, typ := range []string{"thought", "elicitation", "response", "error"} {
+		if err := g.Activity(context.Background(), "sess-1", Activity{typ, "b-" + typ}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, typ := range []string{"thought", "elicitation", "response", "error"} {
+		c := (*calls)[i]
+		content, _ := c.req.Variables["content"].(map[string]any)
+		if c.req.Variables["s"] != "sess-1" || content["type"] != typ || content["body"] != "b-"+typ {
+			t.Fatalf("call %d = %+v", i, c.req.Variables)
+		}
+	}
+}
+
+func TestGraphQLProjectionMutations(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"issueUpdate":{"success":true},"commentCreate":{"success":true},"attachmentCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	ctx := context.Background()
+	for _, err := range []error{g.SetState(ctx, "i", "s"), g.Comment(ctx, "i", "b"), g.LinkCard(ctx, "i", "c1")} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, want := range []string{"issueUpdate", "commentCreate", "attachmentCreate"} {
+		if !strings.Contains((*calls)[i].req.Query, want) {
+			t.Fatalf("call %d query = %s", i, (*calls)[i].req.Query)
+		}
+	}
+	if (*calls)[2].req.Variables["t"] != "Kanban card c1" {
+		t.Fatalf("vars = %v", (*calls)[2].req.Variables)
+	}
+}
