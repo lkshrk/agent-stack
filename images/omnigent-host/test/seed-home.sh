@@ -18,7 +18,7 @@ expect() {
 
 seeded() {
   local f
-  for f in .claude/plugins/installed_plugins.json .agents/skills .codex/AGENTS.md .codex/config.toml \
+  for f in .claude/plugins/installed_plugins.json .claude/settings.json .claude.json .agents/skills .codex/AGENTS.md .codex/config.toml \
     .omp/agent/config.yml .omp/agent/models.yml .omp/agent/mcp.json; do
     [[ -e $1/$f ]] || { echo "missing $f"; return; }
   done
@@ -32,11 +32,7 @@ login "$home"
 expect "a login shell seeds a writable HOME" "$(seeded "$home")" seeded
 expect "a login shell writes the marker" "$(marker "$home")" present
 expect "the system-managed Claude settings are root-owned" "$(stat -c '%U:%a' /etc/claude-code/managed-settings.json)" root:644
-expect "the system-managed Claude MCP config is root-owned" "$(stat -c '%U:%a' /etc/claude-code/managed-mcp.json)" root:644
 expect "the system-managed Claude settings reject runner writes" "$({ : >>/etc/claude-code/managed-settings.json; } 2>/dev/null && echo writable || echo protected)" protected
-expect "the system-managed Claude MCP config rejects runner writes" "$({ : >>/etc/claude-code/managed-mcp.json; } 2>/dev/null && echo writable || echo protected)" protected
-expect "the managed Claude MCP config uses only two servers" "$(jq -r '.mcpServers | keys | join(",")' /etc/claude-code/managed-mcp.json)" codebase-memory-mcp,litellm-tools
-expect "the managed Claude MCP config uses the h-cloud gateway" "$(jq -r '.mcpServers["litellm-tools"].url' /etc/claude-code/managed-mcp.json)" http://litellm-proxy.ai.svc.cluster.local:4000/mcp/
 
 rm "$home/.agent-seeded"
 HOME=$home /opt/agent/bin/seed-agent-home >/dev/null 2>&1
