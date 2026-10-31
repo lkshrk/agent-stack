@@ -28,71 +28,36 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: ${{ github.event_name == 'push' && '0' || '1' }}
           persist-credentials: false
       - name: hermes and hermes-webui pin the same Hermes image
         run: |
           [ "$(grep -h '^ARG HERMES_IMAGE=' images/hermes/Dockerfile)" = "$(grep -h '^ARG HERMES_IMAGE=' images/hermes-webui/Dockerfile)" ]
+      - name: Commit the push is compared against, empty to build everything
+        id: before
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ $BEFORE =~ ^[0-9a-f]{40}$ && $BEFORE != 0000000000000000000000000000000000000000 ]] \
+            && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "sha=$BEFORE" >>"$GITHUB_OUTPUT"
+          fi
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || steps.before.outputs.sha != ''
         id: filter
         with:
-          filters: |
-            ci: &ci
-              - '.github/workflows/ci.yml'
-              - '.github/actions/test-image/**'
-            shared: &shared
-              - *ci
-              - '.github/workflows/images.yml'
-              - '.github/workflows/release.yml'
-              - '.github/actions/build-image/**'
-              - '.dockerignore'
-            omnigent: &omnigent
-              - 'policies/omnigent/**'
-              - 'bundles/**'
-              - 'config/omnigent/**'
-              - 'images/omnigent-host/codex/**'
-            go:
-              - *ci
-              - 'cmd/**'
-              - 'go.mod'
-              - 'go.sum'
-            policies:
-              - *ci
-              - *omnigent
-            omnigent-host:
-              - *shared
-              - *omnigent
-              - 'images/omnigent-host/**'
-              - '.claude-plugin/**'
-              - '.agents/**'
-              - 'plugins/**'
-            omnigent-server:
-              - *shared
-              - *omnigent
-              - 'images/omnigent-server/**'
-            agent-tools:
-              - *shared
-              - 'images/agent-tools/**'
-              - 'cmd/**'
-              - 'go.mod'
-              - 'go.sum'
-            hermes:
-              - *shared
-              - 'images/hermes/**'
-              - 'config/hermes/**'
-            hermes-webui:
-              - *shared
-              - 'images/hermes-webui/**'
-              - 'images/hermes/**'
-              - 'config/hermes/**'
-      - name: Images to build, only the changed ones on pull requests
+          base: ${{ steps.before.outputs.sha }}
+          ref: ${{ github.event_name == 'push' && github.sha || '' }}
+          filters: .github/changes.yml
+          predicate-quantifier: some-with-excludes
+      - name: Images to build, only the changed ones when the changes are known
         id: images
         env:
           ALL: '["omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui"]'
           CHANGES: ${{ steps.filter.outputs.changes }}
-          EVENT: ${{ github.event_name }}
         run: |
-          if [ "$EVENT" = pull_request ]; then
+          if [ -n "$CHANGES" ]; then
             echo "images=$(jq -c --argjson all "$ALL" '[.[] | select(IN($all[]))]' <<<"$CHANGES")" >>"$GITHUB_OUTPUT"
           else
             echo "images=$(jq -c . <<<"$ALL")" >>"$GITHUB_OUTPUT"
@@ -154,7 +119,9 @@ jobs:
   # The only job that writes the GHCR build cache, so pull requests never hold a packages write token.
   images-main:
     needs: changes
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: >-
+      needs.changes.outputs.images != '[]' &&
+      github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
