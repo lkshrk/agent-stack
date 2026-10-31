@@ -1,0 +1,170 @@
+{
+  "id": "conv_000000000000000000000000000000a1",
+  "agent_id": "38cbd375a6a411c3785da546f78cf2c4",
+  "agent_name": "planner",
+  "status": "idle",
+  "background_task_count": null,
+  "background_tasks": null,
+  "created_at": 1793437200,
+  "updated_at": 1793437800,
+  "title": "Plan card-example",
+  "labels": {
+    "agent-stack/card": "card-example",
+    "omnigent.sandbox.repo.0": "https://github.com/example-org/example-repo#main",
+    "omnigent.sandbox.repo": "https://github.com/example-org/example-repo#main",
+    "omnigent.startup": "ready"
+  },
+  "runner_id": "runner_example",
+  "host_id": "host_example",
+  "side_chat_settings_supported": false,
+  "runner_online": true,
+  "host_online": true,
+  "host_resumable": false,
+  "reasoning_effort": null,
+  "items": [
+    {
+      "id": "msg_00000000000000000000000000000001",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437205,
+      "data": {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Plan card card-example: add a widget endpoint."
+          }
+        ],
+        "model": null,
+        "stream_message_id": null
+      },
+      "created_by": "machine-example"
+    },
+    {
+      "id": "msg_00000000000000000000000000000002",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437220,
+      "data": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Reading the repository and drafting the plan."
+          }
+        ],
+        "model": "planner",
+        "stream_message_id": null
+      },
+      "created_by": null
+    },
+    {
+      "id": "rs_00000000000000000000000000000003",
+      "type": "reasoning",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437225,
+      "data": {
+        "model": "planner",
+        "summary": [
+          {
+            "type": "summary_text",
+            "text": "Checking the repository layout."
+          }
+        ]
+      },
+      "created_by": null
+    },
+    {
+      "id": "fc_00000000000000000000000000000004",
+      "type": "function_call",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437400,
+      "data": {
+        "model": "planner",
+        "name": "sys_session_send",
+        "arguments": "{\"agent\": \"critic\", \"title\": \"plan-critic\", \"args\": {\"input\": \"Grade draft 1\", \"model\": \"anthropic/claude-sonnet\"}}",
+        "call_id": "call_example_1"
+      },
+      "created_by": null
+    },
+    {
+      "id": "fco_00000000000000000000000000000005",
+      "type": "function_call_output",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437580,
+      "data": {
+        "call_id": "call_example_1",
+        "output": "Critic reply collected."
+      },
+      "created_by": null
+    },
+    {
+      "id": "msg_00000000000000000000000000000006",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_11111111111111111111111111111111",
+      "created_at": 1793437790,
+      "data": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Plan ready: three slices, critic passed in 2 rounds.\n\n```json\n{\n  \"status\": \"DONE\",\n  \"gate\": \"gate:split\",\n  \"design\": \"Split into three slices.\",\n  \"risk\": {\n    \"class\": \"medium\",\n    \"force_gate_plan\": false\n  },\n  \"children\": [\n    {\n      \"key\": \"a\",\n      \"title\": \"Child a\",\n      \"description\": \"Implement part a.\",\n      \"files\": [\n        \"src/a.py\"\n      ],\n      \"independent_test\": \"pytest tests/test_a.py\",\n      \"criteria\": [\n        {\n          \"id\": \"a-1\",\n          \"ears\": \"WHEN input a arrives THE SYSTEM SHALL handle a\"\n        }\n      ],\n      \"blocked_by\": []\n    },\n    {\n      \"key\": \"b\",\n      \"title\": \"Child b\",\n      \"description\": \"Implement part b.\",\n      \"files\": [\n        \"src/b.py\",\n        \"src/a.py\"\n      ],\n      \"independent_test\": \"pytest tests/test_b.py\",\n      \"criteria\": [\n        {\n          \"id\": \"b-1\",\n          \"ears\": \"WHEN input b arrives THE SYSTEM SHALL handle b\"\n        }\n      ],\n      \"blocked_by\": [\n        \"a\"\n      ]\n    },\n    {\n      \"key\": \"c\",\n      \"title\": \"Child c\",\n      \"description\": \"Implement part c.\",\n      \"files\": [\n        \"src/c.py\"\n      ],\n      \"independent_test\": \"pytest tests/test_c.py\",\n      \"criteria\": [\n        {\n          \"id\": \"c-1\",\n          \"ears\": \"WHEN input c arrives THE SYSTEM SHALL handle c\"\n        }\n      ],\n      \"blocked_by\": []\n    }\n  ],\n  \"critic\": {\n    \"rounds\": 2,\n    \"coverage\": [\n      {\n        \"criterion\": \"a-1\",\n        \"child\": \"a\"\n      },\n      {\n        \"criterion\": \"b-1\",\n        \"child\": \"b\"\n      },\n      {\n        \"criterion\": \"c-1\",\n        \"child\": \"c\"\n      }\n    ]\n  }\n}\n```"
+          }
+        ],
+        "model": "planner",
+        "stream_message_id": null
+      },
+      "created_by": null
+    }
+  ],
+  "permission_level": 3,
+  "sub_agent_name": null,
+  "kind": "default",
+  "parent_session_id": null,
+  "root_conversation_id": "conv_000000000000000000000000000000a1",
+  "llm_model": "anthropic/claude-fable",
+  "harness": "claude-sdk",
+  "model_override": "anthropic/claude-fable",
+  "cost_control_mode_override": null,
+  "subagent_routing_override": null,
+  "share_workspace_files": false,
+  "context_window": 200000,
+  "last_total_tokens": 41230,
+  "total_cost_usd": 1.84,
+  "usage_by_model": {
+    "anthropic/claude-fable": {
+      "input_tokens": 38000,
+      "output_tokens": 3230,
+      "total_tokens": 41230,
+      "cache_read_input_tokens": 30000,
+      "cache_creation_input_tokens": 4000,
+      "total_cost_usd": 1.84
+    }
+  },
+  "usage_included": true,
+  "native_usage_baseline": null,
+  "last_task_error": null,
+  "external_session_id": null,
+  "terminal_launch_args": null,
+  "pending_elicitations": [],
+  "pending_inputs": [],
+  "workspace": "/workspace/example-repo",
+  "git_branch": null,
+  "archived": false,
+  "todos": [],
+  "model_options": [],
+  "inference_configured": true,
+  "inference_error": null,
+  "terminal_pending": false,
+  "sandbox_profile": null,
+  "sandbox_status": null,
+  "mcp_startup": null,
+  "active_response_id": null,
+  "project_id": null
+}

@@ -1,0 +1,127 @@
+{
+  "id": "conv_000000000000000000000000000000b2",
+  "agent_id": "057995d1517418e6839f51d340785dd6",
+  "agent_name": "polly",
+  "status": "idle",
+  "background_task_count": null,
+  "background_tasks": null,
+  "created_at": 1793437200,
+  "updated_at": 1793437800,
+  "title": "Implement card-example",
+  "labels": {
+    "agent-stack/card": "card-example",
+    "omnigent.sandbox.repo.0": "https://github.com/example-org/example-repo#main",
+    "omnigent.sandbox.repo": "https://github.com/example-org/example-repo#main",
+    "omnigent.startup": "ready"
+  },
+  "runner_id": "runner_example",
+  "host_id": "host_example",
+  "side_chat_settings_supported": false,
+  "runner_online": true,
+  "host_online": true,
+  "host_resumable": false,
+  "reasoning_effort": null,
+  "items": [
+    {
+      "id": "msg_00000000000000000000000000000001",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_22222222222222222222222222222222",
+      "created_at": 1793437205,
+      "data": {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "Implement card card-example."
+          }
+        ],
+        "model": null,
+        "stream_message_id": null
+      },
+      "created_by": "machine-example"
+    },
+    {
+      "id": "msg_00000000000000000000000000000002",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_22222222222222222222222222222222",
+      "created_at": 1793437230,
+      "data": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Working on branch agent/example-1-add-widget."
+          }
+        ],
+        "model": "polly",
+        "stream_message_id": null
+      },
+      "created_by": null
+    },
+    {
+      "id": "msg_00000000000000000000000000000003",
+      "type": "message",
+      "status": "completed",
+      "response_id": "resp_22222222222222222222222222222222",
+      "created_at": 1793437790,
+      "data": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "Opened https://github.com/example-org/example-repo/pull/42.\n\n```json\n{\n  \"status\": \"DONE\",\n  \"pr\": \"https://github.com/example-org/example-repo/pull/42\",\n  \"branch\": \"agent/example-1-add-widget\",\n  \"gaps\": [],\n  \"assumptions\": [],\n  \"blocked\": null\n}\n```"
+          }
+        ],
+        "model": "polly",
+        "stream_message_id": null
+      },
+      "created_by": null
+    }
+  ],
+  "permission_level": 3,
+  "sub_agent_name": null,
+  "kind": "default",
+  "parent_session_id": null,
+  "root_conversation_id": "conv_000000000000000000000000000000b2",
+  "llm_model": "anthropic/claude-opus",
+  "harness": "claude-sdk",
+  "model_override": "anthropic/claude-opus",
+  "cost_control_mode_override": null,
+  "subagent_routing_override": null,
+  "share_workspace_files": false,
+  "context_window": 200000,
+  "last_total_tokens": 41230,
+  "total_cost_usd": 3.12,
+  "usage_by_model": {
+    "anthropic/claude-opus": {
+      "input_tokens": 38000,
+      "output_tokens": 3230,
+      "total_tokens": 41230,
+      "cache_read_input_tokens": 30000,
+      "cache_creation_input_tokens": 4000,
+      "total_cost_usd": 3.12
+    }
+  },
+  "usage_included": true,
+  "native_usage_baseline": null,
+  "last_task_error": null,
+  "external_session_id": null,
+  "terminal_launch_args": null,
+  "pending_elicitations": [],
+  "pending_inputs": [],
+  "workspace": "/workspace/example-repo",
+  "git_branch": null,
+  "archived": false,
+  "todos": [],
+  "model_options": [],
+  "inference_configured": true,
+  "inference_error": null,
+  "terminal_pending": false,
+  "sandbox_profile": null,
+  "sandbox_status": null,
+  "mcp_startup": null,
+  "active_response_id": null,
+  "project_id": null
+}
