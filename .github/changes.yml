@@ -23,6 +23,7 @@ go:
 policies:
   - *ci
   - 'policies/omnigent/**'
+  - 'hermes/**'
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
