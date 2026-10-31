@@ -1,6 +1,7 @@
 {
   "status": "DONE",
   "verdict": "pass",
+  "reviewed": ["src/a.py"],
   "findings": [
     {
       "id": "S-1",
