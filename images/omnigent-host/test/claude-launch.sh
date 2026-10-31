@@ -20,6 +20,10 @@ HOME=$home /opt/agent/bin/seed-agent-home
 
 expect "the managed rules are root-owned" "$(stat -c '%U:%a' /etc/claude-code/CLAUDE.md 2>&1)" root:644
 expect "the managed rules carry the runner rules" "$(head -1 /etc/claude-code/CLAUDE.md 2>&1)" "# Runner rules"
+for f in .codex/AGENTS.md .omp/agent/AGENTS.md; do
+  rules=$(grep -oE '[~/][^ :]*CLAUDE\.md' "$home/$f" | head -1)
+  expect "$f points at runner rules that exist" "$(test -s "${rules/#\~/$home}" && echo exists || echo "missing ${rules:-reference}")" exists
+done
 expect "the managed settings keep the deny list" \
   "$(jq -r '.permissions.deny | length' /etc/claude-code/managed-settings.json)" 4
 expect "a seeded HOME enables the runner plugins" \
