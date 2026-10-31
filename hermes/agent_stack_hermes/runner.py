@@ -244,7 +244,10 @@ def _judge(spec: RunSpec, session_id: str, snap: dict, comments: tuple[str, ...]
     at, before = _refs_before(comments)
     pull = gh.pull(pr_url) if pr_url else None
     files = gh.changed_files(spec.repo, pull.base_ref, pull.head_ref) if pull and spec.bundle == "documenter" else []
-    branches = () if pull else (spec.ref, gh.default_branch(spec.repo))
+    if pull:
+        branches = () if spec.ref == pull.head_ref else (spec.ref,)
+    else:
+        branches = (spec.ref, gh.default_branch(spec.repo))
     since = at - ACTIVITY_SLACK_SECONDS
     found = violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
                        lambda ref: gh.activity(spec.repo, ref, since), lambda tag: gh.release_author(spec.repo, tag),

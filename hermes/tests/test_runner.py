@@ -31,8 +31,8 @@ def refs_note(refs, at=AT):
 RECORDED = (refs_note(BEFORE), runner.SESSION_NOTE + "conv_old")
 
 
-def card_body(bundle="polly"):
-    return render_card_body(LinearLink("iss", "EX-1", "lsess", "root"), RunSpec(bundle, REPO, "main", "do it"), "text")
+def card_body(bundle="polly", ref="main"):
+    return render_card_body(LinearLink("iss", "EX-1", "lsess", "root"), RunSpec(bundle, REPO, ref, "do it"), "text")
 
 
 def snapshot(result=None, **over):
@@ -162,7 +162,7 @@ class FakeGitHub:
 
     def activity(self, repo, ref, since):
         self._call("activity", repo, ref, since)
-        return [Activity(ref, since + 1, login) for login in self.entries.get(ref, ())]
+        return [Activity(ref, since + 1, *link) for link in self.entries.get(ref, ())]
 
     def default_branch(self, repo):
         self._call("default_branch", repo)
@@ -386,18 +386,48 @@ class RunnerTest(unittest.TestCase):
 
     def test_owner_merge_during_run_completes(self):
         moved = {**AFTER, "refs/heads/main": "c" * 40, "refs/heads/polly/x": "d" * 40}
-        out = self.run_slice(snapshot(), refs=(moved,), gh={"activity": {"refs/heads/main": ["lkshrk"]}})
+        gh = {"activity": {"refs/heads/main": [("lkshrk", "a" * 40, "c" * 40)]}}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assertEqual(out["state"], "completed")
         self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main"])
+        self.assertFalse(self.calls("default_branch"))
+
+    def test_owner_merge_masking_later_push_blocks(self):
+        moved = {**AFTER, "refs/heads/main": "e" * 40}
+        gh = {"activity": {"refs/heads/main": [("lkshrk", "a" * 40, "c" * 40)]}}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/heads/main")
 
     def test_agent_move_of_main_blocks_permission(self):
         moved = {**AFTER, "refs/heads/main": "c" * 40}
-        out = self.run_slice(snapshot(), refs=(moved,), gh={"activity": {"refs/heads/main": ["lkshrk", AGENT]}})
+        gh = {"activity": {"refs/heads/main": [("lkshrk", "a" * 40, "b" * 40), (AGENT, "b" * 40, "c" * 40)]}}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main")
+
+    def test_agent_push_and_restore_blocks_permission(self):
+        gh = {"activity": {"refs/heads/main": [(AGENT, "a" * 40, "c" * 40), (AGENT, "c" * 40, "a" * 40)]}}
+        out = self.run_slice(snapshot(), gh=gh)
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main")
+
+    def test_card_ref_is_protected_with_pr(self):
+        before = {**BEFORE, "refs/heads/release/1.x": "r" * 40}
+        comments = (refs_note(before), RECORDED[1])
+        out = self.run_slice(snapshot(), comments=comments, body=card_body(ref="release/1.x"),
+                             refs=({**AFTER, "refs/heads/release/1.x": "s" * 40},))
+        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main", "refs/heads/release/1.x"])
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/heads/release/1.x")
+
+    def test_card_ref_equal_to_pr_head_is_not_protected(self):
+        before = {**BEFORE, f"refs/heads/{BRANCH}": "r" * 40}
+        out = self.run_slice(snapshot(), comments=(refs_note(before), RECORDED[1]), body=card_body(ref=BRANCH))
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main"])
 
     def test_no_agent_actors_blocks_protected_move(self):
         moved = {**AFTER, "refs/heads/main": "c" * 40}
-        gh = {"activity": {"refs/heads/main": ["lkshrk"]}, "agents": frozenset()}
+        gh = {"activity": {"refs/heads/main": [("lkshrk", "a" * 40, "c" * 40)]}, "agents": frozenset()}
         out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/heads/main")
 
@@ -486,7 +516,7 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(snapshot(), refs=(moved,), gh={"releases": {"v2": "github-actions[bot]"}})
         self.assertEqual(out["state"], "completed")
         self.assertEqual(self.calls("release_author"), [("release_author", REPO, "v2")])
-        self.assertFalse(self.calls("activity"))
+        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main"])
 
     def test_agent_release_blocks_permission(self):
         moved = {**AFTER, "refs/tags/v2": "d" * 40}

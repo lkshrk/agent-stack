@@ -16,6 +16,7 @@ COMPARE_FILE_CAP = 300
 PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/pull/(\d+)/?$")
 REF_PREFIXES = ("heads", "tags")
 NEXT_LINK = re.compile(r'<([^>]*)>\s*;\s*rel="next"')
+NULL_SHA = "0" * 40
 
 RefMap = dict[str, str]
 
@@ -40,6 +41,8 @@ class Activity:
     ref: str
     timestamp: float
     actor: str
+    before: str
+    after: str
 
 
 def agent_actors(value: str | None) -> frozenset[str]:
@@ -141,10 +144,10 @@ class GitHubReader:
             for item in body:
                 entry = _activity(item)
                 if entry.timestamp < since:
-                    return out
+                    return out[::-1]
                 if entry.ref == ref:
                     out.append(entry)
-        return out
+        return out[::-1]
 
     def release_author(self, repo: str, tag: str) -> str | None:
         try:
@@ -233,22 +236,38 @@ def _activity(item) -> Activity:
         raise GitHubError("activity timestamp unparseable") from None
     if when.tzinfo is None:
         raise GitHubError("activity timestamp has no zone")
-    return Activity(_str(item.get("ref"), "activity ref"), when.timestamp(), login)
+    return Activity(
+        _str(item.get("ref"), "activity ref"),
+        when.timestamp(),
+        login,
+        _str(item.get("before"), "activity before sha"),
+        _str(item.get("after"), "activity after sha"),
+    )
 
 
-def _moved_by(ref: str, actors: list[str], agents: frozenset[str]) -> str | None:
-    if any(a.lower() in agents for a in actors if a):
+def _chained(entries: list[Activity], start: str, end: str) -> bool:
+    expected = end
+    for entry in reversed(entries):
+        if expected == start:
+            return True
+        if entry.after != expected:
+            return False
+        expected = entry.before
+    return expected == start
+
+
+def _branch(ref: str, old: str, new: str, entries: list[Activity], agents: frozenset[str]) -> str | None:
+    if any(e.actor.lower() in agents for e in entries if e.actor):
         return f"ref moved by agent: {ref}"
-    if not actors or not all(actors):
+    if not all(e.actor for e in entries) or not _chained(entries, old, new):
         return f"ref moved (unattributed): {ref}"
     return None
 
 
-def _actors(ref: str, after: RefMap, activity, release) -> list[str]:
-    if not ref.startswith("refs/tags/"):
-        return [e.actor for e in activity(ref)]
-    author = release(ref.removeprefix("refs/tags/")) if ref in after else None
-    return [] if author is None else [author]
+def _tag(ref: str, author: str | None, agents: frozenset[str]) -> str | None:
+    if author and author.lower() in agents:
+        return f"ref moved by agent: {ref}"
+    return None if author else f"ref moved (unattributed): {ref}"
 
 
 def violations(
@@ -265,19 +284,22 @@ def violations(
 ) -> list[str]:
     from agent_stack_policies import vcs
 
-    agents = frozenset(a.lower() for a in agents if a)
     heads = set(branches) | ({pull.base_ref, pull.default_branch} if pull else set())
     protected = {"refs/heads/" + name for name in heads}
     found = []
-    for ref in sorted(set(before) | set(after)):
-        if before.get(ref) == after.get(ref) or not (ref.startswith("refs/tags/") or ref in protected):
-            continue
-        if ref.startswith("refs/tags/") and ref in before and ref in after:
+    for ref in sorted(set(before) | set(after) | protected):
+        old, new = before.get(ref, NULL_SHA), after.get(ref, NULL_SHA)
+        is_tag = ref.startswith("refs/tags/")
+        if is_tag and old != new and ref in before and ref in after:
             reason = f"tag moved: {ref}"
-        elif agents:
-            reason = _moved_by(ref, _actors(ref, after, activity, release), agents)
-        else:
+        elif not (is_tag or ref in protected) or (old == new and (is_tag or not agents)):
+            continue
+        elif not agents:
             reason = f"ref moved: {ref}"
+        elif is_tag:
+            reason = _tag(ref, release(ref.removeprefix("refs/tags/")) if ref in after else None, agents)
+        else:
+            reason = _branch(ref, old, new, activity(ref), agents)
         if reason:
             found.append(reason)
     if pull and pull.head_ref in heads:

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import urllib.error
 
-from agent_stack_hermes.postrun import MAX_PAGES, Activity, GitHubError, GitHubReader, PullHead, agent_actors, violations
+from agent_stack_hermes.postrun import MAX_PAGES, NULL_SHA, Activity, GitHubError, GitHubReader, PullHead, agent_actors, violations
 
 API = "https://api.github.com"
 REPO = "acme/app"
@@ -60,8 +60,11 @@ AGENT = "h-cloud-npa[bot]"
 AGENTS = frozenset({AGENT})
 
 
-def entry(ref, actor, ts=1000.0):
-    return Activity(ref, ts, actor)
+MAIN = "refs/heads/main"
+
+
+def entry(ref, actor, before, after, ts=1000.0):
+    return Activity(ref, ts, actor, before, after)
 
 
 class Lookup:
@@ -96,7 +99,7 @@ class ViolationsTest(unittest.TestCase):
 
     def test_head_branch_move_allowed(self):
         self.assertEqual(self.check({**self.base, "refs/heads/feat/x": "c"}), [])
-        self.assertEqual(self.lookup.asked, [])
+        self.assertEqual(self.lookup.asked, [MAIN])
 
     def test_head_branch_creation_allowed(self):
         before = {k: v for k, v in self.base.items() if k != "refs/heads/feat/x"}
@@ -105,27 +108,71 @@ class ViolationsTest(unittest.TestCase):
     def test_other_agent_branch_move_allowed(self):
         after = {**self.base, "refs/heads/polly/x": "z", "refs/heads/feat/y": "q"}
         self.assertEqual(self.check(after), [])
-        self.assertEqual(self.lookup.asked, [])
+        self.assertEqual(self.lookup.asked, [MAIN])
 
     def test_owner_merge_to_main_allowed(self):
-        lookup = Lookup(entry("refs/heads/main", "lkshrk"))
-        self.assertEqual(self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup), [])
-        self.assertEqual(lookup.asked, ["refs/heads/main"])
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "m"))
+        self.assertEqual(self.check({**self.base, MAIN: "m"}, lookup=lookup), [])
+        self.assertEqual(lookup.asked, [MAIN])
+
+    def test_owner_chain_of_pushes_allowed(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "m1"), entry(MAIN, "renovate[bot]", "m1", "m2"))
+        self.assertEqual(self.check({**self.base, MAIN: "m2"}, lookup=lookup), [])
+
+    def test_entries_before_the_baseline_are_skipped(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "p", "a"), entry(MAIN, "lkshrk", "a", "m"))
+        self.assertEqual(self.check({**self.base, MAIN: "m"}, lookup=lookup), [])
+
+    def test_owner_entry_not_reaching_current_sha_is_unattributed(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "x"))
+        out = self.check({**self.base, MAIN: "y"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
+
+    def test_chain_gap_is_unattributed(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "x"), entry(MAIN, "lkshrk", "z", "m"))
+        out = self.check({**self.base, MAIN: "m"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
+
+    def test_chain_not_from_baseline_is_unattributed(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "q", "m"))
+        out = self.check({**self.base, MAIN: "m"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
+
+    def test_created_and_deleted_protected_branch_chain_on_null_sha(self):
+        before = {k: v for k, v in self.base.items() if k != MAIN}
+        lookup = Lookup(entry(MAIN, "lkshrk", NULL_SHA, "a"))
+        self.assertEqual(self.check(self.base, before=before, lookup=lookup), [])
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", NULL_SHA))
+        self.assertEqual(self.check(before, lookup=lookup), [])
+        out = self.check(before, lookup=Lookup(entry(MAIN, "lkshrk", "a", "x")))
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
 
     def test_agent_moves_main_is_violation(self):
-        lookup = Lookup(entry("refs/heads/main", "lkshrk"), entry("refs/heads/main", AGENT))
-        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "x"), entry(MAIN, AGENT, "x", "m"))
+        out = self.check({**self.base, MAIN: "m"}, lookup=lookup)
         self.assertEqual(out, ["ref moved by agent: refs/heads/main"])
 
     def test_agent_login_compare_case_insensitive(self):
-        lookup = Lookup(entry("refs/heads/main", "H-Cloud-NPA[bot]"))
-        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        lookup = Lookup(entry(MAIN, "H-Cloud-NPA[bot]", "a", "m"))
+        out = self.check({**self.base, MAIN: "m"}, lookup=lookup)
         self.assertEqual(out, ["ref moved by agent: refs/heads/main"])
+
+    def test_agent_push_and_restore_is_violation(self):
+        lookup = Lookup(entry(MAIN, AGENT, "a", "x"), entry(MAIN, AGENT, "x", "a"))
+        self.assertEqual(self.check(dict(self.base), lookup=lookup), ["ref moved by agent: refs/heads/main"])
+
+    def test_non_agent_entries_with_unchanged_sha_allowed(self):
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "x"), entry(MAIN, "lkshrk", "x", "a"))
+        self.assertEqual(self.check(dict(self.base), lookup=lookup), [])
+
+    def test_null_actor_with_unchanged_sha_is_unattributed(self):
+        lookup = Lookup(entry(MAIN, "", "a", "x"), entry(MAIN, "lkshrk", "x", "a"))
+        self.assertEqual(self.check(dict(self.base), lookup=lookup), ["ref moved (unattributed): refs/heads/main"])
 
     def test_release_tag_by_non_agent_allowed(self):
         releases = Releases(v2="github-actions[bot]")
         self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, releases=releases), [])
-        self.assertEqual((releases.asked, self.lookup.asked), (["v2"], []))
+        self.assertEqual((releases.asked, self.lookup.asked), (["v2"], [MAIN]))
 
     def test_agent_release_on_created_tag_is_violation(self):
         out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2="H-Cloud-NPA[bot]"))
@@ -137,13 +184,13 @@ class ViolationsTest(unittest.TestCase):
             with self.subTest(agents=agents):
                 out = self.check({**self.base, "refs/tags/v1": "t2"}, releases=releases, agents=agents)
                 self.assertEqual(out, ["tag moved: refs/tags/v1"])
-        self.assertEqual((releases.asked, self.lookup.asked), ([], []))
+        self.assertEqual(releases.asked, [])
 
     def test_tag_without_release_is_unattributed(self):
-        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]"))
+        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]", NULL_SHA, "t2"))
         out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup)
         self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
-        self.assertEqual((self.releases.asked, lookup.asked), (["v2"], []))
+        self.assertEqual((self.releases.asked, lookup.asked), (["v2"], [MAIN]))
 
     def test_release_without_author_is_unattributed(self):
         out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""))
@@ -167,8 +214,8 @@ class ViolationsTest(unittest.TestCase):
         )
 
     def test_null_actor_is_unattributed(self):
-        lookup = Lookup(entry("refs/heads/main", "lkshrk"), entry("refs/heads/main", ""))
-        out = self.check({**self.base, "refs/heads/main": "m"}, lookup=lookup)
+        lookup = Lookup(entry(MAIN, "", "a", "m"))
+        out = self.check({**self.base, MAIN: "m"}, lookup=lookup)
         self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
 
     def test_base_branch_is_protected(self):
@@ -176,22 +223,28 @@ class ViolationsTest(unittest.TestCase):
         before = {**self.base, "refs/heads/release": "r"}
         out = self.check({**before, "refs/heads/release": "r2"}, before=before, pull=pull)
         self.assertEqual(out, ["ref moved (unattributed): refs/heads/release"])
+        self.assertEqual(self.lookup.asked, [MAIN, "refs/heads/release"])
+
+    def test_given_branches_are_protected_with_pr(self):
+        before = {**self.base, "refs/heads/release/1.x": "r"}
+        out = self.check({**before, "refs/heads/release/1.x": "r2"}, before=before, branches=("release/1.x",))
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/release/1.x"])
 
     def test_no_agent_actors_protected_move_is_violation(self):
-        lookup = Lookup(entry("refs/heads/main", "lkshrk"))
-        for agents in (frozenset(), frozenset({""})):
-            with self.subTest(agents=agents):
-                after = {**self.base, "refs/heads/main": "m", "refs/tags/v2": "t2"}
-                out = self.check(after, lookup=lookup, agents=agents, releases=Releases(v2="github-actions[bot]"))
-                self.assertEqual(out, ["ref moved: refs/heads/main", "ref moved: refs/tags/v2"])
+        lookup = Lookup(entry(MAIN, "lkshrk", "a", "m"))
+        after = {**self.base, MAIN: "m", "refs/tags/v2": "t2"}
+        out = self.check(after, lookup=lookup, agents=frozenset(), releases=Releases(v2="github-actions[bot]"))
+        self.assertEqual(out, ["ref moved: refs/heads/main", "ref moved: refs/tags/v2"])
+        self.assertEqual((lookup.asked, self.releases.asked), ([], []))
 
     def test_no_pr_protects_given_branches(self):
-        after = {**self.base, "refs/heads/main": "m", "refs/heads/feat/x": "c"}
+        after = {**self.base, MAIN: "m", "refs/heads/feat/x": "c"}
         out = self.check(after, pull=None, branches=("main",))
         self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
 
     def test_no_change_no_pr_passes(self):
         self.assertEqual(self.check(dict(self.base), pull=None, branches=("main",)), [])
+        self.assertEqual(self.lookup.asked, [MAIN])
 
     def test_fork_head_is_violation(self):
         pull = PullHead("feat/x", "evil/app", "main", "acme/app", "main")
@@ -207,7 +260,7 @@ class ViolationsTest(unittest.TestCase):
 
     def test_protected_head_branch_is_violation(self):
         pull = PullHead("main", "acme/app", "release", "acme/app", "main")
-        lookup = Lookup(entry("refs/heads/main", AGENT))
+        lookup = Lookup(entry(MAIN, AGENT, "a", "z"))
         self.assertEqual(
             self.check({**self.base, "refs/heads/main": "z"}, pull=pull, lookup=lookup),
             ["ref moved by agent: refs/heads/main", "PR head is a protected branch: main"],
@@ -332,23 +385,23 @@ class RefsTest(ReaderCase):
 class ActivityTest(ReaderCase):
     SINCE = 1_700_000_000.0
 
-    def item(self, ts, login="lkshrk", ref="refs/heads/main"):
-        return {"id": 1, "node_id": "n", "before": "a", "after": "b", "ref": ref, "timestamp": ts,
+    def item(self, ts, login="lkshrk", ref="refs/heads/main", before="a", after="b"):
+        return {"id": 1, "node_id": "n", "before": before, "after": after, "ref": ref, "timestamp": ts,
                 "activity_type": "push", "actor": None if login is None else {"login": login}}
 
-    def test_entries_in_window_returned(self):
+    def test_entries_in_window_returned_oldest_first(self):
         nxt = f'<{API}/repositories/1/activity?ref=refs%2Fheads%2Fmain&per_page=100&after=c1>; rel="next"'
         r = self.reader(
             [
-                jr([self.item("2023-11-14T22:20:00Z", "h-cloud-npa[bot]")], {"Link": nxt}),
+                jr([self.item("2023-11-14T22:20:00Z", "h-cloud-npa[bot]", before="b", after="c")], {"Link": nxt}),
                 jr([self.item("2023-11-14T22:13:21Z"), self.item("2023-11-14T22:13:19Z", "old")]),
             ]
         )
         got = r.activity(REPO, "refs/heads/main", self.SINCE)
         self.assertEqual(
             got,
-            [Activity("refs/heads/main", 1_700_000_400.0, "h-cloud-npa[bot]"),
-             Activity("refs/heads/main", 1_700_000_001.0, "lkshrk")],
+            [Activity("refs/heads/main", 1_700_000_001.0, "lkshrk", "a", "b"),
+             Activity("refs/heads/main", 1_700_000_400.0, "h-cloud-npa[bot]", "b", "c")],
         )
         first = self.opener.requests[0].full_url
         self.assertIn("/repos/acme/app/activity?", first)
@@ -365,7 +418,7 @@ class ActivityTest(ReaderCase):
 
     def test_null_actor_and_offset_timestamp(self):
         r = self.reader([jr([self.item("2023-11-15T00:13:21+02:00", None)])])
-        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [Activity("refs/heads/main", 1_700_000_001.0, "")])
+        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [Activity("refs/heads/main", 1_700_000_001.0, "", "a", "b")])
 
     def test_other_refs_dropped(self):
         r = self.reader([jr([self.item("2023-11-14T22:20:00Z", ref="refs/heads/main-x")])])
@@ -387,6 +440,8 @@ class ActivityTest(ReaderCase):
             [{**self.item("2023-11-14T22:20:00Z"), "actor": "lkshrk"}],
             [{**self.item("2023-11-14T22:20:00Z"), "actor": {"login": 5}}],
             [{**self.item("2023-11-14T22:20:00Z"), "ref": None}],
+            [{**self.item("2023-11-14T22:20:00Z"), "before": None}],
+            [{**self.item("2023-11-14T22:20:00Z"), "after": ""}],
         )
         for body in bad:
             with self.subTest(body=body), self.assertRaises(GitHubError):
