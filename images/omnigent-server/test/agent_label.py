@@ -42,7 +42,6 @@ def main() -> int:
     bundles = sorted(p.name for p in AGENTS_DIR.iterdir() if (p / "config.yaml").is_file())
     check("every bundle in /agents is registered", sorted(p.name for p in entries) == bundles, f"{entries} vs {bundles}")
     expected = {p.name: _bundle(p) for p in entries}
-    check("every bundle's policy functions resolve", True)
 
     with tempfile.TemporaryDirectory() as tmp:
         agents = SqlAlchemyAgentStore(f"sqlite:///{tmp}/omnigent.db")
