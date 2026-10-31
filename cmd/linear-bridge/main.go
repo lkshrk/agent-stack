@@ -43,7 +43,7 @@ func main() {
 		kanban: &gateClient{
 			base:  mustEnv("KANBAN_GATE_URL"),
 			token: mustEnv("KANBAN_GATE_TOKEN"),
-			http:  httpClient,
+			http:  &http.Client{Timeout: stopTimeout},
 		},
 		ownerID:   mustEnv("LINEAR_OWNER_ID"),
 		appUserID: mustEnv("LINEAR_APP_USER_ID"),

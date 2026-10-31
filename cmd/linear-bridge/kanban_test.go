@@ -68,12 +68,22 @@ func TestGateClientNon2xxIsError(t *testing.T) {
 	}
 }
 
+func TestGateClientCardByIssueForeign404IsError(t *testing.T) {
+	g := newGate(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "404 page not found", http.StatusNotFound)
+	})
+	if _, ok, err := g.CardByIssue(context.Background(), "i1"); err == nil || ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+}
+
 func TestGateClientCardByIssueNotFound(t *testing.T) {
 	g := newGate(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("linear_issue") != "i1" {
 			t.Errorf("query = %q", r.URL.RawQuery)
 		}
-		http.Error(w, `{"error":"unknown card"}`, http.StatusNotFound)
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error": "unknown card"}`))
 	})
 	_, ok, err := g.CardByIssue(context.Background(), "i1")
 	if err != nil || ok {

@@ -104,15 +104,39 @@ func (b *bridge) startWork(ctx context.Context, sessionID, issueID string) error
 }
 
 func (b *bridge) queueFailed(ctx context.Context, sessionID, issueRef string, cause error) error {
-	thoughtErr := b.linear.Thought(ctx, sessionID, "Could not queue this issue; the owner was notified.")
 	msg := fmt.Sprintf("linear-bridge: could not queue %s on Kanban: %v", issueRef, cause)
-	if err := b.notify.Notify(ctx, msg); err != nil {
-		log.Printf("linear-bridge: notify failed: %v", err)
-	}
+	b.alert(msg)
+	thoughtErr := b.linear.Thought(ctx, sessionID, "Could not queue this issue; the owner was notified.")
 	if thoughtErr != nil {
 		return thoughtErr
 	}
 	return cause
+}
+
+func (b *bridge) alert(msg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+	if err := b.notify.Notify(ctx, msg); err != nil {
+		log.Printf("linear-bridge: notify failed: %v", err)
+	}
+}
+
+func (b *bridge) stopCard(identifier, cardID, reason string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	err := b.kanban.StopCard(ctx, cardID, reason)
+	if err != nil {
+		b.alert(fmt.Sprintf("🔴 %s: stop failed: %s", identifier, shortErr(err)))
+	}
+	return err
+}
+
+func shortErr(err error) string {
+	msg := err.Error()
+	if len(msg) > 200 {
+		return msg[:200]
+	}
+	return msg
 }
 
 func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
@@ -121,6 +145,7 @@ func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
 	}
 	var d struct {
 		ID         string `json:"id"`
+		Identifier string `json:"identifier"`
 		DelegateID string `json:"delegateId"`
 		StateID    string `json:"stateId"`
 	}
@@ -144,7 +169,7 @@ func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
 		if err != nil || !found {
 			return err
 		}
-		return b.kanban.StopCard(ctx, card.ID, "owner: un-delegated")
+		return b.stopCard(d.Identifier, card.ID, "owner: un-delegated")
 	case stateChanged:
 		card, found, err := b.cardFor(ctx, d.ID)
 		if err != nil || !found {
@@ -161,14 +186,19 @@ func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
 		if err != nil {
 			return fmt.Errorf("issue lookup: %w", err)
 		}
+		known := false
 		for _, st := range issue.States {
 			if st.ID != d.StateID {
 				continue
 			}
+			known = true
 			switch st.Type {
 			case "backlog", "unstarted", "canceled":
-				return b.kanban.StopCard(ctx, card.ID, "owner: moved to "+st.Name)
+				return b.stopCard(d.Identifier, card.ID, "owner: moved to "+st.Name)
 			}
+		}
+		if !known {
+			log.Printf("linear-bridge: issue %s moved to unknown state %s", d.ID, d.StateID)
 		}
 	}
 	return nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,13 @@ import (
 	"time"
 )
 
-const cardTimeout = 3 * time.Second
+const (
+	cardTimeout   = 3 * time.Second
+	notifyTimeout = 5 * time.Second
+	stopTimeout   = 30 * time.Second
+)
+
+const gateNotFound = "unknown card"
 
 type CardLink struct {
 	IssueID     string `json:"issue_id"`
@@ -65,6 +72,15 @@ type gateClient struct {
 	http        *http.Client
 }
 
+var errUnknownCard = errors.New("kanban gate: unknown card")
+
+func gateSaysUnknownCard(raw []byte) bool {
+	var b struct {
+		Error string `json:"error"`
+	}
+	return json.Unmarshal(raw, &b) == nil && b.Error == gateNotFound
+}
+
 func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (int, error) {
 	var body io.Reader
 	if in != nil {
@@ -92,6 +108,9 @@ func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (
 		return resp.StatusCode, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		if resp.StatusCode == http.StatusNotFound && gateSaysUnknownCard(raw) {
+			return resp.StatusCode, errUnknownCard
+		}
 		return resp.StatusCode, fmt.Errorf("kanban gate %s %s returned %d", method, path, resp.StatusCode)
 	}
 	if out != nil {
@@ -110,8 +129,8 @@ func (g *gateClient) CreateRootCard(ctx context.Context, r RootCardRequest) (Car
 
 func (g *gateClient) CardByIssue(ctx context.Context, issueID string) (Card, bool, error) {
 	var c Card
-	status, err := g.do(ctx, http.MethodGet, "/v1/cards?linear_issue="+url.QueryEscape(issueID), nil, &c)
-	if status == http.StatusNotFound {
+	_, err := g.do(ctx, http.MethodGet, "/v1/cards?linear_issue="+url.QueryEscape(issueID), nil, &c)
+	if errors.Is(err, errUnknownCard) {
 		return Card{}, false, nil
 	}
 	return c, err == nil, err

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -24,12 +25,14 @@ const (
 )
 
 type fakeLinear struct {
-	archived   []string
-	thoughts   [][2]string
-	archiveErr error
-	issue      IssueInfo
-	issueErr   error
-	issueCalls []string
+	archived           []string
+	thoughts           [][2]string
+	archiveErr         error
+	issue              IssueInfo
+	issueErr           error
+	issueCalls         []string
+	notifier           *fakeNotifier
+	thoughtAfterNotify bool
 }
 
 func (f *fakeLinear) Issue(_ context.Context, id string) (IssueInfo, error) {
@@ -44,6 +47,7 @@ type fakeKanban struct {
 	found     bool
 	stops     [][2]string
 	stopErr   error
+	stopCtxs  []context.Context
 }
 
 func (f *fakeKanban) CreateRootCard(_ context.Context, r RootCardRequest) (Card, error) {
@@ -55,7 +59,8 @@ func (f *fakeKanban) CardByIssue(context.Context, string) (Card, bool, error) {
 	return f.card, f.found, nil
 }
 
-func (f *fakeKanban) StopCard(_ context.Context, id, reason string) error {
+func (f *fakeKanban) StopCard(ctx context.Context, id, reason string) error {
+	f.stopCtxs = append(f.stopCtxs, ctx)
 	f.stops = append(f.stops, [2]string{id, reason})
 	return f.stopErr
 }
@@ -71,14 +76,21 @@ func (f *fakeLinear) ArchiveIssue(_ context.Context, id string) error {
 }
 
 func (f *fakeLinear) Thought(_ context.Context, s, b string) error {
+	if f.notifier != nil && len(f.notifier.msgs) > 0 {
+		f.thoughtAfterNotify = true
+	}
 	f.thoughts = append(f.thoughts, [2]string{s, b})
 	return nil
 }
 
-type fakeNotifier struct{ msgs []string }
+type fakeNotifier struct {
+	msgs    []string
+	ctxErrs []error
+}
 
-func (f *fakeNotifier) Notify(_ context.Context, t string) error {
+func (f *fakeNotifier) Notify(ctx context.Context, t string) error {
 	f.msgs = append(f.msgs, t)
+	f.ctxErrs = append(f.ctxErrs, ctx.Err())
 	return nil
 }
 
@@ -125,7 +137,8 @@ func newTestBridge() (*bridge, *fakeLinear, *fakeNotifier) {
 }
 
 func newKanbanBridge() (*bridge, *fakeLinear, *fakeNotifier, *fakeKanban) {
-	l, n, k := &fakeLinear{issue: delegatedIssue()}, &fakeNotifier{}, &fakeKanban{}
+	n, k := &fakeNotifier{}, &fakeKanban{}
+	l := &fakeLinear{issue: delegatedIssue(), notifier: n}
 	return &bridge{linear: l, notify: n, kanban: k, ownerID: testOwner, appUserID: testApp}, l, n, k
 }
 
@@ -481,5 +494,50 @@ func TestIssueUpdateByAppIgnored(t *testing.T) {
 	}
 	if len(k.stops) != 0 {
 		t.Fatalf("stops = %v", k.stops)
+	}
+}
+
+func TestQueueFailureNotifiesBeforeThoughtOnLiveContext(t *testing.T) {
+	b, l, n, k := newKanbanBridge()
+	k.createErr = errors.New("gate down")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = b.handle(ctx, loadEvent(t, "agent_session_created.json", nil))
+	if len(n.msgs) != 1 || n.ctxErrs[0] != nil {
+		t.Fatalf("msgs=%v ctxErrs=%v", n.msgs, n.ctxErrs)
+	}
+	if !l.thoughtAfterNotify {
+		t.Fatal("thought was sent before the notification")
+	}
+}
+
+func TestStopUsesOwnLongBudget(t *testing.T) {
+	b, _, _, k := newKanbanBridge()
+	k.card, k.found = Card{ID: "t1", Status: "running"}, true
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := b.handle(ctx, loadEvent(t, "issue_update_undelegate.json", nil)); err != nil {
+		t.Fatal(err)
+	}
+	dl, ok := k.stopCtxs[0].Deadline()
+	if !ok || time.Until(dl) < 20*time.Second {
+		t.Fatalf("stop deadline = %v ok=%v", time.Until(dl), ok)
+	}
+}
+
+func TestStopFailureNotifies(t *testing.T) {
+	for _, name := range []string{"issue_update_undelegate.json", "issue_update_state.json"} {
+		b, _, n, k := newKanbanBridge()
+		k.card, k.found = Card{ID: "t1", Status: "running"}, true
+		k.stopErr = errors.New("2 interrupt/archive errors")
+		var mut func(map[string]any)
+		if name == "issue_update_state.json" {
+			mut = moveTo(stateTodo)
+		}
+		_ = b.handle(context.Background(), loadEvent(t, name, mut))
+		if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 ROU-698: stop failed: ") ||
+			!strings.Contains(n.msgs[0], "interrupt/archive") {
+			t.Fatalf("%s msgs = %v", name, n.msgs)
+		}
 	}
 }
