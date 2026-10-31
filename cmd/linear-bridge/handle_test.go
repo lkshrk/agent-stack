@@ -16,12 +16,13 @@ const (
 )
 
 const (
-	testIssue    = "04959fb8-108f-421e-9ad8-7eea5e4104d6"
-	testUpdated  = "c3f4380b-637c-4fd3-9643-1de802f5c79a"
-	stateTodo    = "11111111-0000-0000-0000-000000000001"
-	stateDone    = "11111111-0000-0000-0000-000000000002"
-	stateReview  = "4820222c-3d20-4499-a456-da5d369196d7"
-	stateBacklog = "11111111-0000-0000-0000-000000000003"
+	testIssue     = "04959fb8-108f-421e-9ad8-7eea5e4104d6"
+	testUpdated   = "c3f4380b-637c-4fd3-9643-1de802f5c79a"
+	stateTodo     = "11111111-0000-0000-0000-000000000001"
+	stateDone     = "11111111-0000-0000-0000-000000000002"
+	stateReview   = "4820222c-3d20-4499-a456-da5d369196d7"
+	stateBacklog  = "11111111-0000-0000-0000-000000000003"
+	stateCanceled = "11111111-0000-0000-0000-000000000004"
 )
 
 type fakeLinear struct {
@@ -32,7 +33,7 @@ type fakeLinear struct {
 	issueErr                            error
 	issueCalls                          []string
 	notifier                            *fakeNotifier
-	thoughtAfterNotify                  bool
+	msgsAtThought                       []int
 	states, activities, comments, links [][2]string
 	writeErr                            error
 	commentErr                          error
@@ -55,6 +56,10 @@ type fakeKanban struct {
 	stops     [][2]string
 	stopErr   error
 	stopCtxs  []context.Context
+	cardErr   error
+
+	stopEntered chan struct{}
+	stopGate    chan struct{}
 }
 
 func (f *fakeKanban) CreateRootCard(_ context.Context, r RootCardRequest) (Card, error) {
@@ -63,10 +68,14 @@ func (f *fakeKanban) CreateRootCard(_ context.Context, r RootCardRequest) (Card,
 }
 
 func (f *fakeKanban) CardByIssue(context.Context, string) (Card, bool, error) {
-	return f.card, f.found, nil
+	return f.card, f.found, f.cardErr
 }
 
 func (f *fakeKanban) StopCard(ctx context.Context, id, reason string) error {
+	if f.stopEntered != nil {
+		f.stopEntered <- struct{}{}
+		<-f.stopGate
+	}
 	f.stopCtxs = append(f.stopCtxs, ctx)
 	f.stops = append(f.stops, [2]string{id, reason})
 	return f.stopErr
@@ -83,8 +92,8 @@ func (f *fakeLinear) ArchiveIssue(_ context.Context, id string) error {
 }
 
 func (f *fakeLinear) Thought(_ context.Context, s, b string) error {
-	if f.notifier != nil && len(f.notifier.msgs) > 0 {
-		f.thoughtAfterNotify = true
+	if f.notifier != nil {
+		f.msgsAtThought = append(f.msgsAtThought, len(f.notifier.msgs))
 	}
 	f.thoughts = append(f.thoughts, [2]string{s, b})
 	return nil
@@ -134,6 +143,7 @@ func delegatedIssue() IssueInfo {
 			{ID: "7511db60-aeb4-48ee-8a5e-f6a1d8660de4", Name: "In Progress", Type: "started"},
 			{ID: stateReview, Name: "In Review", Type: "started"},
 			{ID: stateDone, Name: "Done", Type: "completed"},
+			{ID: stateCanceled, Name: "Canceled", Type: "canceled"},
 		},
 	}
 }
@@ -336,7 +346,7 @@ func TestCardFailureStillThoughtsAndNotifies(t *testing.T) {
 	b, l, n, k := newKanbanBridge()
 	k.createErr = errors.New("gate down")
 	ev := loadEvent(t, "agent_session_created.json", nil)
-	_ = b.handle(context.Background(), ev)
+	_ = b.handleWait(context.Background(), ev)
 	if len(l.thoughts) != 1 || l.thoughts[0][1] != "Could not queue this issue; the owner was notified." {
 		t.Fatalf("thoughts = %v", l.thoughts)
 	}
@@ -350,7 +360,7 @@ func TestSessionByOtherUserDoesNotCreateCard(t *testing.T) {
 	ev := loadEvent(t, "agent_session_created.json", func(m map[string]any) {
 		m["agentSession"].(map[string]any)["creatorId"] = "someone-else"
 	})
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.created) != 0 || len(l.issueCalls) != 0 {
@@ -362,7 +372,7 @@ func TestUndelegateStopsCard(t *testing.T) {
 	b, _, _, k := newKanbanBridge()
 	k.card, k.found = Card{ID: "t1", Status: "done"}, true
 	ev := loadEvent(t, "issue_update_undelegate.json", nil)
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 1 || k.stops[0] != [2]string{"t1", "owner: un-delegated"} {
@@ -373,7 +383,7 @@ func TestUndelegateStopsCard(t *testing.T) {
 func TestUndelegateWithoutCardIsIgnored(t *testing.T) {
 	b, _, _, k := newKanbanBridge()
 	ev := loadEvent(t, "issue_update_undelegate.json", nil)
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 0 {
@@ -387,12 +397,18 @@ func TestUndelegateWithAbsentDelegateKeyStops(t *testing.T) {
 	ev := loadEvent(t, "issue_update_undelegate.json", func(m map[string]any) {
 		delete(m["data"].(map[string]any), "delegateId")
 	})
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 1 {
 		t.Fatalf("stops = %v", k.stops)
 	}
+}
+
+func (b *bridge) handleWait(ctx context.Context, ev event) error {
+	err := b.handle(ctx, ev)
+	b.stopWG.Wait()
+	return err
 }
 
 func moveTo(stateID string) func(map[string]any) {
@@ -407,7 +423,7 @@ func TestOwnerMovesRunningToTodoStops(t *testing.T) {
 	b, l, _, k := newKanbanBridge()
 	k.card, k.found = Card{ID: "t1", Status: "running"}, true
 	ev := loadEvent(t, "issue_update_state.json", moveTo(stateTodo))
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 1 || k.stops[0] != [2]string{"t1", "owner: moved to Todo"} {
@@ -423,7 +439,7 @@ func TestOwnerMovesReadyAndBlockedCardsStop(t *testing.T) {
 		b, _, _, k := newKanbanBridge()
 		k.card, k.found = Card{ID: "t1", Status: status}, true
 		ev := loadEvent(t, "issue_update_state.json", moveTo(stateBacklog))
-		if err := b.handle(context.Background(), ev); err != nil {
+		if err := b.handleWait(context.Background(), ev); err != nil {
 			t.Fatal(err)
 		}
 		if len(k.stops) != 1 {
@@ -436,7 +452,7 @@ func TestOwnerMovesDoneCardIgnored(t *testing.T) {
 	b, _, _, k := newKanbanBridge()
 	k.card, k.found = Card{ID: "t1", Status: "done"}, true
 	ev := loadEvent(t, "issue_update_state.json", moveTo(stateTodo))
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 0 {
@@ -448,7 +464,7 @@ func TestOwnerMovesToStartedTypeIgnored(t *testing.T) {
 	b, _, _, k := newKanbanBridge()
 	k.card, k.found = Card{ID: "t1", Status: "running"}, true
 	ev := loadEvent(t, "issue_update_state.json", nil)
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 0 {
@@ -463,7 +479,7 @@ func TestUpdateWithoutStateChangeIgnored(t *testing.T) {
 		m["data"].(map[string]any)["stateId"] = stateTodo
 		m["updatedFrom"] = map[string]any{"updatedAt": "2026-10-30T09:15:02.114Z"}
 	})
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 0 || len(l.issueCalls) != 0 {
@@ -477,7 +493,7 @@ func TestUndelegateByOtherUserIgnored(t *testing.T) {
 	ev := loadEvent(t, "issue_update_undelegate.json", func(m map[string]any) {
 		m["actor"].(map[string]any)["id"] = "someone-else"
 	})
-	if err := b.handle(context.Background(), ev); err != nil {
+	if err := b.handleWait(context.Background(), ev); err != nil {
 		t.Fatal(err)
 	}
 	if len(k.stops) != 0 {
@@ -495,7 +511,7 @@ func TestIssueUpdateByAppIgnored(t *testing.T) {
 				moveTo(stateTodo)(m)
 			}
 		})
-		if err := b.handle(context.Background(), ev); err != nil {
+		if err := b.handleWait(context.Background(), ev); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -504,7 +520,7 @@ func TestIssueUpdateByAppIgnored(t *testing.T) {
 	}
 }
 
-func TestQueueFailureNotifiesBeforeThoughtOnLiveContext(t *testing.T) {
+func TestQueueFailureThoughtsThenAlertsOnOwnContext(t *testing.T) {
 	b, l, n, k := newKanbanBridge()
 	k.createErr = errors.New("gate down")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -513,8 +529,99 @@ func TestQueueFailureNotifiesBeforeThoughtOnLiveContext(t *testing.T) {
 	if len(n.msgs) != 1 || n.ctxErrs[0] != nil {
 		t.Fatalf("msgs=%v ctxErrs=%v", n.msgs, n.ctxErrs)
 	}
-	if !l.thoughtAfterNotify {
-		t.Fatal("thought was sent before the notification")
+	if len(l.msgsAtThought) != 1 || l.msgsAtThought[0] != 0 {
+		t.Fatalf("thought was not sent before the alert: %v", l.msgsAtThought)
+	}
+}
+
+func TestStopRunsOffTheWorker(t *testing.T) {
+	b, _, _, k := newKanbanBridge()
+	k.card, k.found = Card{ID: "t1", Status: "running"}, true
+	k.stopEntered, k.stopGate = make(chan struct{}), make(chan struct{})
+	if err := b.handle(context.Background(), loadEvent(t, "issue_update_undelegate.json", nil)); err != nil {
+		t.Fatal(err)
+	}
+	<-k.stopEntered
+	if b.waitStops(context.Background(), 20*time.Millisecond) {
+		t.Fatal("waitStops returned while a stop was in flight")
+	}
+	close(k.stopGate)
+	if !b.waitStops(context.Background(), 5*time.Second) {
+		t.Fatal("waitStops did not see the stop finish")
+	}
+	if len(k.stops) != 1 {
+		t.Fatalf("stops = %v", k.stops)
+	}
+}
+
+func TestStopLookupFailureNotifies(t *testing.T) {
+	for _, name := range []string{"issue_update_undelegate.json", "issue_update_state.json"} {
+		b, _, n, k := newKanbanBridge()
+		k.cardErr = errors.New("gate down")
+		var mut func(map[string]any)
+		if name == "issue_update_state.json" {
+			mut = moveTo(stateTodo)
+		}
+		if err := b.handleWait(context.Background(), loadEvent(t, name, mut)); err == nil {
+			t.Fatalf("%s: want error", name)
+		}
+		if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 ROU-698: owner stop not applied: ") ||
+			!strings.Contains(n.msgs[0], "gate down") {
+			t.Fatalf("%s msgs = %v", name, n.msgs)
+		}
+	}
+}
+
+func TestStopIssueLookupFailureNotifies(t *testing.T) {
+	b, l, n, k := newKanbanBridge()
+	k.card, k.found = Card{ID: "t1", Status: "running"}, true
+	l.issueErr = errors.New("linear down")
+	_ = b.handleWait(context.Background(), loadEvent(t, "issue_update_state.json", moveTo(stateTodo)))
+	if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 ROU-698: owner stop not applied: ") || len(k.stops) != 0 {
+		t.Fatalf("msgs=%v stops=%v", n.msgs, k.stops)
+	}
+}
+
+func TestMissingCardIsNotAlerted(t *testing.T) {
+	b, _, n, _ := newKanbanBridge()
+	_ = b.handleWait(context.Background(), loadEvent(t, "issue_update_undelegate.json", nil))
+	if len(n.msgs) != 0 {
+		t.Fatalf("msgs = %v", n.msgs)
+	}
+}
+
+func TestParkedCardStopsOnlyOnBacklogOrCanceled(t *testing.T) {
+	cases := []struct {
+		card  Card
+		state string
+		stops int
+	}{
+		{Card{ID: "t1", Status: "blocked"}, stateTodo, 0},
+		{Card{ID: "t1", Status: "blocked"}, stateBacklog, 1},
+		{Card{ID: "t1", Status: "blocked"}, stateCanceled, 1},
+		{Card{ID: "t1", Status: "blocked", RunID: 3}, stateTodo, 1},
+		{Card{ID: "t1", Status: "ready"}, stateTodo, 1},
+		{Card{ID: "t1", Status: "running", RunID: 1}, stateTodo, 1},
+	}
+	for _, tc := range cases {
+		b, _, _, k := newKanbanBridge()
+		k.card, k.found = tc.card, true
+		if err := b.handleWait(context.Background(), loadEvent(t, "issue_update_state.json", moveTo(tc.state))); err != nil {
+			t.Fatal(err)
+		}
+		if len(k.stops) != tc.stops {
+			t.Errorf("%+v -> %s: stops = %v want %d", tc.card, tc.state, k.stops, tc.stops)
+		}
+	}
+}
+
+func TestStopFailureShowsInterruptDetails(t *testing.T) {
+	b, _, n, k := newKanbanBridge()
+	k.card, k.found = Card{ID: "t1", Status: "running"}, true
+	k.stopErr = errors.New(strings.Repeat("x", 150) + " interrupt errors: s1: boom")
+	_ = b.handleWait(context.Background(), loadEvent(t, "issue_update_undelegate.json", nil))
+	if len(n.msgs) != 1 || !strings.Contains(n.msgs[0], "s1: boom") {
+		t.Fatalf("msgs = %v", n.msgs)
 	}
 }
 
@@ -523,7 +630,7 @@ func TestStopUsesOwnLongBudget(t *testing.T) {
 	k.card, k.found = Card{ID: "t1", Status: "running"}, true
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := b.handle(ctx, loadEvent(t, "issue_update_undelegate.json", nil)); err != nil {
+	if err := b.handleWait(ctx, loadEvent(t, "issue_update_undelegate.json", nil)); err != nil {
 		t.Fatal(err)
 	}
 	dl, ok := k.stopCtxs[0].Deadline()
@@ -541,7 +648,7 @@ func TestStopFailureNotifies(t *testing.T) {
 		if name == "issue_update_state.json" {
 			mut = moveTo(stateTodo)
 		}
-		_ = b.handle(context.Background(), loadEvent(t, name, mut))
+		_ = b.handleWait(context.Background(), loadEvent(t, name, mut))
 		if len(n.msgs) != 1 || !strings.HasPrefix(n.msgs[0], "🔴 ROU-698: stop failed: ") ||
 			!strings.Contains(n.msgs[0], "interrupt/archive") {
 			t.Fatalf("%s msgs = %v", name, n.msgs)

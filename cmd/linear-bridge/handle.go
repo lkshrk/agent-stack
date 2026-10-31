@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
+	"time"
+	"unicode/utf8"
 )
 
 type bridge struct {
@@ -13,6 +16,7 @@ type bridge struct {
 	kanban    kanbanAPI
 	ownerID   string
 	appUserID string
+	stopWG    sync.WaitGroup
 }
 
 func (b *bridge) handle(ctx context.Context, ev event) error {
@@ -104,9 +108,8 @@ func (b *bridge) startWork(ctx context.Context, sessionID, issueID string) error
 }
 
 func (b *bridge) queueFailed(ctx context.Context, sessionID, issueRef string, cause error) error {
-	msg := fmt.Sprintf("linear-bridge: could not queue %s on Kanban: %v", issueRef, cause)
-	b.alert(msg)
 	thoughtErr := b.linear.Thought(ctx, sessionID, "Could not queue this issue; the owner was notified.")
+	b.alert(fmt.Sprintf("linear-bridge: could not queue %s on Kanban: %v", issueRef, cause))
 	if thoughtErr != nil {
 		return thoughtErr
 	}
@@ -121,22 +124,54 @@ func (b *bridge) alert(msg string) {
 	}
 }
 
-func (b *bridge) stopCard(identifier, cardID, reason string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
-	defer cancel()
-	err := b.kanban.StopCard(ctx, cardID, reason)
-	if err != nil {
-		b.alert(fmt.Sprintf("🔴 %s: stop failed: %s", identifier, shortErr(err)))
-	}
-	return err
+func (b *bridge) stopAsync(identifier, cardID, reason string) {
+	b.stopWG.Add(1)
+	go func() {
+		defer b.stopWG.Done()
+		b.stopCard(identifier, cardID, reason)
+	}()
 }
 
-func shortErr(err error) string {
-	msg := err.Error()
-	if len(msg) > 200 {
-		return msg[:200]
+func (b *bridge) waitStops(ctx context.Context, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		b.stopWG.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+	case <-t.C:
 	}
-	return msg
+	return false
+}
+
+func (b *bridge) stopCard(identifier, cardID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	if err := b.kanban.StopCard(ctx, cardID, reason); err != nil {
+		b.alert(fmt.Sprintf("🔴 %s: stop failed: %s", identifier, truncate(err.Error(), 400)))
+	}
+}
+
+func shortErr(err error) string { return truncate(err.Error(), 200) }
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func (b *bridge) stopNotApplied(identifier string, err error) error {
+	b.alert(fmt.Sprintf("🔴 %s: owner stop not applied: %s", identifier, shortErr(err)))
+	return err
 }
 
 func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
@@ -166,14 +201,19 @@ func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
 	switch {
 	case delegateChanged && d.DelegateID == "":
 		card, found, err := b.cardFor(ctx, d.ID)
-		if err != nil || !found {
-			return err
+		if err != nil {
+			return b.stopNotApplied(d.Identifier, err)
 		}
-		return b.stopCard(d.Identifier, card.ID, "owner: un-delegated")
+		if found {
+			b.stopAsync(d.Identifier, card.ID, "owner: un-delegated")
+		}
 	case stateChanged:
 		card, found, err := b.cardFor(ctx, d.ID)
-		if err != nil || !found {
-			return err
+		if err != nil {
+			return b.stopNotApplied(d.Identifier, err)
+		}
+		if !found {
+			return nil
 		}
 		switch card.Status {
 		case "ready", "running", "blocked":
@@ -184,17 +224,18 @@ func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
 		issue, err := b.linear.Issue(issueCtx, d.ID)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("issue lookup: %w", err)
+			return b.stopNotApplied(d.Identifier, fmt.Errorf("issue lookup: %w", err))
 		}
+		parked := card.Status == "blocked" && card.RunID == 0
 		known := false
 		for _, st := range issue.States {
 			if st.ID != d.StateID {
 				continue
 			}
 			known = true
-			switch st.Type {
-			case "backlog", "unstarted", "canceled":
-				return b.stopCard(d.Identifier, card.ID, "owner: moved to "+st.Name)
+			if st.Type == "backlog" || st.Type == "canceled" || (st.Type == "unstarted" && !parked) {
+				b.stopAsync(d.Identifier, card.ID, "owner: moved to "+st.Name)
+				return nil
 			}
 		}
 		if !known {

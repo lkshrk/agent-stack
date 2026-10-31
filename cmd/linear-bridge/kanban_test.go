@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -132,5 +133,28 @@ func TestGateClientEventsAndCursors(t *testing.T) {
 	}
 	if err := g.SetCursor(ctx, "bridge", 7); err != nil || putBody["value"] != 7 {
 		t.Fatalf("put=%v err=%v", putBody, err)
+	}
+}
+
+func TestGateClientStopErrorCarriesInterruptDetails(t *testing.T) {
+	g := newGate(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{"error":"interrupt failed","interrupt_errors":["sess-9: boom"]}`))
+	})
+	err := g.StopCard(context.Background(), "t1", "owner: un-delegated")
+	if err == nil || !strings.Contains(err.Error(), "sess-9: boom") {
+		t.Fatalf("err = %v", err)
+	}
+	g = newGate(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"stopped":["t1"],"interrupt_errors":["sess-9: boom"]}`))
+	})
+	if err := g.StopCard(context.Background(), "t1", "x"); err == nil || !strings.Contains(err.Error(), "sess-9: boom") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGateHTTPTimeoutOutlastsStopBudget(t *testing.T) {
+	if c := newGateHTTPClient(); c.Timeout <= stopTimeout {
+		t.Fatalf("timeout %v <= stop budget %v", c.Timeout, stopTimeout)
 	}
 }

@@ -20,6 +20,10 @@ const (
 	stopTimeout   = 30 * time.Second
 )
 
+func newGateHTTPClient() *http.Client {
+	return &http.Client{Timeout: stopTimeout + notifyTimeout}
+}
+
 const gateNotFound = "unknown card"
 
 type CardLink struct {
@@ -81,6 +85,16 @@ func gateSaysUnknownCard(raw []byte) bool {
 	return json.Unmarshal(raw, &b) == nil && b.Error == gateNotFound
 }
 
+func interruptDetail(raw []byte) string {
+	var b struct {
+		InterruptErrors []string `json:"interrupt_errors"`
+	}
+	if json.Unmarshal(raw, &b) != nil || len(b.InterruptErrors) == 0 {
+		return ""
+	}
+	return " (interrupt errors: " + truncate(strings.Join(b.InterruptErrors, "; "), 200) + ")"
+}
+
 func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (int, error) {
 	var body io.Reader
 	if in != nil {
@@ -111,7 +125,7 @@ func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (
 		if resp.StatusCode == http.StatusNotFound && gateSaysUnknownCard(raw) {
 			return resp.StatusCode, errUnknownCard
 		}
-		return resp.StatusCode, fmt.Errorf("kanban gate %s %s returned %d", method, path, resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("kanban gate %s %s returned %d%s", method, path, resp.StatusCode, interruptDetail(raw))
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -152,7 +166,8 @@ func (g *gateClient) StopCard(ctx context.Context, id, reason string) error {
 		return err
 	}
 	if n := len(out.InterruptErrors) + len(out.ArchiveErrors); n > 0 {
-		return fmt.Errorf("stop card %s: %d interrupt/archive errors", id, n)
+		detail := truncate(strings.Join(append(out.InterruptErrors, out.ArchiveErrors...), "; "), 200)
+		return fmt.Errorf("stop card %s: %d interrupt/archive errors: %s", id, n, detail)
 	}
 	return nil
 }
