@@ -216,29 +216,55 @@ class GateTest(unittest.TestCase):
         self.assertEqual({c[1] for c in self.calls[:2]}, {"conv_a", "conv_b"})
         self.assertEqual(self.kanban.cards[ids[2]]["status"], "done")
 
-    def test_stop_archives_despite_interrupt_failure(self):
-        card_id = self.kanban.create(
-            title="a", body='agent-stack-link: {"issue_id":"a","identifier":"a","session_id":"s","root_issue_id":"a"}\nagent-stack-run: null\n',
-            idempotency_key="linear:a",
-        )
-        self.kanban.notes[card_id] = [SESSION_NOTE + "conv_x"]
+    def _tree_cards(self, names):
+        ids = []
+        for n in names:
+            ids.append(self.kanban.create(
+                title=n,
+                body=f'agent-stack-link: {json.dumps({"issue_id": n, "identifier": n, "session_id": "s", "root_issue_id": "r"})}\nagent-stack-run: null\n',
+                idempotency_key=f"linear:{n}",
+            ))
+        return ids
+
+    def test_stop_archives_nothing_when_any_interrupt_fails(self):
+        ids = self._tree_cards(("a", "b"))
+        self.kanban.notes[ids[0]] = [SESSION_NOTE + "conv_x"]
+        self.kanban.notes[ids[1]] = [SESSION_NOTE + "conv_y"]
         gate = Gate(self.kanban, FakeOmni(self.calls, fail={"conv_x"}), self.tmp.name)
-        status, body = self.call("POST", f"/v1/cards/{card_id}/stop", body={"reason": "r"}, gate=gate)
-        self.assertEqual((status, body["stopped"]), (200, [card_id]))
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"}, gate=gate)
+        self.assertEqual(status, 502)
+        self.assertEqual(body["stopped"], [])
         self.assertEqual(len(body["interrupt_errors"]), 1)
         self.assertIn("conv_x", body["interrupt_errors"][0])
-        self.assertEqual(self.kanban.cards[card_id]["status"], "archived")
+        self.assertNotIn("archive", [c[0] for c in self.calls])
+        self.assertEqual({c[1] for c in self.calls}, {"conv_x", "conv_y"})
+        self.assertEqual({self.kanban.cards[i]["status"] for i in ids}, {"blocked"})
 
-    def test_stop_without_omnigent_still_archives(self):
-        card_id = self.kanban.create(
-            title="a", body='agent-stack-link: {"issue_id":"a","identifier":"a","session_id":"s","root_issue_id":"a"}\nagent-stack-run: null\n',
-            idempotency_key="linear:a",
-        )
-        self.kanban.notes[card_id] = [SESSION_NOTE + "conv_x"]
+    def test_stop_retry_after_interrupt_failure_archives(self):
+        ids = self._tree_cards(("a",))
+        self.kanban.notes[ids[0]] = [SESSION_NOTE + "conv_x"]
+        omni = FakeOmni(self.calls, fail={"conv_x"})
+        gate = Gate(self.kanban, omni, self.tmp.name)
+        self.assertEqual(self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"}, gate=gate)[0], 502)
+        omni.fail.clear()
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"}, gate=gate)
+        self.assertEqual((status, body), (200, {"stopped": ids}))
+
+    def test_stop_without_omnigent_refuses_when_sessions_exist(self):
+        ids = self._tree_cards(("a",))
+        self.kanban.notes[ids[0]] = [SESSION_NOTE + "conv_x"]
         gate = Gate(self.kanban, None, self.tmp.name)
-        status, body = self.call("POST", f"/v1/cards/{card_id}/stop", body={"reason": "r"}, gate=gate)
-        self.assertEqual((status, body["stopped"]), (200, [card_id]))
-        self.assertEqual(self.calls, [("archive", card_id)])
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"}, gate=gate)
+        self.assertEqual((status, body["stopped"]), (502, []))
+        self.assertIn("conv_x", body["interrupt_errors"][0])
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.kanban.cards[ids[0]]["status"], "blocked")
+
+    def test_stop_without_sessions_archives(self):
+        ids = self._tree_cards(("a",))
+        gate = Gate(self.kanban, None, self.tmp.name)
+        status, body = self.call("POST", f"/v1/cards/{ids[0]}/stop", body={"reason": "r"}, gate=gate)
+        self.assertEqual((status, body), (200, {"stopped": ids}))
 
     def test_events_after_cursor_ordered(self):
         self.kanban.events = [
@@ -328,11 +354,84 @@ class ServerTest(unittest.TestCase):
 
 
 class MainTest(unittest.TestCase):
+    FULL = {
+        "KANBAN_GATE_TOKEN": TOKEN,
+        "OMNIGENT_URL": "http://omnigent",
+        "OMNIGENT_TOKEN_URL": "http://idp/token",
+        "OMNIGENT_CLIENT_ID": "id",
+        "OMNIGENT_CLIENT_SECRET": "secret",
+    }
+
     def test_main_refuses_without_token(self):
         from unittest import mock
 
-        with mock.patch.dict("os.environ", {}, clear=True):
+        with mock.patch.dict("os.environ", {}, clear=True), mock.patch("sys.stderr"):
             self.assertNotEqual(gate_mod.main(), 0)
+
+    def test_main_refuses_when_any_required_env_missing(self):
+        from unittest import mock
+
+        for name in self.FULL:
+            env = {k: v for k, v in self.FULL.items() if k != name}
+            with self.subTest(missing=name), mock.patch.dict("os.environ", env, clear=True), \
+                    mock.patch("sys.stderr"), mock.patch.object(gate_mod, "make_server") as server:
+                self.assertEqual(gate_mod.main(), 2)
+                server.assert_not_called()
+
+    def test_main_serves_with_omnigent_client(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as home, \
+                mock.patch.dict("os.environ", {**self.FULL, "HERMES_HOME": home}, clear=True), \
+                mock.patch.object(gate_mod, "make_server") as server:
+            self.assertEqual(gate_mod.main(), 0)
+        gate = server.call_args.args[0]
+        self.assertIsInstance(gate._omni, gate_mod.OmnigentClient)
+        server.return_value.serve_forever.assert_called_once()
+
+
+class CardJsonTest(unittest.TestCase):
+    def setUp(self):
+        import sqlite3
+
+        self.conn = sqlite3.connect(":memory:")
+        self.addCleanup(self.conn.close)
+        self.conn.execute("CREATE TABLE task_events (id INTEGER PRIMARY KEY, task_id TEXT, kind TEXT, payload TEXT)")
+        self.conn.execute("CREATE TABLE task_runs (id INTEGER PRIMARY KEY, task_id TEXT, outcome TEXT, metadata TEXT)")
+
+    def card(self, status, events, run=None):
+        from types import SimpleNamespace
+
+        for kind, payload in events:
+            self.conn.execute(
+                "INSERT INTO task_events (task_id, kind, payload) VALUES ('t1', ?, ?)", (kind, json.dumps(payload))
+            )
+        kb = SimpleNamespace(latest_run=lambda _conn, _id: run)
+        task = SimpleNamespace(
+            id="t1", status=status, assignee="omnigent-runner", current_run_id=None, block_kind="needs_input",
+            result=None, body="plain",
+        )
+        return gate_mod.HermesKanbanAdmin()._card(self.conn, kb, task)
+
+    def test_triage_card_has_block_reason_from_loop_event(self):
+        card = self.card("triage", [
+            ("blocked", {"reason": "first", "kind": "needs_input"}),
+            ("unblocked", None),
+            ("block_loop_detected", {"reason": "second", "kind": "needs_input", "recurrences": 2}),
+        ])
+        self.assertEqual((card["status"], card["block_kind"], card["block_reason"]), ("triage", "needs_input", "second"))
+        self.assertIsNone(card["outcome"])
+
+    def test_triage_card_prefers_blocked_run_summary(self):
+        from types import SimpleNamespace
+
+        run = SimpleNamespace(id=7, outcome="blocked", summary="BLOCKED{permission}: post-run check: x")
+        card = self.card("triage", [("block_loop_detected", {"reason": "other"})], run=run)
+        self.assertEqual((card["block_reason"], card["outcome"], card["run_id"]), (run.summary, "blocked", 7))
+
+    def test_ready_card_has_no_block_reason(self):
+        card = self.card("ready", [("block_loop_detected", {"reason": "old"}), ("unblocked", None)])
+        self.assertIsNone(card["block_reason"])
 
 
 if __name__ == "__main__":

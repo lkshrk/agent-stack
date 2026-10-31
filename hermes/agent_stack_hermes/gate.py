@@ -22,6 +22,7 @@ MAX_CURSOR = 2**63 - 1
 SOCKET_TIMEOUT = 30
 DEFAULT_EVENTS = 100
 TERMINAL = ("done", "archived")
+BLOCKED_STATUSES = ("blocked", "triage")
 DEFAULT_LISTEN = "0.0.0.0:8091"
 OMNIGENT_ENV = ("OMNIGENT_URL", "OMNIGENT_TOKEN_URL", "OMNIGENT_CLIENT_ID", "OMNIGENT_CLIENT_SECRET")
 
@@ -129,9 +130,9 @@ class HermesKanbanAdmin:
         run = kb.latest_run(conn, task.id)
         outcome = run.outcome if run else None
         reason = None
-        if task.status == "blocked":
+        if task.status in BLOCKED_STATUSES:
             newest = conn.execute(
-                "SELECT kind FROM task_events WHERE task_id = ? AND kind IN ('blocked', 'unblocked', 'gave_up') ORDER BY id DESC LIMIT 1",
+                "SELECT kind FROM task_events WHERE task_id = ? AND kind IN ('blocked', 'block_loop_detected', 'unblocked', 'gave_up') ORDER BY id DESC LIMIT 1",
                 (task.id,),
             ).fetchone()
             if newest and newest[0] == "gave_up":
@@ -165,7 +166,7 @@ class HermesKanbanAdmin:
 
     def _blocked_reason(self, conn, task_id: str) -> str | None:
         row = conn.execute(
-            "SELECT payload FROM task_events WHERE task_id = ? AND kind = 'blocked' ORDER BY id DESC LIMIT 1",
+            "SELECT payload FROM task_events WHERE task_id = ? AND kind IN ('blocked', 'block_loop_detected') ORDER BY id DESC LIMIT 1",
             (task_id,),
         ).fetchone()
         payload = _json_object(row[0]) if row else None
@@ -266,6 +267,8 @@ class Gate:
         cards = self._kanban.tree(root) if root else [card]
         cards = [c for c in cards if c["status"] not in TERMINAL]
         errors = self._interrupt(cards)
+        if errors:
+            return 502, {"stopped": [], "interrupt_errors": errors}
         stopped, archive_errors = [], []
         for c in cards:
             try:
@@ -274,8 +277,6 @@ class Gate:
             except Exception as exc:
                 archive_errors.append(f"{c['id']}: {type(exc).__name__}")
         result = {"stopped": stopped}
-        if errors:
-            result["interrupt_errors"] = errors
         if archive_errors:
             result["archive_errors"] = archive_errors
         return (500 if archive_errors and not stopped else 200), result
@@ -287,9 +288,9 @@ class Gate:
                 session_id = note[len(SESSION_NOTE):].strip() if note.startswith(SESSION_NOTE) else ""
                 if session_id and session_id not in sessions:
                     sessions.append(session_id)
-        errors = []
         if self._omni is None:
-            return errors
+            return [f"{session_id}: no Omnigent client" for session_id in sessions]
+        errors = []
         for session_id in sessions:
             try:
                 self._omni.interrupt(session_id)
@@ -397,21 +398,16 @@ def make_server(gate: Gate, token: str, listen: str) -> http.server.ThreadingHTT
     return http.server.ThreadingHTTPServer((host or "0.0.0.0", int(port)), Handler)
 
 
-def _omnigent_from_env() -> OmnigentClient | None:
-    values = [os.environ.get(name) for name in OMNIGENT_ENV]
-    if not all(values):
-        return None
-    url, token_url, client_id, client_secret = values
-    return OmnigentClient(url, TokenSource(MachineCredentials(token_url, client_id, client_secret)))
-
-
 def main() -> int:
-    token = os.environ.get("KANBAN_GATE_TOKEN")
-    if not token:
-        print("gate: KANBAN_GATE_TOKEN is required", file=sys.stderr)
+    missing = [name for name in ("KANBAN_GATE_TOKEN", *OMNIGENT_ENV) if not os.environ.get(name)]
+    if missing:
+        print(f"gate: {', '.join(missing)} required", file=sys.stderr)
         return 2
+    token = os.environ["KANBAN_GATE_TOKEN"]
+    url, token_url, client_id, client_secret = (os.environ[name] for name in OMNIGENT_ENV)
+    omni = OmnigentClient(url, TokenSource(MachineCredentials(token_url, client_id, client_secret)))
     home = os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")
-    gate = Gate(HermesKanbanAdmin(), _omnigent_from_env(), str(Path(home) / "kanban-gate"))
+    gate = Gate(HermesKanbanAdmin(), omni, str(Path(home) / "kanban-gate"))
     server = make_server(gate, token, os.environ.get("KANBAN_GATE_LISTEN", DEFAULT_LISTEN))
     try:
         server.serve_forever()

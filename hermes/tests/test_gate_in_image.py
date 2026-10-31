@@ -96,6 +96,26 @@ class GateInImageTest(unittest.TestCase):
         self.assertEqual(card["summary"], "done it")
         self.assertIsNone(card["link"])
 
+    def test_reblocked_card_in_triage_keeps_block_info(self):
+        from hermes_cli import kanban_db as kb
+        from hermes_cli.kanban_db_connect import connect_closing
+
+        from agent_stack_hermes.gate import HermesKanbanAdmin
+
+        with connect_closing(self.db) as conn:
+            task_id = kb.create_task(conn, title="x", body="plain body")
+            for reason in ("first question", "second question"):
+                run_id = kb.claim_task(conn, task_id, claimer="h:1").current_run_id
+                self.assertTrue(kb.block_task(conn, task_id, reason=reason, kind="needs_input", expected_run_id=run_id))
+                if reason == "first question":
+                    self.assertTrue(kb.unblock_task(conn, task_id))
+            kinds = [r[0] for r in conn.execute("SELECT kind FROM task_events WHERE task_id = ? ORDER BY id", (task_id,))]
+        self.assertIn("block_loop_detected", kinds)
+        card = HermesKanbanAdmin(self.db).get(task_id)
+        self.assertEqual(
+            (card["status"], card["block_kind"], card["block_reason"]), ("triage", "needs_input", "second question")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
