@@ -227,3 +227,55 @@ func TestSignalNotifierNon2xxIsError(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestGraphQLIssueQuery(t *testing.T) {
+	var query string
+	var vars map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &req)
+		query, vars = req.Query, req.Variables
+		_, _ = w.Write([]byte(`{"data":{"issue":{"id":"i1","identifier":"ROU-1","title":"T","description":null,
+			"parent":{"id":"p1"},"delegate":{"id":"app1"},
+			"team":{"id":"tm1","states":{"nodes":[{"id":"s1","name":"Todo","type":"unstarted"}]}}}}}`))
+	}))
+	defer srv.Close()
+	ts := newTokenServer(t)
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	info, err := g.Issue(context.Background(), "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, frag := range []string{"parent{ id }", "team{ id states{ nodes{ id name type } } }", "delegate{ id }"} {
+		if !strings.Contains(query, frag) {
+			t.Fatalf("query missing %q: %s", frag, query)
+		}
+	}
+	if vars["id"] != "i1" {
+		t.Fatalf("vars = %v", vars)
+	}
+	want := IssueInfo{
+		ID: "i1", Identifier: "ROU-1", Title: "T", ParentID: "p1", DelegateID: "app1", TeamID: "tm1",
+		States: []WorkflowState{{ID: "s1", Name: "Todo", Type: "unstarted"}},
+	}
+	if info.ID != want.ID || info.ParentID != want.ParentID || info.DelegateID != want.DelegateID ||
+		info.TeamID != want.TeamID || info.Description != "" || len(info.States) != 1 || info.States[0] != want.States[0] {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestGraphQLIssueNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"issue":null}}`))
+	}))
+	defer srv.Close()
+	ts := newTokenServer(t)
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	if _, err := g.Issue(context.Background(), "i1"); err == nil {
+		t.Fatal("want error")
+	}
+}

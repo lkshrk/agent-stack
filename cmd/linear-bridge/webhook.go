@@ -27,6 +27,7 @@ type event struct {
 	} `json:"actor"`
 	WebhookTimestamp int64           `json:"webhookTimestamp"`
 	Data             json.RawMessage `json:"data"`
+	UpdatedFrom      json.RawMessage `json:"updatedFrom"`
 	AgentSession     json.RawMessage `json:"agentSession"`
 	AgentActivity    json.RawMessage `json:"agentActivity"`
 }

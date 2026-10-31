@@ -23,6 +23,18 @@ const (
 type linearAPI interface {
 	ArchiveIssue(ctx context.Context, issueID string) error
 	Thought(ctx context.Context, sessionID, body string) error
+	Issue(ctx context.Context, id string) (IssueInfo, error)
+}
+
+type WorkflowState struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type IssueInfo struct {
+	ID, Identifier, Title, Description, ParentID, DelegateID, TeamID string
+	States                                                           []WorkflowState
 }
 
 type tokenSource struct {
@@ -92,6 +104,7 @@ type graphQL struct {
 
 const (
 	archiveMutation = `mutation($id:String!){ issueArchive(id:$id){ success } }`
+	issueQuery      = `query($id:String!){ issue(id:$id){ id identifier title description parent{ id } delegate{ id } team{ id states{ nodes{ id name type } } } } }`
 	thoughtMutation = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: "thought", body:$b}}){ success } }`
 )
 
@@ -103,30 +116,89 @@ func (g *graphQL) Thought(ctx context.Context, sessionID, body string) error {
 	return g.run(ctx, thoughtMutation, map[string]any{"s": sessionID, "b": body}, "agentActivityCreate")
 }
 
+func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
+	raw, err := g.exec(ctx, issueQuery, map[string]any{"id": id})
+	if err != nil {
+		return IssueInfo{}, err
+	}
+	var out struct {
+		Data struct {
+			Issue *struct {
+				ID          string  `json:"id"`
+				Identifier  string  `json:"identifier"`
+				Title       string  `json:"title"`
+				Description *string `json:"description"`
+				Parent      *struct {
+					ID string `json:"id"`
+				} `json:"parent"`
+				Delegate *struct {
+					ID string `json:"id"`
+				} `json:"delegate"`
+				Team struct {
+					ID     string `json:"id"`
+					States struct {
+						Nodes []WorkflowState `json:"nodes"`
+					} `json:"states"`
+				} `json:"team"`
+			} `json:"issue"`
+		} `json:"data"`
+		Errors []struct{ Message string } `json:"errors"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return IssueInfo{}, err
+	}
+	if len(out.Errors) > 0 {
+		return IssueInfo{}, fmt.Errorf("linear graphql error: %s", out.Errors[0].Message)
+	}
+	i := out.Data.Issue
+	if i == nil {
+		return IssueInfo{}, errors.New("linear issue not found")
+	}
+	info := IssueInfo{ID: i.ID, Identifier: i.Identifier, Title: i.Title, TeamID: i.Team.ID, States: i.Team.States.Nodes}
+	if i.Description != nil {
+		info.Description = *i.Description
+	}
+	if i.Parent != nil {
+		info.ParentID = i.Parent.ID
+	}
+	if i.Delegate != nil {
+		info.DelegateID = i.Delegate.ID
+	}
+	return info, nil
+}
+
 func (g *graphQL) run(ctx context.Context, query string, vars map[string]any, field string) error {
+	raw, err := g.exec(ctx, query, vars)
+	if err != nil {
+		return err
+	}
+	return checkResult(raw, field)
+}
+
+func (g *graphQL) exec(ctx context.Context, query string, vars map[string]any) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	payload, err := json.Marshal(map[string]any{"query": query, "variables": vars})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for attempt := 0; ; attempt++ {
 		token, err := g.tokens.Token(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		status, raw, err := g.post(ctx, token, payload)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if status == http.StatusUnauthorized && attempt == 0 {
 			g.tokens.Invalidate()
 			continue
 		}
 		if status != http.StatusOK {
-			return fmt.Errorf("linear graphql returned %d", status)
+			return nil, fmt.Errorf("linear graphql returned %d", status)
 		}
-		return checkResult(raw, field)
+		return raw, nil
 	}
 }
 

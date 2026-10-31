@@ -40,6 +40,11 @@ func main() {
 			recipient: mustEnv("SIGNAL_RECIPIENT"),
 			http:      httpClient,
 		},
+		kanban: &gateClient{
+			base:  mustEnv("KANBAN_GATE_URL"),
+			token: mustEnv("KANBAN_GATE_TOKEN"),
+			http:  httpClient,
+		},
 		ownerID:   mustEnv("LINEAR_OWNER_ID"),
 		appUserID: mustEnv("LINEAR_APP_USER_ID"),
 	}
