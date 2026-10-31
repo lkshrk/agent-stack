@@ -45,6 +45,10 @@ def _doc_file(name: str) -> bool:
     return name in _DOC_NAMES or os.path.splitext(name)[1].lower() in _DOC_EXTS
 
 
+def is_doc_path(path: str) -> bool:
+    return _doc_file(_base(path))
+
+
 def _check_add(args: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if args[:1] == ["--"]:
         args = args[1:]

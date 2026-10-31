@@ -1,0 +1,8 @@
+name: omnigent_runner
+version: "0.1.0"
+description: "agent-stack omnigent-runner lane: the omnigent_run tool runs a card's Omnigent session and closes the card; a pre_tool_call hook denies the Kanban terminal tools."
+author: "agent-stack"
+provides_tools:
+  - omnigent_run
+provides_hooks:
+  - pre_tool_call

@@ -1,6 +1,6 @@
 import unittest
 
-from agent_stack_policies.vcs import docs_vcs
+from agent_stack_policies.vcs import docs_vcs, is_doc_path
 
 from . import tool_call_event
 
@@ -400,3 +400,11 @@ class HeredocTest(unittest.TestCase):
         for command in ("cat <<E\nit's\nE\ngit push origin main #'", "cat <<E\nunterminated"):
             with self.subTest(command=command):
                 self.assertEqual(run(command)["result"], "DENY")
+
+
+class IsDocPathTest(unittest.TestCase):
+    def test_is_doc_path(self):
+        for path in ("docs/a.md", "README", "docs/img/flow.PNG", "CHANGELOG"):
+            self.assertTrue(is_doc_path(path), path)
+        for path in ("src/app.py", "docs/run.sh", "Makefile", ""):
+            self.assertFalse(is_doc_path(path), path)

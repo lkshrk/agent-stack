@@ -1,0 +1,6 @@
+{
+  "status": "DONE",
+  "pr": "https://github.com/acme/shop/pull/42",
+  "branch": "feat/orders-export",
+  "assumptions": ["orders are never empty"]
+}

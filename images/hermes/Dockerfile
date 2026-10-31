@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.10
 ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
 
-FROM ${HERMES_IMAGE}
+FROM ${HERMES_IMAGE} AS image
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.3
 ARG KUBECTL_VERSION=v1.37.1
@@ -36,8 +36,32 @@ COPY --chmod=0644 config/hermes/config.yaml /etc/hermes/config.yaml
 COPY --chmod=0644 config/hermes/SOUL.md /opt/hermes-soul/SOUL.md
 COPY --chmod=0755 config/hermes/snapshot.sh /opt/agent/bin/hermes-snapshot
 COPY --chmod=0755 images/hermes/cont-init.d/03-agent-stack /etc/cont-init.d/03-agent-stack
+COPY --chmod=0755 images/hermes/cont-init.d/04-profiles /etc/cont-init.d/04-profiles
 RUN chmod 0755 /opt/agent/bin/* \
  && git config --system include.path /etc/gitconfig.d/agent
 
+COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/agent_stack_policies/
+COPY hermes/agent_stack_hermes/ /opt/agent-stack/agent_stack_hermes/
+COPY config/hermes/profiles/ /opt/agent-stack/hermes-profiles/
+COPY hermes/plugins/omnigent_runner/ /opt/agent-stack/hermes-profiles/omnigent-runner/plugins/omnigent_runner/
+RUN mkdir /opt/agent-stack/hermes-profiles/delivery/skills /opt/agent-stack/hermes-profiles/omnigent-runner/skills \
+ && chmod -R u=rwX,go=rX /opt/agent-stack \
+ && echo /opt/agent-stack > "$(/opt/hermes/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/agent-stack.pth"
+
 ENV PATH="/opt/agent/bin:${PATH}" \
     HERMES_MANAGED_DIR=/etc/hermes
+
+FROM image AS test
+COPY hermes/ /src/hermes/
+COPY policies/omnigent/ /src/policies/omnigent/
+COPY config/hermes/ /src/config/hermes/
+COPY bundles/ /src/bundles/
+COPY config/omnigent/ /src/config/omnigent/
+COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
+WORKDIR /src
+RUN AGENT_STACK_IN_IMAGE=1 /opt/hermes/.venv/bin/python -B -m unittest discover -s hermes/tests -t hermes -v
+# Its AGENT_STACK_IN_IMAGE tests need the Omnigent image; they run in images/omnigent-server.
+RUN /opt/hermes/.venv/bin/python -B -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
+
+# The default target is the published image, without the test stage.
+FROM image

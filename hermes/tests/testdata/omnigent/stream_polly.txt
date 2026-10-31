@@ -1,0 +1,25 @@
+: connected
+
+event: session.heartbeat
+data: {"sequence_number": null, "type": "session.heartbeat", "server_time": null}
+
+event: session.status
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "conv_000000000000000000000000000000b2", "status": "running", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
+
+event: session.heartbeat
+data: {"sequence_number": null, "type": "session.heartbeat", "server_time": "2026-10-31T09:05:00Z"}
+
+event: response.output_item.done
+data: {"sequence_number": null, "type": "response.output_item.done", "item": {"id": "msg_00000000000000000000000000000003", "response_id": "resp_22222222222222222222222222222222", "type": "message", "status": "completed", "created_at": 1793437790, "role": "assistant", "content": [{"type": "output_text", "text": "Opened https://github.com/example-org/example-repo/pull/42.\n\n```json\n{\n  \"status\": \"DONE\",\n  \"pr\": \"https://github.com/example-org/example-repo/pull/42\",\n  \"branch\": \"agent/example-1-add-widget\",\n  \"gaps\": [],\n  \"assumptions\": [],\n  \"blocked\": null\n}\n```"}], "model": "polly"}}
+
+event: response.completed
+data: {"sequence_number": null, "type": "response.completed", "response": {"id": "resp_22222222222222222222222222222222", "object": "response", "status": "completed", "model": "polly", "created_at": 1793437205, "completed_at": 1793437790, "output": [{"id": "msg_00000000000000000000000000000003", "response_id": "resp_22222222222222222222222222222222", "type": "message", "status": "completed", "created_at": 1793437790, "role": "assistant", "content": [{"type": "output_text", "text": "Opened https://github.com/example-org/example-repo/pull/42.\n\n```json\n{\n  \"status\": \"DONE\",\n  \"pr\": \"https://github.com/example-org/example-repo/pull/42\",\n  \"branch\": \"agent/example-1-add-widget\",\n  \"gaps\": [],\n  \"assumptions\": [],\n  \"blocked\": null\n}\n```"}], "model": "polly"}], "background": false, "store": true, "usage": null, "previous_response_id": null, "conversation": {"id": "conv_000000000000000000000000000000b2"}, "instructions": null, "reasoning": null, "error": null, "incomplete_details": null}}
+
+event: turn.completed
+data: {"sequence_number": null, "type": "turn.completed", "session_id": "conv_000000000000000000000000000000b2"}
+
+event: session.status
+data: {"sequence_number": null, "type": "session.status", "conversation_id": "conv_000000000000000000000000000000b2", "status": "idle", "response_id": null, "error": null, "background_task_count": null, "background_tasks": null, "blocked_on": null}
+
+data: [DONE]
+

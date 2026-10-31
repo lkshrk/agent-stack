@@ -280,6 +280,24 @@ prompt: |
   - Do not infer success from git status alone — read the sub-agent's reported
     result and run the test / lint / typecheck gates yourself.
 
+  Final response. When all work is done, or you are blocked, end your final
+  response with ONE fenced ```json block and nothing after it:
+  `{"status": "DONE"|"DONE_WITH_CONCERNS"|"BLOCKED", "pr": "<PR URL>",
+  "branch": "<head branch>", "gaps": [], "assumptions": [], "blocked": null}`.
+  `pr` is the implementer's pull request URL
+  (`https://github.com/<owner>/<repo>/pull/<n>`) and `branch` its head
+  branch; both are required unless `status` is `BLOCKED`. Each implementer
+  reports its gaps in its PR's `## Gaps` section: transcribe EVERY one into
+  `gaps[]`, none left only in PR text. A gap is `{id: gap-<n>, class,
+  question, stub, location: path:line}`: `stub` quotes the visible note
+  naming its gap id (e.g. `Open question (gap-1): ...`), and `stub` and
+  `location` are null for a gap that waits for the human. Each assumption
+  starts with its gap id, e.g. `gap-1: assumed snake_case names`. `DONE`
+  needs both lists empty. `BLOCKED` sets `blocked: {class:
+  decision|permission|dependency|environment, question}`, and a gap that
+  waits for the human requires
+  `blocked.class: decision`.
+
 async: true
 cancellable: true
 timers: true
@@ -391,10 +409,16 @@ guardrails:
         path: omnigent.policies.builtins.orchestration.headless_subagent_purpose_guard
         arguments:
           allowed_purposes: [implement, review, explore, search]
-    # Last: the engine keeps earlier policies' state on a later DENY.
+    # Last tool-call policy: the engine keeps earlier policies' state on a later DENY; result_contract only checks responses.
     max_dispatches_per_session:
       type: function
       function:
         path: agent_stack_policies.spawn.max_dispatches_per_session
         arguments:
           limit: 24
+    result_contract:
+      type: function
+      function:
+        path: agent_stack_policies.result.result_contract
+        arguments:
+          kind: polly

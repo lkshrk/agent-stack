@@ -27,6 +27,9 @@ pre-commit:
     policies-tests:
       glob: "policies/omnigent/**"
       run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent
+    hermes-tests:
+      glob: "hermes/**"
+      run: python3 -m unittest discover -s hermes/tests -t hermes
 
 pre-push:
   parallel: true

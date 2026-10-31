@@ -71,5 +71,18 @@ RUN mv /apptoo/server.py /apptoo/server.py.real \
  && test -f /app/venv/.deps_installed \
  && rm -rf /tmp/prebuild /tmp/prebuild.log
 
+# The WebUI reads only HERMES_CONFIG_PATH, without the PA's profile layer, so it gets the PA's merged config.
+COPY config/hermes/profiles/default/config.yaml /tmp/pa-config.yaml
+RUN /app/venv/bin/python - <<'EOF'
+from pathlib import Path
+import hermes_yaml
+from hermes_cli.config import _deep_merge
+managed = Path("/etc/hermes/config.yaml")
+pa = Path("/tmp/pa-config.yaml")
+merged = _deep_merge(hermes_yaml.safe_load(pa.read_text()), hermes_yaml.safe_load(managed.read_text()))
+managed.write_text(hermes_yaml.safe_dump(merged, sort_keys=False, width=2**31 - 1))
+pa.unlink()
+EOF
+
 ENV PATH="/opt/agent/bin:${PATH}" \
     HERMES_MANAGED_DIR=/etc/hermes

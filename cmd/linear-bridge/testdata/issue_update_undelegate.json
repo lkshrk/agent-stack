@@ -1,0 +1,48 @@
+{
+  "_synthetic": "built from Linear's documented webhook schema (no real capture); delegateId absent/null in data, previous value in updatedFrom",
+  "action": "update",
+  "actor": {
+    "id": "86f579dd-3529-498b-b531-56ece905d2cc",
+    "name": "Placeholder Name",
+    "email": "user@example.com",
+    "url": "https://linear.app/example/",
+    "type": "user"
+  },
+  "createdAt": "2026-10-30T09:15:02.114Z",
+  "url": "https://linear.app/example/issue/ROU-698",
+  "type": "Issue",
+  "organizationId": "c6d019c4-7242-448d-8696-1c4d0c617d96",
+  "data": {
+    "id": "c3f4380b-637c-4fd3-9643-1de802f5c79a",
+    "createdAt": "2026-10-26T04:08:55.418Z",
+    "updatedAt": "2026-10-30T09:15:02.114Z",
+    "number": 698,
+    "title": "placeholder title",
+    "priority": 0,
+    "labelIds": [],
+    "teamId": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+    "creatorId": "86f579dd-3529-498b-b531-56ece905d2cc",
+    "stateId": "7511db60-aeb4-48ee-8a5e-f6a1d8660de4",
+    "delegateId": null,
+    "identifier": "ROU-698",
+    "url": "https://linear.app/example/issue/ROU-698",
+    "state": {
+      "id": "7511db60-aeb4-48ee-8a5e-f6a1d8660de4",
+      "color": "#f2c94c",
+      "name": "In Progress",
+      "type": "started"
+    },
+    "team": {
+      "id": "b6a02ec0-3a75-44a7-a36e-01e5231d10f5",
+      "key": "ROU",
+      "name": "Placeholder Name"
+    },
+    "labels": []
+  },
+  "updatedFrom": {
+    "updatedAt": "2026-10-30T09:10:00.000Z",
+    "delegateId": "d01486e2-a31b-43d2-b7b0-4b4dfb44b0eb"
+  },
+  "webhookTimestamp": 1793351702300,
+  "webhookId": "fba557e7-681d-41a0-ad80-235e95123d18"
+}

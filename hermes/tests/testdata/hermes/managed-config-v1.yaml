@@ -1,0 +1,74 @@
+model:
+  provider: custom:litellm
+  default: smart-auto
+
+# The legacy list form, because hermes-webui reads named providers only from custom_providers.
+custom_providers:
+  - name: litellm
+    base_url: http://litellm-proxy.ai.svc.cluster.local:4000/v1
+    api_mode: chat_completions
+    key_env: LITELLM_API_KEY
+    session_affinity_header: x-litellm-session-id
+
+auxiliary:
+  compression:
+    provider: custom:litellm
+    model: anthropic/claude-haiku
+  background_review:
+    enabled: true
+    provider: custom:litellm
+    model: anthropic/claude-haiku
+  title_generation:
+    provider: custom:litellm
+    model: anthropic/claude-haiku
+
+agent:
+  max_turns: 150
+
+delegation:
+  max_concurrent_children: 2
+  max_spawn_depth: 1
+
+memory:
+  provider: openviking
+  write_approval: false
+
+skills:
+  write_approval: false
+  guard_agent_created: true
+
+approvals:
+  mode: smart
+  cron_mode: deny
+  unattended_mode: deny
+
+security:
+  redact_secrets: true
+  allow_lazy_installs: false
+
+terminal:
+  backend: local
+
+mcp_servers:
+  linear_read:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_read
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+    tools:
+      include:
+        - list_issues
+        - get_issue
+        - list_comments
+        - list_projects
+        - get_project
+        - list_teams
+        - list_issue_labels
+        - list_issue_statuses
+  context7:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/context7
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}
+  searxng:
+    url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/searxng
+    headers:
+      x-litellm-api-key: ${LITELLM_API_KEY}

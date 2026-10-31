@@ -1326,6 +1326,25 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(skills, ["plan-architect", "plan-contract", "plan-decompose"])
         self.assertEqual(spec.tools.agents, ["critic"])
 
+    def test_polly_bundle_has_result_contract(self):
+        from omnigent.spec import load
+
+        spec = load(BUNDLES / "polly", expand_env=False)
+        last = agent_policies(spec)[-1]
+        self.assertEqual(last.function.path, "agent_stack_policies.result.result_contract")
+        self.assertEqual(last.function.arguments, {"kind": "polly"})
+
+    def test_planner_prompt_sends_critic_model(self):
+        import yaml
+
+        prompt = yaml.safe_load((BUNDLES / "planner" / "config.yaml").read_text())["prompt"]
+        flat = " ".join(prompt.split())
+        start = flat.index('sys_session_send(agent="critic"')
+        call = flat[start : flat.index(")`", start)]
+        head, _, args = call.partition("args={")
+        self.assertNotIn("model=", head)
+        self.assertIn('model: "anthropic/claude-sonnet"', args)
+
     def test_planner_critic_flags(self):
         import yaml
         from omnigent.spec import load

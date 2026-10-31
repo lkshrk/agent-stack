@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+home="${HERMES_HOME:-/opt/data}"
+[ -d "$home/profiles" ] || install -d -o hermes -g hermes "$home/profiles"
+for name in delivery omnigent-runner; do
+  [ -d "$home/profiles/$name" ] || install -d -o hermes -g hermes "$home/profiles/$name"
+done
