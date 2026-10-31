@@ -322,3 +322,53 @@ func TestNewBlockReasonReprojectsAndAlerts(t *testing.T) {
 		t.Fatalf("activities=%d msgs=%q", len(l.activities), n.msgs)
 	}
 }
+
+func TestOutageDoesNotSkipCards(t *testing.T) {
+	k := &projKanban{
+		events: []CardEvent{{ID: 1, CardID: "a"}, {ID: 2, CardID: "b"}},
+		cards:  map[string]Card{"a": linkedCard("a", "todo"), "b": linkedCard("b", "todo")},
+	}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErr: errors.New("linear down")}
+	p, n := newProj(k, l)
+	for i := 0; i < 5; i++ {
+		if err := p.tick(context.Background()); err == nil {
+			t.Fatalf("tick %d: want error", i)
+		}
+	}
+	if len(k.setCursor) != 0 || len(n.msgs) != 0 || len(p.fails) != 0 {
+		t.Fatalf("cursor=%v msgs=%q fails=%v", k.setCursor, n.msgs, p.fails)
+	}
+	l.issueErr = nil
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(k.setCursor) != 1 || len(l.states) != 0 && len(l.links) != 2 {
+		t.Fatalf("cursor=%v links=%v", k.setCursor, l.links)
+	}
+}
+
+func TestSkippedCardNotRealertedWhileStalled(t *testing.T) {
+	k := &projKanban{
+		events: []CardEvent{{ID: 1, CardID: "a"}, {ID: 2, CardID: "b"}, {ID: 3, CardID: "c"}},
+		cards:  map[string]Card{"a": linkedCard("a", "todo"), "b": linkedCard("b", "todo"), "c": linkedCard("c", "todo")},
+	}
+	l := &fakeLinear{issue: projIssue("s-prog"), issueErrFor: map[string]error{"iss-a": errors.New("gone")}}
+	p, n := newProj(k, l)
+	for i := 0; i < 2; i++ {
+		_ = p.tick(context.Background())
+	}
+	l.issueErrFor["iss-b"] = errors.New("flaky")
+	k.cards["b"] = linkedCard("b", "ready")
+	if err := p.tick(context.Background()); err == nil {
+		t.Fatal("want error: b is failing")
+	}
+	if len(n.msgs) != 1 {
+		t.Fatalf("msgs = %q", n.msgs)
+	}
+	for i := 0; i < 2; i++ {
+		_ = p.tick(context.Background())
+	}
+	if len(k.setCursor) != 1 || len(n.msgs) != 2 || !strings.Contains(n.msgs[0], "card a") || !strings.Contains(n.msgs[1], "card b") {
+		t.Fatalf("cursor=%v msgs=%q", k.setCursor, n.msgs)
+	}
+}

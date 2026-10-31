@@ -115,6 +115,7 @@ type projector struct {
 	steps       map[string]bool
 	identifiers map[string]string
 	fails       map[string]int
+	skipped     map[string]bool
 	warned      map[string]bool
 }
 
@@ -149,6 +150,9 @@ func (p *projector) tick(ctx context.Context) error {
 	if p.steps == nil {
 		p.steps = map[string]bool{}
 	}
+	if p.skipped == nil {
+		p.skipped = map[string]bool{}
+	}
 	if p.fails == nil {
 		p.fails = map[string]int{}
 	}
@@ -175,30 +179,44 @@ func (p *projector) tick(ctx context.Context) error {
 		return nil
 	}
 	seen := map[string]bool{}
-	var firstErr error
+	errs := map[string]error{}
+	var order []string
+	succeeded := false
 	for _, ev := range events {
 		if seen[ev.CardID] {
 			continue
 		}
 		seen[ev.CardID] = true
-		err := p.project(ctx, ev.CardID)
-		if err == nil {
-			delete(p.fails, ev.CardID)
+		if err := p.project(ctx, ev.CardID); err != nil {
+			errs[ev.CardID] = err
+			order = append(order, ev.CardID)
 			continue
 		}
-		p.fails[ev.CardID]++
-		if p.fails[ev.CardID] < maxCardFailures {
+		succeeded = true
+		delete(p.fails, ev.CardID)
+	}
+	if len(errs) > 0 && !succeeded {
+		return fmt.Errorf("card %s: %w", order[0], errs[order[0]])
+	}
+	var firstErr error
+	for _, id := range order {
+		if p.skipped[id] {
+			continue
+		}
+		p.fails[id]++
+		if p.fails[id] < maxCardFailures {
 			if firstErr == nil {
-				firstErr = fmt.Errorf("card %s: %w", ev.CardID, err)
+				firstErr = fmt.Errorf("card %s: %w", id, errs[id])
 			}
 			continue
 		}
-		delete(p.fails, ev.CardID)
-		ident := p.identifiers[ev.CardID]
+		delete(p.fails, id)
+		p.skipped[id] = true
+		ident := p.identifiers[id]
 		if ident == "" {
 			ident = "unlinked"
 		}
-		msg := fmt.Sprintf("⚠️ projection skipped for card %s (%s): %s", ev.CardID, ident, shortErr(err))
+		msg := fmt.Sprintf("⚠️ projection skipped for card %s (%s): %s", id, ident, shortErr(errs[id]))
 		log.Print("linear-bridge: " + msg)
 		p.alert(msg)
 	}
@@ -210,6 +228,7 @@ func (p *projector) tick(ctx context.Context) error {
 	if err := p.kanban.SetCursor(cctx, cursorName, events[len(events)-1].ID); err != nil {
 		return fmt.Errorf("set cursor: %w", err)
 	}
+	p.skipped = map[string]bool{}
 	return nil
 }
 
