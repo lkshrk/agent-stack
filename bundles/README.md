@@ -1,8 +1,8 @@
 # bundles
 
-Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this directory to `/agents/` in the server image, and the server registers all four through `OMNIGENT_BUILTIN_AGENT_DIRS`, after Omnigent's packaged agents, so our `polly` replaces the packaged one. `OMNIGENT_SEEDED_AGENTS` hides every other packaged agent except the Claude Code and Codex harnesses. Each gets the built-in agent id, so its runner pods carry `omnigent.ai/agent: <name>`, and h-cloud's `agent-github-tokens` policy mounts only that agent's GitHub tokens: `review` for security-review, `review` and `knowledge-ro` for the planner, `code` and `knowledge` for polly and the documenter.
+Omnigent agent bundles. `images/omnigent-server/Dockerfile` copies this directory to `/agents/` in the server image, and the server image registers all four through `OMNIGENT_BUILTIN_AGENT_DIRS`, which Omnigent seeds after its packaged agents. `OMNIGENT_SEEDED_AGENTS` keeps only the Claude Code and Codex harnesses of the packaged agents, so the packaged `polly` and `debby` are not offered. Each gets the built-in agent id, so its runner pods carry `omnigent.ai/agent: <name>`, and h-cloud's `agent-github-tokens` policy mounts only that agent's GitHub tokens: `review` for security-review, `review` and `knowledge-ro` for the planner, `code` and `knowledge` for polly and the documenter.
 
-A bundle's `model` doesn't choose the model of a session started from the Omnigent UI: Omnigent 0.19.1 starts managed sessions on the harness `default_model` from `config/omnigent/config.yaml` (`anthropic-auto` or `openai-auto`), and a different model is selected in the session. Plan 3's session tool will pass each bundle's model explicitly.
+A bundle's `model` doesn't choose the model of a session started from the Omnigent UI: Omnigent (checked on 0.19.1) starts managed sessions on the harness `default_model` from `config/omnigent/config.yaml` (`anthropic-auto` or `openai-auto`), and a different model is selected in the session. Plan 3's session tool will pass each bundle's model explicitly.
 
 | Bundle | Contents |
 | --- | --- |

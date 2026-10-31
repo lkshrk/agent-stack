@@ -3,7 +3,7 @@ ARG OMNIGENT_SERVER_IMAGE=ghcr.io/omnigent-ai/omnigent-server-kubernetes:v0.21.0
 FROM ${OMNIGENT_SERVER_IMAGE} AS image
 
 COPY bundles/ /agents/
-# Extra built-ins seed after the packaged ones, so ours replace the same-named packaged polly.
+# Extra built-ins seed last, so they win over any packaged agent of the same name.
 ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter \
     OMNIGENT_SEEDED_AGENTS=claude-native-ui,codex-native-ui
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
