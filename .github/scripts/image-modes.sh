@@ -7,10 +7,11 @@ inspect=${INSPECT:-docker buildx imagetools inspect}
 modes='{}'
 for image in omnigent-host omnigent-server agent-tools hermes hermes-webui; do
   mode=build
+  changed=$(jq -r --arg image "$image" 'if type == "array" then (index($image) != null | tostring) else error end' \
+    <<<"${CHANGES:-}" 2>/dev/null) || changed=unknown
   # The server bakes the runner tag of its own release into its config, so every release rebuilds it.
-  if [ "$image" != omnigent-server ] && [ -n "${CHANGES:-}" ] && [ -n "${PREVIOUS:-}" ] \
-    && [[ ${VERSION:-} =~ $semver && $PREVIOUS =~ $semver ]] \
-    && ! jq -e --arg image "$image" 'index($image) != null' <<<"$CHANGES" >/dev/null; then
+  if [ "$image" != omnigent-server ] && [ "$changed" = false ] && [ -n "${PREVIOUS:-}" ] \
+    && [[ ${VERSION:-} =~ $semver && $PREVIOUS =~ $semver ]]; then
     if $inspect "$REPOSITORY/$image:${PREVIOUS#v}" >/dev/null 2>&1; then
       mode=retag
     else
