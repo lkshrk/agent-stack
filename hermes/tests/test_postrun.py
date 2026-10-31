@@ -9,7 +9,7 @@ from agent_stack_hermes.postrun import GitHubError, GitHubReader, PullHead, viol
 
 API = "https://api.github.com"
 REPO = "acme/app"
-HEAD = PullHead("feat/x", "acme/app", "main")
+HEAD = PullHead("feat/x", "acme/app", "main", "acme/app", "main")
 
 
 class FakeResponse(io.BytesIO):
@@ -87,16 +87,37 @@ class ViolationsTest(unittest.TestCase):
         self.assertEqual(violations("coder", REPO, self.base, dict(self.base), None, []), [])
 
     def test_fork_head_is_violation(self):
-        pull = PullHead("feat/x", "evil/app", "main")
+        pull = PullHead("feat/x", "evil/app", "main", "acme/app", "main")
         self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR head is not in {REPO}"])
 
     def test_deleted_fork_head_is_violation(self):
-        pull = PullHead("feat/x", "", "main")
+        pull = PullHead("feat/x", "", "main", "acme/app", "main")
         self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR head is not in {REPO}"])
 
     def test_repo_compare_case_insensitive(self):
-        pull = PullHead("feat/x", "Acme/App", "main")
+        pull = PullHead("feat/x", "Acme/App", "main", "ACME/app", "main")
         self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [])
+
+    def test_protected_head_branch_is_violation(self):
+        pull = PullHead("main", "acme/app", "release", "acme/app", "main")
+        after = {**self.base, "refs/heads/main": "z"}
+        self.assertEqual(
+            violations("coder", REPO, self.base, after, pull, []),
+            ["ref moved: refs/heads/main", "PR head is a protected branch: main"],
+        )
+
+    def test_head_equal_base_is_violation(self):
+        pull = PullHead("dev", "acme/app", "dev", "acme/app", "main")
+        before = {**self.base, "refs/heads/dev": "1"}
+        after = {**before, "refs/heads/dev": "2"}
+        self.assertEqual(
+            violations("coder", REPO, before, after, pull, []),
+            ["ref moved: refs/heads/dev", "PR head is a protected branch: dev"],
+        )
+
+    def test_base_repo_elsewhere_is_violation(self):
+        pull = PullHead("feat/x", "acme/app", "main", "other/app", "main")
+        self.assertEqual(violations("coder", REPO, self.base, self.base, pull, []), [f"PR is not in {REPO}"])
 
     def test_documenter_code_file_is_violation(self):
         out = violations("documenter", REPO, self.base, self.base, HEAD, ["README.md", "src/app.py"])
@@ -111,20 +132,31 @@ class ViolationsTest(unittest.TestCase):
 
 class RefsTest(ReaderCase):
     def test_refs_paginates(self):
-        nxt = f'<{API}/repositories/1/git/matching-refs/?page=2>; rel="next", <{API}/x>; rel="last"'
+        nxt = f'<{API}/repositories/1/git/matching-refs/heads?page=2>; rel="next", <{API}/x>; rel="last"'
         r = self.reader(
             [
                 jr([{"ref": "refs/heads/a", "object": {"sha": "1"}}], {"Link": nxt}),
+                jr([{"ref": "refs/heads/b", "object": {"sha": "3"}}]),
                 jr([{"ref": "refs/tags/v1", "object": {"sha": "2"}}]),
             ]
         )
-        self.assertEqual(r.refs(REPO), {"refs/heads/a": "1", "refs/tags/v1": "2"})
-        self.assertEqual(len(self.opener.requests), 2)
-        self.assertIn("/repos/acme/app/git/matching-refs/", self.opener.requests[0].full_url)
-        self.assertIn("page=2", self.opener.requests[1].full_url)
+        self.assertEqual(r.refs(REPO), {"refs/heads/a": "1", "refs/heads/b": "3", "refs/tags/v1": "2"})
+        urls = [q.full_url for q in self.opener.requests]
+        self.assertIn("/repos/acme/app/git/matching-refs/heads", urls[0])
+        self.assertIn("page=2", urls[1])
+        self.assertIn("/repos/acme/app/git/matching-refs/tags", urls[2])
+
+    def test_only_heads_and_tags_returned(self):
+        r = self.reader(
+            [
+                jr([{"ref": "refs/heads/a", "object": {"sha": "1"}}, {"ref": "refs/heads-x/y", "object": {"sha": "9"}}]),
+                jr([{"ref": "refs/tags/v1", "object": {"sha": "2"}}, {"ref": "refs/tags/v2", "object": {"sha": "3"}}]),
+            ]
+        )
+        self.assertEqual(set(r.refs(REPO)), {"refs/heads/a", "refs/tags/v1", "refs/tags/v2"})
 
     def test_request_headers_and_timeout(self):
-        r = self.reader([jr([])])
+        r = self.reader([jr([]), jr([])])
         r.refs(REPO)
         req = self.opener.requests[0]
         self.assertEqual(req.get_header("Authorization"), "Bearer tok1")
@@ -133,12 +165,12 @@ class RefsTest(ReaderCase):
         self.assertTrue(self.opener.timeouts[0])
 
     def test_token_file_reread(self):
-        r = self.reader([jr([]), jr([])])
+        r = self.reader([jr([]), jr([]), jr([]), jr([])])
         r.refs(REPO)
         with open(self.token_file, "w") as fh:
             fh.write("tok2")
         r.refs(REPO)
-        self.assertEqual(self.opener.requests[1].get_header("Authorization"), "Bearer tok2")
+        self.assertEqual(self.opener.requests[2].get_header("Authorization"), "Bearer tok2")
 
     def test_empty_token_raises(self):
         open(self.token_file, "w").close()
@@ -169,6 +201,12 @@ class RefsTest(ReaderCase):
         with self.assertRaises(GitHubError):
             self.reader([FakeResponse(b"<html>")]).refs(REPO)
 
+    def test_missing_status_raises(self):
+        resp = FakeResponse(b"[]")
+        del resp.status
+        with self.assertRaises(GitHubError):
+            self.reader([resp]).refs(REPO)
+
     def test_wrong_shape_raises(self):
         for body in ({"a": 1}, [{"ref": "refs/heads/a"}], [{"ref": "refs/heads/a", "object": {}}], ["x"]):
             with self.subTest(body=body), self.assertRaises(GitHubError):
@@ -177,18 +215,23 @@ class RefsTest(ReaderCase):
 
 class PullTest(ReaderCase):
     def test_pull_parsed(self):
-        body = {"head": {"ref": "feat/x", "repo": {"full_name": "acme/app"}}, "base": {"ref": "main"}}
+        body = {"head": {"ref": "feat/x", "repo": {"full_name": "acme/app"}}, "base": {"ref": "main", "repo": {"full_name": "acme/app", "default_branch": "main"}}}
         got = self.reader([jr(body)]).pull("https://github.com/acme/app/pull/7")
-        self.assertEqual(got, PullHead("feat/x", "acme/app", "main"))
+        self.assertEqual(got, PullHead("feat/x", "acme/app", "main", "acme/app", "main"))
         self.assertTrue(self.opener.requests[0].full_url.endswith("/repos/acme/app/pulls/7"))
 
     def test_deleted_fork_repo_null(self):
-        body = {"head": {"ref": "feat/x", "repo": None}, "base": {"ref": "main"}}
+        body = {"head": {"ref": "feat/x", "repo": None}, "base": {"ref": "main", "repo": {"full_name": "acme/app", "default_branch": "main"}}}
         got = self.reader([jr(body)]).pull("https://github.com/acme/app/pull/7")
         self.assertEqual(got.head_repo, "")
 
+    def test_missing_base_repo_raises(self):
+        body = {"head": {"ref": "x", "repo": {"full_name": "acme/app"}}, "base": {"ref": "main"}}
+        with self.assertRaises(GitHubError):
+            self.reader([jr(body)]).pull("https://github.com/acme/app/pull/7")
+
     def test_bad_url_raises(self):
-        for url in ("", "https://example.com/acme/app/pull/7", "https://github.com/acme/app/issues/7", None):
+        for url in ("https://github.com/acme/../pull/7", "https://github.com/ac_me/app/pull/7", "", "https://example.com/acme/app/pull/7", "https://github.com/acme/app/issues/7", None):
             with self.subTest(url=url), self.assertRaises(GitHubError):
                 self.reader([]).pull(url)
 

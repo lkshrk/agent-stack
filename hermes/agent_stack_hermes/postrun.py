@@ -11,7 +11,8 @@ TRANSPORT_STATUS = 0
 BAD_BODY_STATUS = 502
 MAX_PAGES = 100
 COMPARE_FILE_CAP = 300
-PR_URL = re.compile(r"^https://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)/?$")
+PR_URL = re.compile(r"^https://github\.com/([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)/pull/(\d+)/?$")
+REF_PREFIXES = ("heads", "tags")
 NEXT_LINK = re.compile(r'<([^>]*)>\s*;\s*rel="next"')
 
 RefMap = dict[str, str]
@@ -28,6 +29,8 @@ class PullHead:
     head_ref: str
     head_repo: str
     base_ref: str
+    base_repo: str
+    default_branch: str
 
 
 def _str(value, what: str) -> str:
@@ -63,7 +66,7 @@ class GitHubReader:
         )
         try:
             with self._opener(request, timeout=TIMEOUT_SECONDS) as resp:
-                status = getattr(resp, "status", 200)
+                status = resp.status
                 raw = resp.read()
                 link = resp.headers.get("Link", "") if getattr(resp, "headers", None) else ""
         except urllib.error.HTTPError as exc:
@@ -74,7 +77,7 @@ class GitHubReader:
             finally:
                 exc.close()
             raise GitHubError(f"HTTP {exc.code} {detail}".strip(), exc.code) from None
-        except (OSError, http.client.HTTPException) as exc:
+        except (OSError, http.client.HTTPException, AttributeError) as exc:
             raise GitHubError(f"{type(exc).__name__}: {exc}", TRANSPORT_STATUS) from None
         if not 200 <= status < 300:
             raise GitHubError(f"HTTP {status}", status)
@@ -84,7 +87,13 @@ class GitHubReader:
             raise GitHubError("response body is not JSON") from None
 
     def refs(self, repo: str) -> RefMap:
-        url = f"{self._api}/repos/{repo}/git/matching-refs/?per_page=100"
+        out: RefMap = {}
+        for kind in REF_PREFIXES:
+            out.update(self._refs_under(repo, kind))
+        return out
+
+    def _refs_under(self, repo: str, kind: str) -> RefMap:
+        url = f"{self._api}/repos/{repo}/git/matching-refs/{kind}?per_page=100"
         out: RefMap = {}
         for _ in range(MAX_PAGES):
             body, link = self._get(url)
@@ -93,7 +102,10 @@ class GitHubReader:
             for item in body:
                 if not isinstance(item, dict) or not isinstance(item.get("object"), dict):
                     raise GitHubError("ref entry has the wrong shape")
-                out[_str(item.get("ref"), "ref name")] = _str(item["object"].get("sha"), "ref sha")
+                name = _str(item.get("ref"), "ref name")
+                sha = _str(item["object"].get("sha"), "ref sha")
+                if name.startswith(f"refs/{kind}/"):
+                    out[name] = sha
             match = NEXT_LINK.search(link)
             if not match:
                 return out
@@ -107,6 +119,8 @@ class GitHubReader:
         if not match:
             raise GitHubError(f"unparseable PR URL: {pr_url!r}")
         owner, name, number = match.groups()
+        if name in (".", ".."):
+            raise GitHubError(f"unparseable PR URL: {pr_url!r}")
         body, _ = self._get(f"{self._api}/repos/{owner}/{name}/pulls/{number}")
         if not isinstance(body, dict) or not isinstance(body.get("head"), dict) or not isinstance(body.get("base"), dict):
             raise GitHubError("pull response has the wrong shape")
@@ -118,7 +132,16 @@ class GitHubReader:
             repo_name = _str(head_repo.get("full_name"), "head repo name")
         else:
             raise GitHubError("pull head repo has the wrong shape")
-        return PullHead(_str(head.get("ref"), "head ref"), repo_name, _str(base.get("ref"), "base ref"))
+        base_repo = base.get("repo")
+        if not isinstance(base_repo, dict):
+            raise GitHubError("pull base repo missing")
+        return PullHead(
+            _str(head.get("ref"), "head ref"),
+            repo_name,
+            _str(base.get("ref"), "base ref"),
+            _str(base_repo.get("full_name"), "base repo name"),
+            _str(base_repo.get("default_branch"), "default branch"),
+        )
 
     def changed_files(self, repo: str, base: str, head: str) -> list[str]:
         spec = f"{urllib.parse.quote(base, safe='')}...{urllib.parse.quote(head, safe='')}"
@@ -144,14 +167,19 @@ def violations(
 ) -> list[str]:
     from agent_stack_policies import vcs
 
-    allowed = {"refs/heads/" + pull.head_ref} if pull else set()
+    protected = bool(pull) and pull.head_ref in (pull.base_ref, pull.default_branch)
+    allowed = {"refs/heads/" + pull.head_ref} if pull and not protected else set()
     found = [
         f"ref moved: {ref}"
         for ref in sorted(set(before) | set(after))
         if before.get(ref) != after.get(ref) and ref not in allowed
     ]
+    if pull and protected:
+        found.append(f"PR head is a protected branch: {pull.head_ref}")
     if pull and pull.head_repo.lower() != repo.lower():
         found.append(f"PR head is not in {repo}")
+    if pull and pull.base_repo.lower() != repo.lower():
+        found.append(f"PR is not in {repo}")
     if bundle == "documenter":
         found.extend(f"non-doc file: {path}" for path in files if not vcs.is_doc_path(path))
     return found
