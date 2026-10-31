@@ -1,0 +1,58 @@
+# Read by dorny/paths-filter with predicate-quantifier: some-with-excludes, so a '!' pattern excludes from every filter that includes it.
+ci: &ci
+  - '.github/workflows/ci.yml'
+  - '.github/actions/test-image/**'
+  - '.github/changes.yml'
+  - '!README.md'
+  - '!bundles/README.md'
+  - '!plugins/README.md'
+  - '!cmd/README.md'
+shared: &shared
+  - *ci
+  - '.github/workflows/images.yml'
+  - '.github/workflows/release.yml'
+  - '.github/actions/build-image/**'
+  - '.github/actions/retag-image/**'
+  - '.github/scripts/image-modes.sh'
+  - '.dockerignore'
+go:
+  - *ci
+  - 'cmd/**'
+  - 'go.mod'
+  - 'go.sum'
+policies:
+  - *ci
+  - 'policies/omnigent/**'
+  - 'bundles/**'
+  - 'config/omnigent/**'
+  - 'images/omnigent-host/codex/**'
+omnigent-host:
+  - *shared
+  - 'policies/omnigent/agent_stack_policies/**'
+  - 'images/omnigent-host/**'
+  - '.claude-plugin/**'
+  - '.agents/**'
+  - 'plugins/**'
+omnigent-server:
+  - *shared
+  - 'policies/omnigent/**'
+  - 'bundles/**'
+  - 'config/omnigent/**'
+  - 'images/omnigent-server/**'
+agent-tools:
+  - *shared
+  - 'images/agent-tools/**'
+  - 'cmd/**'
+  - 'go.mod'
+  - 'go.sum'
+hermes:
+  - *shared
+  - 'images/hermes/**'
+  - 'config/hermes/**'
+hermes-webui:
+  - *shared
+  - 'images/hermes-webui/**'
+  - 'images/hermes/bin/**'
+  - 'images/hermes/profile.d/agent-path.sh'
+  - 'images/hermes/gitconfig'
+  - 'config/hermes/config.yaml'

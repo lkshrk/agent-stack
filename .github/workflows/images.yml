@@ -15,21 +15,85 @@ permissions:
   id-token: write
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      modes: ${{ steps.modes.outputs.modes }}
+      previous: ${{ steps.previous.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.version || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Previous release, empty to build everything
+        id: previous
+        if: inputs.version != ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$VERSION^" 2>/dev/null); then
+            {
+              echo "tag=$tag"
+              echo "sha=$(git rev-parse "$tag^{commit}")"
+              echo "head=$(git rev-parse "$VERSION^{commit}")"
+            } >>"$GITHUB_OUTPUT"
+          fi
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        if: steps.previous.outputs.sha != ''
+        with:
+          base: ${{ steps.previous.outputs.sha }}
+          ref: ${{ steps.previous.outputs.head }}
+          filters: .github/changes.yml
+          predicate-quantifier: some-with-excludes
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build changed images, retag unchanged ones
+        id: modes
+        env:
+          CHANGES: ${{ steps.filter.outputs.changes }}
+          PREVIOUS: ${{ steps.previous.outputs.tag }}
+          VERSION: ${{ inputs.version }}
+          REPOSITORY: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          modes=$(.github/scripts/image-modes.sh)
+          echo "modes=$modes" >>"$GITHUB_OUTPUT"
+          jq -r --arg prev "${PREVIOUS:-none}" '"Since \($prev): " + (to_entries | map("\(.key) \(.value)") | join(", "))' <<<"$modes"
+
   runner:
+    needs: plan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.version || github.sha }}
       - uses: ./.github/actions/build-image
+        if: fromJSON(needs.plan.outputs.modes)['omnigent-host'] == 'build'
         with:
           image: omnigent-host
           version: ${{ inputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
           # A constant, unlike a commit time, keeps the flattened base layer's digest across releases of the same base.
           source-date-epoch: "1767225600"
+      - uses: ./.github/actions/retag-image
+        if: fromJSON(needs.plan.outputs.modes)['omnigent-host'] == 'retag'
+        with:
+          image: omnigent-host
+          version: ${{ inputs.version }}
+          previous: ${{ needs.plan.outputs.previous }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build:
+    needs: plan
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,11 +111,19 @@ jobs:
         with:
           ref: ${{ inputs.version || github.sha }}
       - uses: ./.github/actions/build-image
+        if: fromJSON(needs.plan.outputs.modes)[matrix.image] == 'build'
         with:
           image: ${{ matrix.image }}
           version: ${{ inputs.version }}
           token: ${{ secrets.GITHUB_TOKEN }}
           app: ${{ matrix.app }}
+      - uses: ./.github/actions/retag-image
+        if: fromJSON(needs.plan.outputs.modes)[matrix.image] == 'retag'
+        with:
+          image: ${{ matrix.image }}
+          version: ${{ inputs.version }}
+          previous: ${{ needs.plan.outputs.previous }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   # The server image pins the runner of the same release by tag, so it publishes only after the runner did.
   server:
