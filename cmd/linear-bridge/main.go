@@ -24,8 +24,9 @@ func main() {
 	httpClient := &http.Client{Timeout: callTimeout}
 	b := &bridge{
 		linear: &graphQL{
-			endpoint: graphQLURL,
-			http:     httpClient,
+			endpoint:    graphQLURL,
+			cardURLBase: os.Getenv("KANBAN_CARD_URL_BASE"),
+			http:        httpClient,
 			tokens: &tokenSource{
 				tokenURL:     tokenURL,
 				clientID:     mustEnv("LINEAR_APP_CLIENT_ID"),
@@ -39,6 +40,11 @@ func main() {
 			number:    mustEnv("SIGNAL_NUMBER"),
 			recipient: mustEnv("SIGNAL_RECIPIENT"),
 			http:      httpClient,
+		},
+		kanban: &gateClient{
+			base:  mustEnv("KANBAN_GATE_URL"),
+			token: mustEnv("KANBAN_GATE_TOKEN"),
+			http:  newGateHTTPClient(),
 		},
 		ownerID:   mustEnv("LINEAR_OWNER_ID"),
 		appUserID: mustEnv("LINEAR_APP_USER_ID"),
@@ -60,6 +66,14 @@ func main() {
 	})
 	srv := newServer(listen, mux)
 
+	projCtx, stopProject := context.WithCancel(context.Background())
+	projDone := make(chan struct{})
+	proj := newProjector(b.kanban, b.linear, b.notify)
+	go func() {
+		defer close(projDone)
+		proj.run(projCtx)
+	}()
+
 	workerDone := make(chan struct{})
 	abort := make(chan struct{})
 	go func() {
@@ -78,6 +92,7 @@ func main() {
 		log.Fatal(err)
 	case <-stop:
 	}
+	stopProject()
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
@@ -90,6 +105,13 @@ func main() {
 	case <-workerDone:
 	case <-ctx.Done():
 		log.Print("linear-bridge: shutdown grace expired with events still queued")
+	}
+	if !b.waitStops(ctx, shutdownGrace) {
+		log.Print("linear-bridge: shutdown grace expired with owner stops in flight")
+	}
+	select {
+	case <-projDone:
+	case <-ctx.Done():
 	}
 }
 

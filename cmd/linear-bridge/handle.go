@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
+	"time"
+	"unicode/utf8"
 )
 
 type bridge struct {
 	linear    linearAPI
 	notify    notifier
+	kanban    kanbanAPI
 	ownerID   string
 	appUserID string
+	stopWG    sync.WaitGroup
 }
 
 func (b *bridge) handle(ctx context.Context, ev event) error {
@@ -20,6 +25,8 @@ func (b *bridge) handle(ctx context.Context, ev event) error {
 		return b.auditIssue(ctx, ev)
 	case ev.Type == "AgentSessionEvent" && ev.Action == "created":
 		return b.ackSession(ctx, ev)
+	case ev.Type == "Issue" && ev.Action == "update":
+		return b.issueUpdated(ctx, ev)
 	case ev.Type == "AgentSessionEvent" && ev.Action == "prompted":
 		b.logPrompted(ev)
 	}
@@ -57,6 +64,7 @@ func (b *bridge) ackSession(ctx context.Context, ev event) error {
 	var s struct {
 		ID        string `json:"id"`
 		CreatorID string `json:"creatorId"`
+		IssueID   string `json:"issueId"`
 	}
 	if err := json.Unmarshal(ev.AgentSession, &s); err != nil {
 		return fmt.Errorf("agent session: %w", err)
@@ -64,11 +72,183 @@ func (b *bridge) ackSession(ctx context.Context, ev event) error {
 	if s.ID == "" {
 		return fmt.Errorf("agent session has no id")
 	}
-	body := "Only the workspace owner can start work for this agent."
-	if b.ownerID != "" && s.CreatorID == b.ownerID {
-		body = "Received. Checking readiness."
+	if b.ownerID == "" || s.CreatorID != b.ownerID {
+		return b.linear.Thought(ctx, s.ID, "Only the workspace owner can start work for this agent.")
 	}
-	return b.linear.Thought(ctx, s.ID, body)
+	return b.startWork(ctx, s.ID, s.IssueID)
+}
+
+func (b *bridge) startWork(ctx context.Context, sessionID, issueID string) error {
+	const ack = "Received. Checking readiness."
+	issueCtx, cancel := context.WithTimeout(ctx, cardTimeout)
+	issue, err := b.linear.Issue(issueCtx, issueID)
+	cancel()
+	if err != nil {
+		return b.queueFailed(ctx, sessionID, issueID, fmt.Errorf("issue lookup: %w", err))
+	}
+	if b.appUserID == "" || issue.DelegateID != b.appUserID {
+		return b.linear.Thought(ctx, sessionID, ack)
+	}
+	if issue.ParentID != "" {
+		return b.linear.Thought(ctx, sessionID, "Sub-issues start from their root issue.")
+	}
+	cardCtx, cancel := context.WithTimeout(ctx, cardTimeout)
+	_, err = b.kanban.CreateRootCard(cardCtx, RootCardRequest{
+		IssueID:     issue.ID,
+		Identifier:  issue.Identifier,
+		Title:       issue.Title,
+		Description: issue.Description,
+		SessionID:   sessionID,
+	})
+	cancel()
+	if err != nil {
+		return b.queueFailed(ctx, sessionID, issue.Identifier, err)
+	}
+	return b.linear.Thought(ctx, sessionID, ack)
+}
+
+func (b *bridge) queueFailed(ctx context.Context, sessionID, issueRef string, cause error) error {
+	thoughtErr := b.linear.Thought(ctx, sessionID, "Could not queue this issue; the owner was notified.")
+	b.alert(fmt.Sprintf("linear-bridge: could not queue %s on Kanban: %v", issueRef, cause))
+	if thoughtErr != nil {
+		return thoughtErr
+	}
+	return cause
+}
+
+func (b *bridge) alert(msg string) {
+	ctx, cancel := context.WithTimeout(context.Background(), notifyTimeout)
+	defer cancel()
+	if err := b.notify.Notify(ctx, msg); err != nil {
+		log.Printf("linear-bridge: notify failed: %v", err)
+	}
+}
+
+func (b *bridge) stopAsync(identifier, cardID, reason string) {
+	b.stopWG.Add(1)
+	go func() {
+		defer b.stopWG.Done()
+		b.stopCard(identifier, cardID, reason)
+	}()
+}
+
+func (b *bridge) waitStops(ctx context.Context, d time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		b.stopWG.Wait()
+		close(done)
+	}()
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+	case <-t.C:
+	}
+	return false
+}
+
+func (b *bridge) stopCard(identifier, cardID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), stopTimeout)
+	defer cancel()
+	if err := b.kanban.StopCard(ctx, cardID, reason); err != nil {
+		b.alert(fmt.Sprintf("🔴 %s: stop failed: %s", identifier, truncate(err.Error(), 400)))
+	}
+}
+
+func shortErr(err error) string { return truncate(err.Error(), 200) }
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
+func (b *bridge) stopNotApplied(identifier string, err error) error {
+	b.alert(fmt.Sprintf("🔴 %s: owner stop not applied: %s", identifier, shortErr(err)))
+	return err
+}
+
+func (b *bridge) issueUpdated(ctx context.Context, ev event) error {
+	if b.ownerID == "" || ev.Actor == nil || ev.Actor.ID != b.ownerID {
+		return nil
+	}
+	var d struct {
+		ID         string `json:"id"`
+		Identifier string `json:"identifier"`
+		DelegateID string `json:"delegateId"`
+		StateID    string `json:"stateId"`
+	}
+	if err := json.Unmarshal(ev.Data, &d); err != nil {
+		return fmt.Errorf("issue data: %w", err)
+	}
+	var from map[string]json.RawMessage
+	if len(ev.UpdatedFrom) > 0 {
+		if err := json.Unmarshal(ev.UpdatedFrom, &from); err != nil {
+			return fmt.Errorf("issue updatedFrom: %w", err)
+		}
+	}
+	if d.ID == "" {
+		return nil
+	}
+	_, delegateChanged := from["delegateId"]
+	_, stateChanged := from["stateId"]
+	switch {
+	case delegateChanged && d.DelegateID == "":
+		card, found, err := b.cardFor(ctx, d.ID)
+		if err != nil {
+			return b.stopNotApplied(d.Identifier, err)
+		}
+		if found {
+			b.stopAsync(d.Identifier, card.ID, "owner: un-delegated")
+		}
+	case stateChanged:
+		card, found, err := b.cardFor(ctx, d.ID)
+		if err != nil {
+			return b.stopNotApplied(d.Identifier, err)
+		}
+		if !found {
+			return nil
+		}
+		switch card.Status {
+		case "ready", "running", "blocked":
+		default:
+			return nil
+		}
+		issueCtx, cancel := context.WithTimeout(ctx, cardTimeout)
+		issue, err := b.linear.Issue(issueCtx, d.ID)
+		cancel()
+		if err != nil {
+			return b.stopNotApplied(d.Identifier, fmt.Errorf("issue lookup: %w", err))
+		}
+		parked := card.Status == "blocked" && card.RunID == 0
+		known := false
+		for _, st := range issue.States {
+			if st.ID != d.StateID {
+				continue
+			}
+			known = true
+			if st.Type == "backlog" || st.Type == "canceled" || (st.Type == "unstarted" && !parked) {
+				b.stopAsync(d.Identifier, card.ID, "owner: moved to "+st.Name)
+				return nil
+			}
+		}
+		if !known {
+			log.Printf("linear-bridge: issue %s moved to unknown state %s", d.ID, d.StateID)
+		}
+	}
+	return nil
+}
+
+func (b *bridge) cardFor(ctx context.Context, issueID string) (Card, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, cardTimeout)
+	defer cancel()
+	return b.kanban.CardByIssue(ctx, issueID)
 }
 
 func (b *bridge) logPrompted(ev event) {

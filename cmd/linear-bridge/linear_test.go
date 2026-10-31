@@ -227,3 +227,118 @@ func TestSignalNotifierNon2xxIsError(t *testing.T) {
 		t.Fatal("want error")
 	}
 }
+
+func TestGraphQLIssueQuery(t *testing.T) {
+	var query string
+	var vars map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &req)
+		query, vars = req.Query, req.Variables
+		_, _ = w.Write([]byte(`{"data":{"issue":{"id":"i1","identifier":"ROU-1","title":"T","description":null,
+			"parent":{"id":"p1"},"delegate":{"id":"app1"},
+			"team":{"id":"tm1","states":{"nodes":[{"id":"s1","name":"Todo","type":"unstarted"}]}}}}}`))
+	}))
+	defer srv.Close()
+	ts := newTokenServer(t)
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	info, err := g.Issue(context.Background(), "i1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, frag := range []string{"parent{ id }", "team{ id states{ nodes{ id name type } } }", "delegate{ id }"} {
+		if !strings.Contains(query, frag) {
+			t.Fatalf("query missing %q: %s", frag, query)
+		}
+	}
+	if vars["id"] != "i1" {
+		t.Fatalf("vars = %v", vars)
+	}
+	want := IssueInfo{
+		ID: "i1", Identifier: "ROU-1", Title: "T", ParentID: "p1", DelegateID: "app1", TeamID: "tm1",
+		States: []WorkflowState{{ID: "s1", Name: "Todo", Type: "unstarted"}},
+	}
+	if info.ID != want.ID || info.ParentID != want.ParentID || info.DelegateID != want.DelegateID ||
+		info.TeamID != want.TeamID || info.Description != "" || len(info.States) != 1 || info.States[0] != want.States[0] {
+		t.Fatalf("info = %+v", info)
+	}
+}
+
+func TestGraphQLIssueNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"issue":null}}`))
+	}))
+	defer srv.Close()
+	ts := newTokenServer(t)
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	if _, err := g.Issue(context.Background(), "i1"); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+func TestGraphQLActivityTypes(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"agentActivityCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	for _, typ := range []string{"thought", "elicitation", "response", "error"} {
+		if err := g.Activity(context.Background(), "sess-1", Activity{typ, "b-" + typ}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, typ := range []string{"thought", "elicitation", "response", "error"} {
+		c := (*calls)[i]
+		content, _ := c.req.Variables["content"].(map[string]any)
+		if c.req.Variables["s"] != "sess-1" || content["type"] != typ || content["body"] != "b-"+typ {
+			t.Fatalf("call %d = %+v", i, c.req.Variables)
+		}
+	}
+}
+
+func TestGraphQLProjectionMutations(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"issueUpdate":{"success":true},"commentCreate":{"success":true},"attachmentCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
+	ctx := context.Background()
+	for _, err := range []error{g.SetState(ctx, "i", "s"), g.Comment(ctx, "i", "b"), g.LinkCard(ctx, "i", "c1")} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, want := range []string{"issueUpdate", "commentCreate", "attachmentCreate"} {
+		if !strings.Contains((*calls)[i].req.Query, want) {
+			t.Fatalf("call %d query = %s", i, (*calls)[i].req.Query)
+		}
+	}
+	if (*calls)[2].req.Variables["t"] != "Kanban card c1" {
+		t.Fatalf("vars = %v", (*calls)[2].req.Variables)
+	}
+}
+
+func TestGraphQLLinkCardURLBase(t *testing.T) {
+	ts := newTokenServer(t)
+	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
+		_, _ = fmt.Fprint(w, `{"data":{"attachmentCreate":{"success":true}}}`)
+	})
+	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient, cardURLBase: "https://kanban.example/"}
+	if err := g.LinkCard(context.Background(), "i", "c1"); err != nil {
+		t.Fatal(err)
+	}
+	g.cardURLBase = ""
+	if err := g.LinkCard(context.Background(), "i", "c1"); err != nil {
+		t.Fatal(err)
+	}
+	if u := (*calls)[0].req.Variables["u"]; u != "https://kanban.example/cards/c1" {
+		t.Fatalf("url = %v", u)
+	}
+	if u := (*calls)[1].req.Variables["u"]; u != "kanban://card/c1" {
+		t.Fatalf("url = %v", u)
+	}
+}
