@@ -270,10 +270,16 @@ def violations(
     protected = {"refs/heads/" + name for name in heads}
     found = []
     for ref in sorted(set(before) | set(after)):
-        if before.get(ref) != after.get(ref) and (ref.startswith("refs/tags/") or ref in protected):
-            reason = _moved_by(ref, _actors(ref, after, activity, release), agents) if agents else f"ref moved: {ref}"
-            if reason:
-                found.append(reason)
+        if before.get(ref) == after.get(ref) or not (ref.startswith("refs/tags/") or ref in protected):
+            continue
+        if ref.startswith("refs/tags/") and ref in before and ref in after:
+            reason = f"tag moved: {ref}"
+        elif agents:
+            reason = _moved_by(ref, _actors(ref, after, activity, release), agents)
+        else:
+            reason = f"ref moved: {ref}"
+        if reason:
+            found.append(reason)
     if pull and pull.head_ref in heads:
         found.append(f"PR head is a protected branch: {pull.head_ref}")
     if pull and pull.head_repo.lower() != repo.lower():

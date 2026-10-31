@@ -127,9 +127,17 @@ class ViolationsTest(unittest.TestCase):
         self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, releases=releases), [])
         self.assertEqual((releases.asked, self.lookup.asked), (["v2"], []))
 
-    def test_agent_release_on_moved_tag_is_violation(self):
-        out = self.check({**self.base, "refs/tags/v1": "t2"}, releases=Releases(v1="H-Cloud-NPA[bot]"))
-        self.assertEqual(out, ["ref moved by agent: refs/tags/v1"])
+    def test_agent_release_on_created_tag_is_violation(self):
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2="H-Cloud-NPA[bot]"))
+        self.assertEqual(out, ["ref moved by agent: refs/tags/v2"])
+
+    def test_moved_tag_is_violation_despite_release(self):
+        releases = Releases(v1="github-actions[bot]")
+        for agents in (AGENTS, frozenset()):
+            with self.subTest(agents=agents):
+                out = self.check({**self.base, "refs/tags/v1": "t2"}, releases=releases, agents=agents)
+                self.assertEqual(out, ["tag moved: refs/tags/v1"])
+        self.assertEqual((releases.asked, self.lookup.asked), ([], []))
 
     def test_tag_without_release_is_unattributed(self):
         lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]"))
@@ -155,7 +163,7 @@ class ViolationsTest(unittest.TestCase):
     def test_protected_move_without_activity_is_unattributed(self):
         after = {k: v for k, v in self.base.items() if k != "refs/heads/main"} | {"refs/tags/v1": "t2"}
         self.assertEqual(
-            self.check(after), ["ref moved (unattributed): refs/heads/main", "ref moved (unattributed): refs/tags/v1"]
+            self.check(after), ["ref moved (unattributed): refs/heads/main", "tag moved: refs/tags/v1"]
         )
 
     def test_null_actor_is_unattributed(self):
