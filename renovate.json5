@@ -115,6 +115,11 @@
       groupName: 'hermes runtime',
     },
     {
+      description: 'Runner and server images must ship the same Omnigent release, which ci enforces; bump them together',
+      matchDepNames: ['ghcr.io/omnigent-ai/omnigent-host', 'ghcr.io/omnigent-ai/omnigent-server-kubernetes'],
+      groupName: 'omnigent runtime',
+    },
+    {
       description: 'Release assets are pinned by checksum in the Dockerfile; the PR must update the SHA256 too',
       matchDepNames: ['rtk-ai/rtk', 'DeusData/codebase-memory-mcp'],
       addLabels: ['checksum-update'],
