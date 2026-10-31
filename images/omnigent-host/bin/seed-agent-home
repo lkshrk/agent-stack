@@ -9,7 +9,8 @@ render() {
       -e "s#\${OPENAI_BASE_URL}#${base}/v1#g" "$1" >"$2"
 }
 
-cp -a --remove-destination /opt/agent/claude-home/.claude "$HOME/"
+mkdir -p "$HOME/.claude/plugins"
+cp -a --remove-destination /opt/agent/claude-home/.claude/plugins/. "$HOME/.claude/plugins/"
 mkdir -p "$HOME/.codex"
 cp /opt/agent/codex-home/AGENTS.md "$HOME/.codex/AGENTS.md"
 cp /opt/agent/codex-home/security-review.config.toml "$HOME/.codex/security-review.config.toml"
@@ -22,7 +23,6 @@ if [ -z "$base" ]; then
   echo "seed-agent-home: LITELLM_BASE_URL unset; skipping gateway config for Claude Code, Codex and omp" >&2
   exit 0
 fi
-render /opt/agent/claude-home/.claude.json.tmpl "$HOME/.claude.json"
 render /opt/agent/codex-home/config.toml.tmpl "$HOME/.codex/config.toml"
 render /opt/agent/omp-home/models.yml.tmpl "$HOME/.omp/agent/models.yml"
 render /opt/agent/omp-home/mcp.json.tmpl "$HOME/.omp/agent/mcp.json"

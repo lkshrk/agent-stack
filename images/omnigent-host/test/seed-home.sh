@@ -18,7 +18,7 @@ expect() {
 
 seeded() {
   local f
-  for f in .claude/settings.json .agents/skills .claude.json .codex/AGENTS.md .codex/config.toml \
+  for f in .claude/plugins/installed_plugins.json .agents/skills .codex/AGENTS.md .codex/config.toml \
     .omp/agent/config.yml .omp/agent/models.yml .omp/agent/mcp.json; do
     [[ -e $1/$f ]] || { echo "missing $f"; return; }
   done
