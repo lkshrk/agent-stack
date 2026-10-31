@@ -75,6 +75,15 @@ class PluginTest(unittest.TestCase):
         self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("blocked", False, None))
         self.assertIn("not configured", out["reason"])
 
+    def test_handler_error_reports_running_without_retry(self):
+        env = {name: "x" for name in runner.REQUIRED_ENV}
+        boom = mock.Mock(side_effect=OSError("database is locked"))
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
+                mock.patch.object(runner, "run_slice", boom):
+            out = json.loads(runner.handle({}))
+        self.assertEqual((out["state"], out["call_again"]), ("running", False))
+        self.assertIn("database is locked", out["reason"])
+
     def test_handler_without_config_blocks_the_card(self):
         RecordingKanban.blocks = []
         env = {"HERMES_KANBAN_TASK": "t_1", "HERMES_KANBAN_RUN_ID": "7", "HERMES_KANBAN_CLAIM_LOCK": "h:1"}

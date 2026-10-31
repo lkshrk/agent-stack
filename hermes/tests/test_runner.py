@@ -8,7 +8,7 @@ from agent_stack_hermes import runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent
 from agent_stack_hermes.postrun import GitHubError, PullHead
-from agent_stack_hermes.runspec import LinearLink, RunSpec, render_card_body
+from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
 POLLY = json.loads((DATA / "snapshot_polly.json").read_text())
@@ -51,13 +51,16 @@ class Clock:
 
 
 class FakeKanban:
-    def __init__(self, log, body, comments=(), ok=True):
-        self.log, self.body, self.comments, self.ok = log, body, list(comments), ok
+    def __init__(self, log, body, comments=(), ok=True, note_fail=None):
+        self.log, self.body, self.comments, self.ok, self.note_fail = log, body, list(comments), ok, note_fail
 
     def card(self, task_id):
         return CardView(task_id, "running", self.body, 7, tuple(self.comments))
 
     def note(self, task_id, body):
+        if self.note_fail and body.startswith(self.note_fail):
+            self.log.append(("note_failed", body))
+            raise OSError("database is locked")
         self.comments.append(body)
         self.log.append(("note", body))
 
@@ -75,9 +78,13 @@ class FakeKanban:
 
 
 class FakeOmnigent:
-    def __init__(self, log, clock, snap, events=(DONE_EVENT,), step=0, prs=(), fail=None):
+    def __init__(self, log, clock, snap, events=(DONE_EVENT,), step=0, prs=(), fail=None, sessions=()):
         self.log, self.clock, self.snap, self.events, self.step = log, clock, snap, events, step
-        self.prs, self.fail = list(prs), fail or {}
+        self.prs, self.fail, self.sessions = list(prs), fail or {}, list(sessions)
+
+    def list_sessions(self, agent_id=None):
+        self._call("list_sessions", agent_id)
+        return copy.deepcopy(self.sessions)
 
     def _call(self, name, *args):
         self.log.append((name, *args))
@@ -140,8 +147,8 @@ class RunnerTest(unittest.TestCase):
         self.clock = Clock()
 
     def run_slice(self, snap, comments=RECORDED, bundle="polly", body=None, ok=True, env=ENV, refs=None,
-                  gh_fail=None, files=(), slice_seconds=runner.SLICE_SECONDS, **omni):
-        self.kanban = FakeKanban(self.log, card_body(bundle) if body is None else body, comments, ok)
+                  gh_fail=None, files=(), slice_seconds=runner.SLICE_SECONDS, note_fail=None, **omni):
+        self.kanban = FakeKanban(self.log, card_body(bundle) if body is None else body, comments, ok, note_fail)
         self.omni = FakeOmnigent(self.log, self.clock, snap, **omni)
         if refs is None:
             refs = (AFTER,) if comments else (BEFORE, AFTER)
@@ -211,11 +218,15 @@ class RunnerTest(unittest.TestCase):
         self.assertFalse(self.terminal_writes())
 
     def test_stream_end_reconciles_from_snapshot(self):
-        out = self.run_slice(running(), events=(DONE_EVENT, StreamEvent("session.status", {"status": "idle"})))
-        self.assertTrue(out["call_again"])
-        self.assertGreaterEqual(len(self.calls("snapshot")), 1)
-        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
-        self.assertFalse(self.terminal_writes())
+        for first in (DONE_EVENT, StreamEvent("session.status", {"status": "idle"})):
+            with self.subTest(event=first.name):
+                self.log.clear()
+                self.clock.t = T0
+                out = self.run_slice(running(), events=(first, OmnigentError(0, "never read")))
+                self.assertTrue(out["call_again"])
+                self.assertGreaterEqual(len(self.calls("snapshot")), 1)
+                self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
+                self.assertFalse(self.terminal_writes())
 
     def test_stream_error_reconciles_from_snapshot(self):
         out = self.run_slice(running(), events=(OmnigentError(0, "reset"),))
@@ -329,6 +340,49 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(running(), comments=(), fail={"create": OmnigentError(500, "boom")})
         self.assertEqual([c[1].split(":")[0] for c in self.calls("note")], ["refs-before"])
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
+
+    def test_refs_note_without_session_recovers_by_label(self):
+        sessions = [{"id": "conv_other", "labels": {"agent-stack/card": "t_9"}},
+                    {"id": "conv_found", "labels": {"agent-stack/card": "t_1"}},
+                    {"id": "conv_bare"}]
+        out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
+        self.assertEqual(self.calls("list_sessions"), [("list_sessions", builtin_agent_id("polly"))])
+        self.assertFalse(self.calls("create") + self.calls("refs"))
+        self.assertEqual([c[1] for c in self.calls("note")], [runner.SESSION_NOTE + "conv_found"])
+        self.assertEqual(self.calls("stream")[0][1], "conv_found")
+        self.assertEqual((out["session_id"], out["call_again"]), ("conv_found", True))
+
+    def test_refs_note_without_session_creates_with_original_baseline(self):
+        moved = {**AFTER, "refs/tags/v1": "d" * 40}
+        out = self.run_slice(snapshot(), comments=RECORDED[:1], refs=(moved,))
+        self.assertEqual(len(self.calls("create")), 1)
+        self.assertEqual(self.calls("refs"), [("refs", REPO)])
+        self.assertEqual([c[1] for c in self.calls("note")], [runner.SESSION_NOTE + "conv_new"])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/tags/v1")
+
+    def test_earliest_refs_note_is_the_baseline(self):
+        later = {**BEFORE, "refs/tags/v1": "d" * 40}
+        comments = (runner.REFS_NOTE + json.dumps(BEFORE), runner.REFS_NOTE + json.dumps(later), RECORDED[1])
+        out = self.run_slice(snapshot(), comments=comments, refs=({**AFTER, "refs/tags/v1": "d" * 40},))
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved: refs/tags/v1")
+
+    def test_multiple_sessions_for_card_blocks_environment(self):
+        sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
+        out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
+        self.assertFalse(self.calls("create") + self.calls("note") + self.calls("stream"))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: multiple sessions for this card")
+        self.assertIsNone(out["session_id"])
+
+    def test_session_list_error_blocks_environment(self):
+        out = self.run_slice(running(), comments=RECORDED[:1], fail={"list_sessions": OmnigentError(503)})
+        self.assertFalse(self.calls("create"))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: OmnigentError")
+
+    def test_session_note_failure_interrupts(self):
+        out = self.run_slice(running(), comments=(), note_fail=runner.SESSION_NOTE)
+        self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_new")])
+        self.assertFalse(self.calls("stream") + self.calls("share"))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: OSError: database is locked")
 
     def test_unparseable_refs_note_blocks_environment(self):
         comments = (runner.REFS_NOTE + "{not json", runner.SESSION_NOTE + "conv_old")

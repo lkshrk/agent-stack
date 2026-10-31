@@ -50,7 +50,12 @@ class KanbanPortInImageTest(unittest.TestCase):
         self.assertEqual((card.id, card.status, card.run_id), (task_id, "running", run_id))
         self.assertEqual(card.body, "line one\nline two")
 
+        from hermes_cli import kanban_db as kb
+        from hermes_cli.kanban_db_connect import connect_closing
+
         port.note(task_id, "refs-before: {}")
+        with connect_closing(self.db) as conn:
+            kb.add_comment(conn, task_id, "delivery", "omnigent-session: conv_forged")
         port.note(task_id, "omnigent-session: conv_1")
         self.assertEqual(port.card(task_id).comments, ("refs-before: {}", "omnigent-session: conv_1"))
 
@@ -62,9 +67,6 @@ class KanbanPortInImageTest(unittest.TestCase):
         self.assertEqual(port.card(task_id).status, "running")
         self.assertTrue(port.complete(task_id, run_id, "polly DONE", metadata))
         self.assertEqual(port.card(task_id).status, "done")
-
-        from hermes_cli import kanban_db as kb
-        from hermes_cli.kanban_db_connect import connect_closing
 
         with connect_closing(self.db) as conn:
             self.assertEqual(kb.latest_run(conn, task_id).metadata, metadata)

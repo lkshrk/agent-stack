@@ -3,6 +3,7 @@ import json
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 TOKEN_SKEW_SECONDS = 300
 TRANSPORT_STATUS = 0
 BAD_BODY_STATUS = 502
+LIST_PAGE_SIZE = 100
+MAX_LIST_PAGES = 10
 
 
 class OmnigentError(Exception):
@@ -163,6 +166,25 @@ class OmnigentClient:
         if not isinstance(data, list):
             raise _bad_body("pull-requests response has no data list")
         return data
+
+    def list_sessions(self, agent_id: str | None = None, max_pages: int = MAX_LIST_PAGES) -> list[dict]:
+        params = {"limit": LIST_PAGE_SIZE, "order": "desc", "sort_by": "created_at", "visibility": "mine"}
+        if agent_id:
+            params["agent_id"] = agent_id
+        sessions: list[dict] = []
+        for _ in range(max_pages):
+            page = self._json("GET", "/v1/sessions?" + urllib.parse.urlencode(params))
+            data = page.get("data")
+            if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+                raise _bad_body("session list has no data list of objects")
+            sessions.extend(data)
+            if page.get("has_more") is not True:
+                return sessions
+            last_id = page.get("last_id")
+            if not isinstance(last_id, str) or not last_id:
+                raise _bad_body("session list has more pages but no last_id")
+            params["after"] = last_id
+        raise _bad_body("too many session list pages")
 
     def interrupt(self, session_id: str) -> None:
         self._json("POST", f"/v1/sessions/{session_id}/events", {"type": "interrupt"}, allow_empty=True)

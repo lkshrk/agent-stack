@@ -259,6 +259,33 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(request.full_url, "https://omni.test/v1/sessions/s1/permissions")
         self.assertEqual(json.loads(request.data), {"user_id": "u1", "level": 2})
 
+    def test_list_sessions_pages_own_sessions_newest_first(self):
+        c, opener = client([
+            json_response({"object": "list", "data": [{"id": "c3"}, {"id": "c2"}], "last_id": "c2", "has_more": True}),
+            json_response({"object": "list", "data": [], "last_id": "c1x", "has_more": True}),
+            json_response({"object": "list", "data": [{"id": "c1"}], "last_id": "c1", "has_more": False}),
+        ])
+        self.assertEqual([s["id"] for s in c.list_sessions(agent_id="ag1")], ["c3", "c2", "c1"])
+        queries = [parse_qs(r.full_url.split("?", 1)[1]) for r in opener.requests]
+        self.assertTrue(all(r.full_url.startswith("https://omni.test/v1/sessions?") for r in opener.requests))
+        self.assertEqual(queries[0], {"limit": ["100"], "order": ["desc"], "sort_by": ["created_at"],
+                                      "visibility": ["mine"], "agent_id": ["ag1"]})
+        self.assertEqual((queries[1]["after"], queries[2]["after"]), (["c2"], ["c1x"]))
+
+    def test_list_sessions_fails_closed(self):
+        page = {"data": [{"id": "c"}], "last_id": "c", "has_more": True}
+        cases = [
+            [json_response({"has_more": False})],
+            [json_response({"data": ["x"], "has_more": False})],
+            [json_response({"data": [], "has_more": True})],
+            [json_response(page) for _ in range(3)],
+        ]
+        for responses in cases:
+            with self.subTest(responses=len(responses)):
+                c, _ = client(responses)
+                with self.assertRaises(OmnigentError):
+                    c.list_sessions(max_pages=3)
+
     def test_stream_uses_read_timeout_and_yields_events(self):
         body = b'event: session.status\ndata: {"status": "idle"}\n\ndata: [DONE]\n\n'
         c, opener = client([FakeResponse(body)])

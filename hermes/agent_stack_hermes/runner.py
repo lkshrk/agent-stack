@@ -8,7 +8,14 @@ from dataclasses import dataclass, field
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
 from agent_stack_hermes.postrun import GitHubReader, violations
-from agent_stack_hermes.runspec import MAX_RUNTIME, RunSpec, evaluate, parse_card_body, session_request
+from agent_stack_hermes.runspec import (
+    MAX_RUNTIME,
+    RunSpec,
+    builtin_agent_id,
+    evaluate,
+    parse_card_body,
+    session_request,
+)
 
 SLICE_SECONDS = 300
 HEARTBEAT_SECONDS = 900
@@ -16,6 +23,7 @@ STALL_SECONDS = 2700
 POLL_SECONDS = 15
 SESSION_NOTE = "omnigent-session: "
 REFS_NOTE = "refs-before: "
+CARD_LABEL = "agent-stack/card"
 BLOCK_KIND = {"decision": "needs_input", "permission": "needs_input", "dependency": "dependency", "environment": "transient"}
 DENIED_TOOLS = frozenset(
     {
@@ -74,15 +82,26 @@ def _kanban_ids(env: Mapping[str, str]) -> tuple[str, int] | None:
     return (task_id, run_id) if task_id else None
 
 
+class _BlockReason(Exception):
+    pass
+
+
+def _notes(comments: tuple[str, ...], prefix: str) -> list[str]:
+    return [c[len(prefix):].strip() for c in comments if c.startswith(prefix) and c[len(prefix):].strip()]
+
+
 def _last_note(comments: tuple[str, ...], prefix: str) -> str | None:
-    for comment in reversed(comments):
-        if comment.startswith(prefix) and comment[len(prefix):].strip():
-            return comment[len(prefix):].strip()
-    return None
+    notes = _notes(comments, prefix)
+    return notes[-1] if notes else None
+
+
+def _first_note(comments: tuple[str, ...], prefix: str) -> str | None:
+    notes = _notes(comments, prefix)
+    return notes[0] if notes else None
 
 
 def _refs_before(comments: tuple[str, ...]) -> dict[str, str]:
-    raw = _last_note(comments, REFS_NOTE)
+    raw = _first_note(comments, REFS_NOTE)
     if raw is None:
         raise ValueError("no refs-before note on the card")
     refs = json.loads(raw)
@@ -105,7 +124,8 @@ def _empty(value) -> bool:
 def _terminal(snap: dict) -> bool:
     if snap.get("status") == "failed":
         return True
-    labels = snap.get("labels") if isinstance(snap.get("labels"), dict) else {}
+    labels = snap.get("labels")
+    labels = labels if isinstance(labels, dict) else {}
     return (
         snap.get("status") == "idle"
         and _empty(snap.get("pending_inputs"))
@@ -118,17 +138,47 @@ def _terminal(snap: dict) -> bool:
     )
 
 
-def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link) -> tuple[str, tuple[str, ...]]:
-    refs_note = REFS_NOTE + json.dumps(gh.refs(spec.repo), sort_keys=True, separators=(",", ":"))
-    kanban.note(task_id, refs_note)
-    session_id = omni.create_session(session_request(spec, task_id, link))
+def _recover(omni, task_id: str, spec: RunSpec) -> str | None:
+    matches = [
+        s
+        for s in omni.list_sessions(agent_id=builtin_agent_id(spec.bundle))
+        if isinstance(s.get("labels"), dict) and s["labels"].get(CARD_LABEL) == task_id
+    ]
+    if len(matches) > 1:
+        raise _BlockReason("multiple sessions for this card")
+    if not matches:
+        return None
+    session_id = matches[0].get("id")
+    if not isinstance(session_id, str) or not session_id:
+        raise ValueError("listed session has no id")
+    return session_id
+
+
+def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link, comments) -> tuple[str, tuple]:
+    notes: tuple[str, ...] = ()
+    session_id = None
+    if _first_note(comments, REFS_NOTE) is None:
+        refs_note = REFS_NOTE + json.dumps(gh.refs(spec.repo), sort_keys=True, separators=(",", ":"))
+        kanban.note(task_id, refs_note)
+        notes = (refs_note,)
+    else:
+        session_id = _recover(omni, task_id, spec)
+    created = session_id is None
+    if created:
+        session_id = omni.create_session(session_request(spec, task_id, link))
     session_note = SESSION_NOTE + session_id
-    kanban.note(task_id, session_note)
+    try:
+        kanban.note(task_id, session_note)
+    except Exception:
+        if created:
+            with contextlib.suppress(Exception):
+                omni.interrupt(session_id)
+        raise
     share_with = env.get("OMNIGENT_SHARE_WITH")
     if share_with:
         with contextlib.suppress(Exception):
             omni.share(session_id, share_with, 1)
-    return session_id, (refs_note, session_note)
+    return session_id, notes + (session_note,)
 
 
 class _Heartbeat:
@@ -275,16 +325,16 @@ def run_slice(
     try:
         link, spec = parse_card_body(card.body)
     except ValueError:
-        spec = None
+        link, spec = None, None
     if spec is None:
         return _close(kanban, task_id, run_id, None, _blocked("decision", "card has no valid run spec"))
     comments = card.comments
     session_id = _last_note(comments, SESSION_NOTE)
+    deadline = now() + slice_seconds
     try:
         if session_id is None:
-            session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link)
+            session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link, comments)
             comments = comments + notes
-        deadline = now() + slice_seconds
         heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, now)
         if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, now, deadline):
             return _close(kanban, task_id, run_id, session_id, _STALE)
@@ -296,7 +346,7 @@ def run_slice(
             if not heartbeat.beat():
                 return _close(kanban, task_id, run_id, session_id, _STALE)
     except Exception as exc:
-        verdict = _blocked("environment", _short(exc))
+        verdict = _blocked("environment", str(exc) if isinstance(exc, _BlockReason) else _short(exc))
     return _close(kanban, task_id, run_id, session_id, verdict)
 
 
@@ -326,4 +376,4 @@ def handle(args: dict | None = None, **kw) -> str:
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
         return json.dumps(run_slice(env, kanban, omni, gh))
     except Exception as exc:
-        return json.dumps(_result("blocked", None, "runner error: " + _short(exc)))
+        return json.dumps(_result("running", None, "runner error: " + _short(exc)))

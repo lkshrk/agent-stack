@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-AUTHOR = "omnigent-runner"
+AUTHOR = "agent-stack/omnigent-runner"
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,8 @@ class HermesKanban:
             if task is None:
                 raise LookupError(f"unknown card {task_id}")
             comments = sorted(kb.list_comments(conn, task_id), key=lambda c: c.id)
-        return CardView(task.id, task.status, task.body or "", task.current_run_id, tuple(c.body for c in comments))
+        own = tuple(c.body for c in comments if c.author == self._author)
+        return CardView(task.id, task.status, task.body or "", task.current_run_id, own)
 
     def note(self, task_id: str, body: str) -> None:
         from hermes_cli import kanban_db as kb
