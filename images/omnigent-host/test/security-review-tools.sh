@@ -26,4 +26,12 @@ for cmd in "gitleaks version" "uv --version" "uvx --version" "pnpm --version" "r
   fi
 done
 
+if out=$(cd "$home" && env -i HOME="$home" PATH=/usr/local/bin:/usr/bin:/bin bash -lc 'gitleaks version && go version && uv --version' 2>&1); then
+  echo "ok   the shims run in a login shell that sources only profile.d"
+else
+  echo "FAIL the shims fail in a login shell that sources only profile.d:"
+  head -3 <<<"$out"
+  fail=1
+fi
+
 exit "$fail"
