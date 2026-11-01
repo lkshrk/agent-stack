@@ -1158,6 +1158,40 @@ class StatementAndWrapperTest(unittest.TestCase):
                     self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
 
+class PublicContributionEngineTest(unittest.TestCase):
+    def test_raw_commands_are_denied_and_helper_is_structured_only(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from unittest.mock import patch
+
+        from agent_stack_policies import public_contributions
+
+        agent = BUNDLES / "polly/agents/claude_code"
+        root = "/home/omnigent/work/omnigent"
+        with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
+            for command in (
+                f"git clone https://github.com/omnigent-ai/omnigent.git {root}",
+                f"git worktree add {root}",
+                f"git -C {root} fetch origin",
+                "/opt/agent/bin/agent-stack-contribute prepare omnigent",
+                "/opt/agent/bin/agent-stack-contribute publish omnigent",
+            ):
+                with self.subTest(command=command):
+                    out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+            out = results(
+                agent,
+                Case(
+                    "polly/agents/claude_code",
+                    "tool_call",
+                    "Bash",
+                    {"command": ["/opt/agent/bin/agent-stack-contribute", "prepare", "omnigent"]},
+                    "",
+                ),
+            )
+        self.assertEqual(out["public_contributions"].action.name, "ALLOW")
+
+
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
 class BundleVerdictTest(unittest.TestCase):
     def test_cases(self):

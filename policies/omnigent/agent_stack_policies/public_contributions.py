@@ -321,9 +321,17 @@ def _matches_validation(argv: list[str], registry: Registry) -> bool:
 
 
 def _mentions_helper(argv: object) -> bool:
+    if isinstance(argv, str):
+        return "agent-stack-contribute" in argv
     return isinstance(argv, list) and any(
         isinstance(item, str) and "agent-stack-contribute" in item for item in argv
     )
+
+
+def _raw_contribution_operation(command: str, registry: Registry) -> bool:
+    if _mentions_helper(command):
+        return True
+    return any(str(CONTRIBUTION_WORKSPACE / repository.checkout) in command for repository in registry.repositories)
 
 
 def _exact_helper(argv: object, registry: Registry) -> bool:
@@ -355,6 +363,10 @@ def prepare_operation(event: Event) -> Decision | None:
     except RegistryError:
         return deny("public contribution registry is unavailable")
     argv = arguments.get("command")
+    if isinstance(argv, str):
+        if _raw_contribution_operation(argv, registry) or _registered_tree(arguments, registry):
+            return deny("public contribution operations require trusted structured argv")
+        return None
     if _exact_helper(argv, registry):
         return allow()
     if _mentions_helper(argv):

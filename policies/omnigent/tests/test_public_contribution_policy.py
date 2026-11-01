@@ -91,6 +91,22 @@ class TestPrepareOperation(unittest.TestCase):
         self.assertIsNone(self.evaluate(["git", "-C", "/home/omnigent/work/other", "fetch", "origin"]))
         self.assertIsNone(self.evaluate(["git", "clone", "https://github.com/omnigent-ai/omnigent.git", "/tmp/omnigent"]))
 
+    def test_denies_raw_helper_and_registered_git_commands(self):
+        for command in (
+            f"git clone https://github.com/omnigent-ai/omnigent.git {TREE}",
+            f"git worktree add {TREE}",
+            f"git -C {TREE} fetch origin",
+            f"{HELPER} prepare omnigent",
+            f"{HELPER} publish omnigent",
+            f"bash -c '{HELPER} prepare omnigent'",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_allows_helper_only_as_structured_argv(self):
+        self.assertAllowed([HELPER, "prepare", "omnigent"])
+        self.assertDenied(f"{HELPER} prepare omnigent")
+
     def test_rejects_registered_tree_symlink_path(self):
         with tempfile.TemporaryDirectory() as directory:
             link = Path(directory) / "link"
