@@ -65,6 +65,71 @@ class DocsVcsTest(unittest.TestCase):
         ):
             self.assertAllowed(command)
 
+    def test_documented_workflows_allowed(self):
+        for command in (
+            "git status",
+            "git diff",
+            "git diff --stat",
+            "git log --oneline -n 5",
+            "git log --oneline -5",
+            "git show HEAD",
+            "git rev-parse HEAD",
+            "git ls-files",
+            "git branch --show-current",
+            "git remote -v",
+            "git fetch",
+            "git fetch origin",
+            "git fetch origin main",
+            "git fetch --quiet origin feat/x",
+            "git merge-base HEAD origin/main",
+            "git commit -m 'docs: update'",
+            "git push origin HEAD:docs/update",
+            "gh pr view 7",
+            "gh pr diff 7",
+            "gh pr checks 7",
+            "gh pr list",
+            "gh api repos/o/r/pulls",
+            "gh api -X GET repos/o/r/pulls",
+            "gh api -X POST -X GET repos/o/r/pulls",
+        ):
+            self.assertAllowed(command)
+
+    def test_abbreviated_and_unknown_git_options_denied(self):
+        for verb in ("status", "diff", "log", "show", "rev-parse", "ls-files", "fetch origin", "merge-base HEAD main"):
+            for option in (
+                "--upload-pac=touch",
+                "--upload-p touch",
+                "--upload-pack=touch",
+                "--rec=touch",
+                "--receive-pack=touch",
+                "--ext-d",
+                "--ext-diff",
+                "--outp=out.md",
+                "--output=out.md",
+                "--exe=touch",
+                "--exec=touch",
+                "--textc",
+                "--config-e=x=y",
+                "--config-env=x=y",
+                "--open-files-in-pa",
+                "--open-files-in-pager=sh",
+                "--no-such-option",
+                "-O",
+            ):
+                self.assertDenied(f"git {verb} {option}")
+
+    def test_git_fetch_refspec_and_unsafe_remote_denied(self):
+        for command in (
+            "git fetch origin main:refs/heads/main",
+            "git fetch origin +main:main",
+            "git fetch origin :main",
+            "git fetch --prune origin",
+            "git fetch --tags origin",
+            "git fetch https://example.test/r.git",
+            "git fetch ../other",
+        ):
+            self.assertDenied(command)
+
     def test_git_add_doc_paths_allowed(self):
         for command in (
             "git add docs/setup.md README.md",
