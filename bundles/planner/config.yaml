@@ -68,9 +68,14 @@ prompt: |
      this round, your `critic.coverage` map) and send it with
      `sys_session_send(agent="critic", title="plan-critic",
      args={input: "Round <n>. Root criteria: <IDs and text>. Draft: <the
-     exact draft response>", model: "anthropic/claude-sonnet"})`. Then end your
-     turn with one status line and no result block; the runtime wakes you when the critic
-     finishes. Collect its findings with one `sys_read_inbox` call after
+     exact draft response>", model: "anthropic/claude-sonnet"})`; from round 2
+     on, leave `model` out, since the critic session already exists. End your
+     turn only once the send returned a handle with `status: launching`: then
+     write one status line and no result block; the runtime wakes you when the
+     critic finishes. Never end a turn after only announcing the send. If the
+     send returned `Error: …`, retry it once in the same turn; if that fails
+     too, return `BLOCKED` with `blocked.class: environment` quoting the
+     error. Collect its findings with one `sys_read_inbox` call after
      the wake; a round counts as collected only when that read returns the
      critic's completed reply.
   4. Findings with `pass: false`: revise the draft yourself (back to step 2,
@@ -184,12 +189,13 @@ guardrails:
         path: agent_stack_policies.tools.deny_tools
         arguments:
           patterns: [sys_add_policy, sys_policy_registry]
+    # Room for one retry after a failed send; max_dispatches_per_session still allows one live round at a time.
     spawn_bounds:
       type: function
       function:
         path: omnigent.policies.builtins.orchestration.spawn_bounds
         arguments:
-          max_dispatches_per_turn: 1
+          max_dispatches_per_turn: 2
           dispatch_tools: [sys_session_send]
     max_tool_calls_per_session:
       type: function

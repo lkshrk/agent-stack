@@ -36,6 +36,17 @@ def _launched(text: str) -> bool:
     return isinstance(handle, dict) and handle.get("status") == "launching"
 
 
+def _failed(text: str) -> bool:
+    """A failed send returns `Error: …` text, or a JSON object with an `error` key for a session_id target."""
+    if text.lstrip().startswith("Error:"):
+        return True
+    try:
+        result = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(result, dict) and "error" in result
+
+
 def _delivered_child_output(event: Event) -> bool:
     """The runner re-posts each drained child result as a sys_session_send TOOL_RESULT, keyed `args` not `arguments`."""
     request = event.get("request_data")
@@ -98,12 +109,17 @@ def max_dispatches_per_session(
             return None
         if _delivered_child_output(event) or _launched(_result_text(event)):
             return None
-        return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
+        if parallel:
+            return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
+        if not _failed(_result_text(event)):
+            return None
+        # Serial collections stand for collected replies, so a failed send is uncounted instead.
+        return allow(state_updates=[{"key": DISPATCH_STATE_KEY, "action": "increment", "value": -1}])
 
     def policy(event: Event) -> Decision | None:
         if collectors and _result_tool(event, collectors):
             return collect(event)
-        if parallel and _result_tool(event, tools):
+        if _result_tool(event, tools):
             return settle_send(event)
         if tool_call(event, tools) is None:
             return None

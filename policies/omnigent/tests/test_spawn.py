@@ -149,7 +149,39 @@ class SpawnTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(policy(tool_result_event("sys_session_send", {"result": text}, state))["state_updates"], settled)
         self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": "Error: x"}, {DISPATCH_STATE_KEY: 1, COLLECT_STATE_KEY: 1})))
-        self.assertIsNone(max_dispatches_per_session(limit=3)(tool_result_event("sys_session_send", {"result": "Error: x"}, state)))
+
+    def test_serial_gives_back_only_failed_sends(self):
+        policy = max_dispatches_per_session(limit=3, collect_tools=["sys_read_inbox"], collect_from="critic")
+        state = {DISPATCH_STATE_KEY: 1}
+        handle = {"task_id": "c1", "kind": "sub_agent", "agent": "critic", "title": "plan-critic"}
+        launched = json.dumps({**handle, "status": "launching"})
+        steered = json.dumps({**handle, "status": "running"})
+        for text in (launched, steered, "No such tool output", json.dumps(["error"])):
+            with self.subTest(text=text):
+                self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": text}, state)))
+        given_back = [{"key": DISPATCH_STATE_KEY, "action": "increment", "value": -1}]
+        for text in (
+            "Error: failed to send message to child: 503 upstream unavailable",
+            "Error: failed to create child session: 500 boom",
+            "Error: sys_session_send 'model' applies only when a sub-agent session is first created",
+            json.dumps({"error": "session_not_found", "conversation_id": "c1"}),
+            json.dumps({"error": "session_out_of_tree", "conversation_id": "c1"}),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(policy(tool_result_event("sys_session_send", {"result": text}, state))["state_updates"], given_back)
+        self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": "Error: x"}, {DISPATCH_STATE_KEY: 1, COLLECT_STATE_KEY: 1})))
+        self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": "Error: x"}, {})))
+        self.assertEqual(
+            max_dispatches_per_session(limit=3)(tool_result_event("sys_session_send", {"result": "Error: x"}, state))["state_updates"], given_back
+        )
+
+    def test_serial_ignores_delivered_child_output(self):
+        policy = max_dispatches_per_session(limit=3, collect_tools=["sys_read_inbox"], collect_from="critic")
+        delivered = {
+            **tool_result_event("sys_session_send", {"result": "findings"}, {DISPATCH_STATE_KEY: 1}),
+            "request_data": {"name": "sys_session_send", "tool": "sys_session_send", "args": {"agent": "critic", "title": "plan-critic"}},
+        }
+        self.assertIsNone(policy(delivered))
 
     def test_parallel_ignores_delivered_child_output(self):
         policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
