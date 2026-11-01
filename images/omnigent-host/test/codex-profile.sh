@@ -5,7 +5,7 @@ export HOME
 HOME=$(mktemp -d /var/tmp/home.XXXXXX) || exit 1
 trap 'rm -rf "$HOME"' EXIT
 
-/opt/agent/bin/seed-agent-home 2>/dev/null
+LITELLM_BASE_URL=http://gateway.invalid /opt/agent/bin/seed-agent-home 2>/dev/null
 profile=$HOME/.codex/security-review.config.toml
 if [[ ! -r $profile ]]; then
   echo "FAIL seed-agent-home did not install the security-review Codex profile"
