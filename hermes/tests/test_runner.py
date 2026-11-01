@@ -239,6 +239,16 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(out["call_again"])
         self.assertFalse(self.terminal_writes())
 
+    def test_share_level_is_configurable_and_invalid_falls_back_to_read(self):
+        for raw, level in ((None, 1), ("2", 2), ("3", 3), ("0", 1), ("4", 1), ("x", 1), ("", 1)):
+            with self.subTest(raw=raw):
+                self.log.clear()
+                env = {**ENV, "OMNIGENT_SHARE_WITH": "owner@example.test"}
+                if raw is not None:
+                    env["OMNIGENT_SHARE_LEVEL"] = raw
+                self.run_slice(running(), comments=(), env=env)
+                self.assertEqual(self.calls("share")[0][1:], ("conv_new", "owner@example.test", level))
+
     def test_retry_resumes_recorded_session(self):
         out = self.run_slice(running())
         self.assertFalse(self.calls("create"))
