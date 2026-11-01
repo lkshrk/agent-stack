@@ -1211,6 +1211,9 @@ class PublicContributionEngineTest(unittest.TestCase):
             ["gh", "pr", "create", "--title", "fix"],
             ["gh", "pr", "comment", "1", "--body", "note"],
             ["gh", "api", "-X", "POST", "repos/example/project/issues"],
+            ["bash", "-lc", "git push origin HEAD:contribution/fix"],
+            ["env", "git", "push", "origin", "HEAD:contribution/fix"],
+            ["sh", "-c", "gh issue create --title fix"],
         )
         with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
             for agent in ("polly/agents/claude_code", "polly/agents/codex"):

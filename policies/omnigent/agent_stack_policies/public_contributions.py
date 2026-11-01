@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import yaml
 
 from ._event import Decision, Event, allow, deny, tool_call
+from ._shell import OpaqueCommand, resolve, shell_command, walk
 from .paths import SHELL_TOOLS
 from .tools import direct_public_write
 
@@ -348,6 +349,17 @@ def _raw_contribution_operation(command: str, registry: Registry) -> bool:
     )
 
 
+def _contains_direct_public_write(argv: list[str]) -> bool:
+    command = shell_command({"command": argv})
+    if command is None:
+        return True
+    try:
+        statements = walk(command)
+    except (OpaqueCommand, ValueError):
+        return True
+    return any(direct_public_write(resolve(tokens).argv) for tokens in statements)
+
+
 def _exact_helper(argv: object, registry: Registry) -> bool:
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
         return False
@@ -393,7 +405,7 @@ def prepare_operation(event: Event | None = None) -> Callable[[Event], Decision 
         return None
     registered_tree = _registered_tree(arguments, registry)
     registered_git_target = _registered_git_target(argv, registry)
-    if registered_tree and direct_public_write(argv):
+    if registered_tree and _contains_direct_public_write(argv):
         return deny("direct public publishing in a registered contribution tree is not allowed; request the trusted gateway instead")
     if registered_git_target:
         return deny("direct Git operation targeting a registered contribution tree is not allowed; request preparation instead")

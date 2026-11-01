@@ -46,6 +46,15 @@ class PublicPublishDenialTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
+    def test_denies_direct_public_writes_through_structured_wrappers(self):
+        for command in (
+            ["bash", "-lc", "git push origin HEAD:contribution/fix"],
+            ["env", "git", "push", "origin", "HEAD:contribution/fix"],
+            ["sh", "-c", "gh issue create --title fix"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
     def test_allows_structured_helper_preflight(self):
         decision = self.evaluate([HELPER, "preflight", "omnigent"])
         self.assertEqual(decision["result"], "ALLOW", decision)
