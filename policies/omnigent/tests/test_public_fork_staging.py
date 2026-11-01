@@ -660,6 +660,82 @@ class ForkStagingTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(self.evaluate(command, cwd=cwd))
 
+    def test_persistent_global_git_config_writes_are_denied_everywhere(self):
+        home = self.tree.parent.parent
+        own = self.tree.parent / "agent-stack"
+        own.mkdir(exist_ok=True)
+        denied = (
+            "git config --global core.fsmonitor 'sh /tmp/x'",
+            ["git", "config", "--global", "core.fsmonitor", "sh /tmp/x"],
+            "git config set --global core.hooksPath /tmp/h",
+            "git config --system core.pager /tmp/x",
+            "git config --worktree core.hooksPath /tmp/h",
+            "git config --global --edit",
+            "git config --global -e",
+            "git config edit --global",
+            "git config --global --add trailer.x.cmd 'sh /tmp/x'",
+            "git config --global --replace-all core.fsmonitor /tmp/x",
+            "git config --global --unset core.fsmonitor",
+            "git config --global --unset-all core.fsmonitor",
+            "git config --global --rename-section a b",
+            "git config --global --remove-section core",
+            "git config unset --global core.fsmonitor",
+            "git config rename-section --global a b",
+            "git config remove-section --global core",
+            "git config --file ~/.gitconfig core.fsmonitor /tmp/x",
+            f"git config -f {home}/.config/git/config core.hooksPath /tmp/h",
+            f"git config -f{home}/.gitconfig core.hooksPath /tmp/h",
+            f"git config -zf {home}/.gitconfig core.hooksPath /tmp/h",
+            f"git config --file={home}/.gitconfig core.fsmonitor /tmp/x",
+            "git config --file $HOME/.config/git/attributes x y",
+            "git config --fil ~/.gitconfig core.fsmonitor /tmp/x",
+            "git config --glob core.fsmonitor /tmp/x",
+            "git config --gl core.fsmonitor /tmp/x",
+            "git config --sys core.pager /tmp/x",
+            "git config --work core.hooksPath /tmp/h",
+            "git config --global --ad trailer.x.cmd /tmp/x",
+            "git config --global --rep core.fsmonitor /tmp/x",
+            "git config --global --unset-a core.fsmonitor",
+            "git config --global --edi",
+            "git config --global -ze",
+            "git config --global --type bool core.fsmonitor /tmp/x",
+            "git config set --global --value=/tmp/x core.fsmonitor",
+            "GIT_CONFIG=~/.gitconfig git config core.fsmonitor /tmp/x",
+            "env GIT_CONFIG=$HOME/.gitconfig git config core.fsmonitor /tmp/x",
+            "export GIT_CONFIG=~/.gitconfig; git config core.fsmonitor /tmp/x",
+            "GIT_CONFIG_GLOBAL=/tmp/g git config --global core.fsmonitor /tmp/x",
+            "git -c core.pager=cat config --global core.fsmonitor /tmp/x",
+            "git -C /tmp config --global core.fsmonitor /tmp/x",
+            "git --no-pager config --global core.fsmonitor /tmp/x",
+            "cd /tmp && git config --global core.fsmonitor /tmp/x",
+            "bash -c 'git config --global core.fsmonitor /tmp/x'",
+            "env git config --global core.fsmonitor /tmp/x",
+            "command git config --global core.fsmonitor /tmp/x",
+        )
+        for cwd in (own, home):
+            for command in denied:
+                with self.subTest(cwd=cwd, command=command):
+                    self.assertDenied(command, cwd=cwd)
+        for command in (
+            "git config --global --get user.name",
+            "git config --global --get-all user.name",
+            "git config --global --list",
+            "git config --global -l",
+            "git config get --global user.name",
+            "git config list --global",
+            "git config --global user.name",
+            "git config --global --type bool core.bare",
+            "git config --glob --get-regexp user",
+            f"git config -f {home}/.gitconfig --get user.name",
+            "GIT_CONFIG=~/.gitconfig git config --get user.name",
+            "git config --list",
+            "git config user.email x@example.invalid",
+            "git config --local core.autocrlf false",
+            "git -c core.pager=cat log -1",
+        ):
+            with self.subTest(control=command):
+                self.assertIsNone(self.evaluate(command, cwd=own))
+
     def test_own_repositories_keep_their_behaviour(self):
         own = self.tree.parent / "agent-stack"
         own.mkdir()

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 import yaml
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import OpaqueCommand, resolve, shell_command, walk
+from ._shell import Command, OpaqueCommand, resolve, shell_command, walk
 from .contribution_vcs import fork_gh, gh_exposes_token, into_git_dir, registered_git
 from .paths import SHELL_TOOLS
 from .tools import direct_public_write, gh_api_mutates
@@ -34,6 +34,14 @@ _GH_SLUG = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _REDIRECT = re.compile(r"[0-9]*(>>?|<<?<?|&>>?|>&|<&|>\|)")
 _FUSED_REDIRECT = re.compile(r"[0-9]*(>>?|<|&>>?|>&|<&)\S")
 _DECLARATIONS = frozenset({"export", "declare", "typeset", "local", "readonly"})
+_GIT_VALUE_OPTIONS = frozenset({"-c", "-C", "--config-env", "--git-dir", "--work-tree", "--namespace"})
+_GLOBAL_GIT_FILES = frozenset({".gitconfig", ".gitattributes"})
+_CONFIG_SCOPE_OPTIONS = ("--global", "--system", "--worktree")
+_CONFIG_VALUE_OPTIONS = ("--type", "--default", "--blob", "--comment", "--value")
+_CONFIG_WRITE_OPTIONS = ("--add", "--replace-all", "--unset", "--unset-all", "--rename-section", "--remove-section", "--edit")
+_CONFIG_READ_OPTIONS = ("--get", "--get-all", "--get-regexp", "--get-urlmatch", "--get-color", "--get-colorbool", "--list")
+_CONFIG_READ_SUBCOMMANDS = frozenset({"get", "list"})
+_CONFIG_WRITE_SUBCOMMANDS = frozenset({"set", "unset", "rename-section", "remove-section", "edit"})
 _WORD = re.compile(r"[^\s;&|<>()`'\"]+")
 
 
@@ -527,6 +535,115 @@ def _mentions_helper(argv: object) -> bool:
     )
 
 
+def _git_subcommand(argv: list[str]) -> tuple[str, list[str]] | None:
+    index = 1
+    while index < len(argv):
+        token = argv[index]
+        if token in _GIT_VALUE_OPTIONS:
+            index += 2
+        elif token.startswith("-"):
+            index += 1
+        else:
+            return token, argv[index + 1 :]
+    return None
+
+
+def _protected_git_file(value: str, cwd: str | None) -> bool:
+    for path in _expansions(value, [cwd or "/"]):
+        normalized = posixpath.normpath(path)
+        for home in _homes():
+            relative = posixpath.relpath(normalized, home) if normalized.startswith(home + "/") else None
+            if relative in _GLOBAL_GIT_FILES or (relative or "").startswith(".config/git/"):
+                return True
+    return False
+
+
+def _abbreviates(name: str, options: tuple[str, ...]) -> bool:
+    """Whether a long option is one of `options` or a prefix git's option parser expands to one."""
+    return len(name) > 2 and any(option.startswith(name) for option in options)
+
+
+def _global_git_config_write(argv: list[str], cwd: str | None, protected_env_file: bool = False) -> bool:
+    """Whether a `git config` call persistently writes the global, system or worktree config, or a protected file."""
+    if not argv or posixpath.basename(argv[0]) != "git":
+        return False
+    parsed = _git_subcommand(argv)
+    if parsed is None or parsed[0] != "config":
+        return False
+    args = parsed[1]
+    scoped = protected_env_file
+    writes = reads = False
+    positional: list[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        name, equals, value = token.partition("=")
+        if token == "--":
+            positional += args[index + 1 :]
+            break
+        if token.startswith("--"):
+            if _abbreviates(name, _CONFIG_SCOPE_OPTIONS):
+                scoped = True
+            elif _abbreviates(name, ("--file",)):
+                if not equals:
+                    index += 1
+                    value = args[index] if index < len(args) else ""
+                scoped = scoped or _protected_git_file(value, cwd)
+            elif _abbreviates(name, _CONFIG_WRITE_OPTIONS):
+                writes = True
+            elif _abbreviates(name, _CONFIG_READ_OPTIONS):
+                reads = True
+            elif _abbreviates(name, _CONFIG_VALUE_OPTIONS) and not equals:
+                index += 1
+        elif token.startswith("-") and len(token) > 1:
+            for position, flag in enumerate(token[1:], start=2):
+                writes = writes or flag == "e"
+                reads = reads or flag == "l"
+                if flag == "f":
+                    target = token[position:]
+                    if not target:
+                        index += 1
+                        target = args[index] if index < len(args) else ""
+                    scoped = scoped or _protected_git_file(target, cwd)
+                    break
+        else:
+            positional.append(token)
+        index += 1
+    if not scoped:
+        return False
+    if positional[:1] and positional[0] in _CONFIG_WRITE_SUBCOMMANDS:
+        return True
+    if positional[:1] and positional[0] in _CONFIG_READ_SUBCOMMANDS:
+        return False
+    if writes:
+        return True
+    if reads:
+        return False
+    return len(positional) != 1
+
+
+def _protected_git_config_env(command: Command, cwd: str | None) -> bool:
+    assignments = command.assignments + (command.argv[1:] if command.name in _DECLARATIONS else [])
+    return any(
+        name == "GIT_CONFIG" and _protected_git_file(value, cwd)
+        for name, _, value in (assignment.partition("=") for assignment in assignments)
+    )
+
+
+def _writes_global_git_config(text: str, cwd: str | None) -> bool:
+    if "config" not in text:
+        return False
+    try:
+        commands = [resolve(tokens) for tokens in walk(text)]
+    except (OpaqueCommand, ValueError):
+        return bool(re.search(r"--(gl|sy|wo|fi)|(^|\s)-[a-z]*f|GIT_CONFIG=", text))
+    exported = any(command.name in _DECLARATIONS and _protected_git_config_env(command, cwd) for command in commands)
+    return any(
+        _global_git_config_write(command.argv, cwd, exported or _protected_git_config_env(command, cwd))
+        for command in commands
+    )
+
+
 def _exposes_gh_token(text: str) -> bool:
     if "gh" not in text or "auth" not in text:
         return False
@@ -622,6 +739,8 @@ def _prepare_operation(event: Event) -> Decision | None:
     texts += [joined] if joined else []
     if any(_exposes_gh_token(text) for text in texts):
         return deny("gh commands that print the authentication token are not allowed")
+    if any(_writes_global_git_config(text, cwd) for text in texts):
+        return deny("persistent git config writes to the global, system or worktree config are not allowed; use repository config or `git -c`")
     repository = _registered_repository(cwd, registry)
     if isinstance(argv, str):
         simple = _simple_command(argv)

@@ -1409,6 +1409,22 @@ class GitDirPathGuardTest(unittest.TestCase):
         ):
             with self.subTest(tool=tool, data=data):
                 self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, data, "")), "DENY")
+        for command in (
+            "git config --global core.fsmonitor 'sh /tmp/x'",
+            "git config set --global core.hooksPath /tmp/h",
+            "git config --system core.pager /tmp/x",
+            "git config --global --edit",
+            "git config --glob core.fsmonitor /tmp/x",
+            "GIT_CONFIG=~/.gitconfig git config core.fsmonitor /tmp/x",
+        ):
+            for cwd in ("/home/omnigent/work/agent-stack", "/home/omnigent"):
+                with self.subTest(command=command, cwd=cwd):
+                    out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": cwd}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+        for command in ("git config --global --get user.name", "git config --list", "git config user.email x@example.invalid"):
+            with self.subTest(control=command):
+                out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": "/home/omnigent/work/agent-stack"}, ""))
+                self.assertNotEqual(out["public_contributions"].action.name, "DENY")
         for command in ("git status", "git diff --stat", "git log --oneline -3"):
             with self.subTest(control=command):
                 out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": "/home/omnigent/work/agent-stack"}, ""))
