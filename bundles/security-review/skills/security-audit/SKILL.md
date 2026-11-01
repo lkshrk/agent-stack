@@ -109,7 +109,7 @@ Severity:
 - `medium`: needs several preconditions, or weakens a defence.
 - `low`: hardening or hygiene.
 
-A defence-in-depth gap or checklist deviation with no reachable boundary
+A defence-in-depth weakness or checklist deviation with no reachable boundary
 violation is not a vulnerability: report it as `low` at most, never higher.
 The contract has no informational level.
 
