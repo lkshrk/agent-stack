@@ -40,6 +40,16 @@ _GIT_PAGER_OFF = frozenset({"--no-pager", "-P"})
 _VCS_NAMES = frozenset({"git", "gh"})
 _UNQUOTED_LITERAL = re.compile(r"[A-Za-z0-9_./:=@,+%^-]")
 _GIT_TIMEOUT = 10
+_GIT_SAFE_CONFIG = (
+    "core.fsmonitor=false",
+    "core.hooksPath=/dev/null",
+    "core.pager=cat",
+    "diff.external=",
+    "log.showSignature=false",
+    "submodule.recurse=false",
+)
+_FILTER_DRIVER = re.compile(r"[A-Za-z0-9_.-]+")
+_GIT_ENV_KEEP = ("PATH", "HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
 _WORKFLOWS = ".github/workflows/"
 _OWNER_LABEL = "approved-upstream"
 _REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
@@ -525,19 +535,42 @@ def _contains_direct_public_write(argv: list[str]) -> bool:
     return False
 
 
-def _git(cwd: str, *args: str) -> str | None:
+def _run_git(cwd: str, overrides: list[str], args: tuple[str, ...]) -> str | None:
+    environment = {key: os.environ[key] for key in _GIT_ENV_KEEP if key in os.environ}
     try:
         completed = subprocess.run(
-            ["git", "--no-optional-locks", "-C", cwd, *args],
+            ["git", "--no-optional-locks", *overrides, "-C", cwd, *args],
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            env={**environment, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"},
             stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     return completed.stdout if completed.returncode == 0 else None
+
+
+def _filter_overrides(cwd: str, base: list[str]) -> list[str] | None:
+    listing = _run_git(cwd, base, ("config", "--name-only", "-z", "--get-regexp", r"^filter\."))
+    drivers = {key.removeprefix("filter.").rpartition(".")[0] for key in (listing or "").split("\0") if key}
+    if not all(_FILTER_DRIVER.fullmatch(driver) for driver in drivers):
+        return None
+    return [
+        item
+        for driver in sorted(drivers)
+        for setting in (f"filter.{driver}.clean=cat", f"filter.{driver}.smudge=cat", f"filter.{driver}.process=", f"filter.{driver}.required=false")
+        for item in ("-c", setting)
+    ]
+
+
+def _git(cwd: str, *args: str) -> str | None:
+    """Run git with every repository setting that can execute a program neutralised."""
+    base = [item for setting in _GIT_SAFE_CONFIG for item in ("-c", setting)]
+    filters = _filter_overrides(cwd, base)
+    if filters is None:
+        return None
+    return _run_git(cwd, base + filters, args)
 
 
 def _fork_urls(repository: RegisteredRepository) -> frozenset[str]:
@@ -560,7 +593,7 @@ def _remote_is_fork(cwd: str, remote: str, repository: RegisteredRepository) -> 
 def _pushed_paths(cwd: str) -> list[str] | None:
     if not _git(cwd, "for-each-ref", "--count=1", "refs/remotes/"):
         return None
-    output = _git(cwd, "log", "-z", "--format=", "--name-only", "--no-renames", "-m", "HEAD", "--not", "--remotes")
+    output = _git(cwd, "log", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "-z", "--format=", "--name-only", "--no-renames", "-m", "HEAD", "--not", "--remotes")
     if output is None:
         return None
     return [path.strip("\n") for path in output.split("\0") if path.strip("\n")]
@@ -592,7 +625,7 @@ def _check_add(args: list[str], cwd: str) -> Decision:
 
 
 def _check_commit(cwd: str) -> Decision:
-    output = _git(cwd, "diff", "-z", "--name-only", "HEAD")
+    output = _git(cwd, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "-z", "--name-only", "HEAD")
     if output is None:
         return deny("cannot check what `git commit` would record")
     if _workflow_paths([path for path in output.split("\0") if path]):

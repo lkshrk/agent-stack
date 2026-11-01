@@ -1,9 +1,13 @@
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent_stack_policies import public_contributions
 from agent_stack_policies.public_contributions import prepare_operation
 
 from . import tool_call_event
@@ -381,6 +385,64 @@ class ForkStagingTest(unittest.TestCase):
         self.assertDenied(["git", "add", "../.github"], cwd=self.tree / "web")
         git(self.tree, "add", ".github/workflows/new.yml")
         self.assertDenied(["git", "commit", "-m", "ci: new"])
+
+    def test_policy_git_calls_ignore_planted_executable_config(self):
+        marker = self.tree.parent / "marker"
+        script = self.tree.parent / "planted"
+        script.write_text(f'#!/bin/sh\necho "$0 $*" >> {marker}\ncat\n')
+        script.chmod(0o755)
+        (self.tree / ".gitattributes").write_text("*.ts filter=planted diff=planted\n")
+        for key in (
+            "core.fsmonitor",
+            "core.hooksPath",
+            "core.pager",
+            "diff.external",
+            "diff.planted.textconv",
+            "diff.planted.command",
+            "filter.planted.clean",
+            "filter.planted.smudge",
+            "filter.planted.process",
+            "gpg.program",
+        ):
+            git(self.tree, "config", key, str(script))
+        git(self.tree, "config", "filter.planted.required", "true")
+        git(self.tree, "config", "log.showSignature", "true")
+        (self.tree / "web" / "a.ts").write_text("export const a = 3\n")
+        self.assertAllowed(["git", "add", "web/a.ts"])
+        self.assertAllowed(["git", "commit", "-m", "fix(web): a"])
+        self.assertAllowed('git commit -a -m "fix(web): a"')
+        self.assertAllowed(["git", "push", "fork", "HEAD:feat/x"])
+        self.assertFalse(marker.exists(), marker.read_text() if marker.exists() else "")
+
+    def test_denies_when_a_filter_driver_name_cannot_be_overridden(self):
+        marker = self.tree.parent / "marker"
+        script = self.tree.parent / "planted"
+        script.write_text(f'#!/bin/sh\necho "$0 $*" >> {marker}\ncat\n')
+        script.chmod(0o755)
+        (self.tree / ".gitattributes").write_text('*.ts filter="a=b"\n')
+        git(self.tree, "config", "filter.a=b.clean", str(script))
+        (self.tree / "web" / "a.ts").write_text("export const a = 4\n")
+        self.assertDenied(["git", "add", "web/a.ts"])
+        self.assertDenied(["git", "commit", "-a", "-m", "fix(web): a"])
+        self.assertFalse(marker.exists())
+
+    def test_policy_git_calls_use_a_minimal_environment_with_a_timeout(self):
+        calls = []
+        real_run = subprocess.run
+
+        def record(*args, **kwargs):
+            calls.append(kwargs)
+            return real_run(*args, **kwargs)
+
+        secrets = {"GH_TOKEN": "x", "GITHUB_TOKEN": "x", "GIT_ASKPASS": "/bin/true", "SSH_AUTH_SOCK": "/tmp/s", "AWS_SECRET_ACCESS_KEY": "x"}
+        with patch.dict(os.environ, secrets), patch.object(public_contributions.subprocess, "run", side_effect=record):
+            self.assertAllowed(["git", "push", "fork", "HEAD:feat/x"])
+            self.assertAllowed(["git", "commit", "-m", "fix(web): a"])
+        self.assertTrue(calls)
+        for kwargs in calls:
+            self.assertFalse(set(secrets) & set(kwargs["env"]), sorted(set(secrets) & set(kwargs["env"])))
+            self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+            self.assertGreater(kwargs["timeout"], 0)
 
     def test_own_repositories_keep_their_behaviour(self):
         own = self.tree.parent / "agent-stack"
