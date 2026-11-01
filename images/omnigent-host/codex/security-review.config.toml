@@ -3,6 +3,7 @@ sandbox_mode = "danger-full-access"
 
 [features]
 unified_exec = false
+shell_snapshot = false
 multi_agent = false
 
 [shell_environment_policy]

@@ -29,7 +29,7 @@ class SecurityReviewProfileTest(unittest.TestCase):
         )
 
     def test_unhooked_tools_disabled(self):
-        self.assertEqual(self.profile["features"], {"unified_exec": False, "multi_agent": False})
+        self.assertEqual(self.profile["features"], {"unified_exec": False, "shell_snapshot": False, "multi_agent": False})
 
     def test_tool_caches_live_in_tmp(self):
         env = self.profile["shell_environment_policy"]["set"]
