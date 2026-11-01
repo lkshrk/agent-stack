@@ -1231,10 +1231,21 @@ class PublicContributionEngineTest(unittest.TestCase):
                             BUNDLES / agent,
                             Case(agent, "tool_call", "Bash", {"command": command, "cwd": root}, ""),
                         )
-                        self.assertEqual(
-                            max(decision.action.name for decision in out.values()),
-                            "DENY",
-                        )
+                        self.assertIn("public_contributions", out)
+                        self.assertEqual(out["public_contributions"].action.name, "DENY")
+                with self.subTest(agent=agent, control="unregistered internal push"):
+                    out = results(
+                        BUNDLES / agent,
+                        Case(
+                            agent,
+                            "tool_call",
+                            "Bash",
+                            {"command": ["git", "push", "origin", "HEAD:feature/internal"], "cwd": "/home/omnigent/work/agent-stack"},
+                            "",
+                        ),
+                    )
+                    self.assertIn("public_contributions", out)
+                    self.assertNotEqual(out["public_contributions"].action.name, "DENY")
 
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
