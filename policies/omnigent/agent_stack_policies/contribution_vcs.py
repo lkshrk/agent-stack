@@ -49,62 +49,62 @@ FORK_GH_FORM = "in a registered contribution gh may write only through `gh pr cr
 
 
 @dataclass(frozen=True)
-class _Options:
+class Options:
     flags: frozenset[str] = frozenset()
     values: frozenset[str] = frozenset()
     counts: bool = False
 
 
 @dataclass
-class _Parsed:
+class Parsed:
     positional: list[str] = field(default_factory=list)
     options: dict[str, list[str]] = field(default_factory=dict)
 
 
-def _options(flags: str = "", values: str = "", counts: bool = False) -> _Options:
-    return _Options(frozenset(flags.split()), frozenset(values.split()), counts)
+def option_set(flags: str = "", values: str = "", counts: bool = False) -> Options:
+    return Options(frozenset(flags.split()), frozenset(values.split()), counts)
 
 
-_GIT_OPTIONS = {
-    "status": _options("-s --short -b --branch --porcelain --porcelain=v1 --porcelain=v2 -z --untracked-files=no --untracked-files=normal --untracked-files=all"),
-    "diff": _options(
+GIT_OPTIONS = {
+    "status": option_set("-s --short -b --branch --porcelain --porcelain=v1 --porcelain=v2 -z --untracked-files=no --untracked-files=normal --untracked-files=all"),
+    "diff": option_set(
         "--cached --staged --stat --shortstat --numstat --name-only --name-status -p --patch --no-color --check -w "
         "--ignore-all-space --quiet --exit-code -z --no-ext-diff --no-textconv --word-diff --merge-base -R",
         "--unified --diff-filter",
     ),
-    "log": _options(
+    "log": option_set(
         "--oneline --graph --decorate --no-decorate --stat --shortstat --name-only --name-status -p --patch --no-color "
         "--all --reverse --first-parent --no-merges --merges -z --follow --abbrev-commit --no-ext-diff --no-textconv",
         "--format --pretty -n --max-count --since --until --after --before --author --grep --date --skip",
         counts=True,
     ),
-    "show": _options(
+    "show": option_set(
         "--stat --shortstat --name-only --name-status --oneline -p --patch --no-patch -s --no-color --no-ext-diff --no-textconv --abbrev-commit",
         "--format --pretty",
     ),
-    "rev-parse": _options(
+    "rev-parse": option_set(
         "--abbrev-ref --short --show-toplevel --git-dir --verify --symbolic-full-name -q --quiet --is-inside-work-tree --show-prefix",
         "--short",
     ),
-    "ls-files": _options("-m --modified -o --others --exclude-standard -s --stage -z -c --cached -d --deleted -u --unmerged"),
-    "merge-base": _options("--is-ancestor --all --fork-point"),
-    "restore": _options("--staged -S --worktree -W --ours --theirs -q --quiet", "--source -s"),
-    "add": _options("-A --all -u --update -N --intent-to-add -v --verbose -n --dry-run -f --force --chmod=+x --chmod=-x"),
-    "commit": _options(
+    "ls-files": option_set("-m --modified -o --others --exclude-standard -s --stage -z -c --cached -d --deleted -u --unmerged"),
+    "merge-base": option_set("--is-ancestor --all --fork-point"),
+    "restore": option_set("--staged -S --worktree -W --ours --theirs -q --quiet", "--source -s"),
+    "add": option_set("-A --all -u --update -N --intent-to-add -v --verbose -n --dry-run -f --force --chmod=+x --chmod=-x"),
+    "commit": option_set(
         "-s --signoff -a --all -q --quiet --amend --no-edit -v --verbose --allow-empty --no-verify -n",
         "-m --message --author --trailer --date --fixup",
     ),
-    "fetch": _options("--prune -p --no-tags --tags --all -q --quiet -v --verbose --unshallow --prune-tags", "--depth"),
-    "rebase": _options("-q --quiet --continue --abort --skip --quit", "--onto"),
-    "branch": _options("--show-current -a --all -r --remotes -l --list -v -vv --verbose"),
-    "push": _options("-u --set-upstream"),
+    "fetch": option_set("--prune -p --no-tags --tags --all -q --quiet -v --verbose --unshallow --prune-tags", "--depth"),
+    "rebase": option_set("-q --quiet --continue --abort --skip --quit", "--onto"),
+    "branch": option_set("--show-current -a --all -r --remotes -l --list -v -vv --verbose"),
+    "push": option_set("-u --set-upstream"),
 }
 _PATHSPEC_COMMANDS = frozenset({"status", "diff", "log", "show", "ls-files", "restore", "add", "commit"})
 
 
-def _parse(args: list[str], spec: _Options) -> _Parsed | None:
+def parse_options(args: list[str], spec: Options) -> Parsed | None:
     """Exact options only: no abbreviations, no bundled short flags, `--name=value` only for long value options."""
-    parsed = _Parsed()
+    parsed = Parsed()
     index = 0
     after_separator = False
     while index < len(args):
@@ -249,7 +249,7 @@ def _check_add(args: list[str], cwd: str) -> Decision:
     return allow()
 
 
-def _check_commit(parsed: _Parsed, cwd: str) -> Decision:
+def _check_commit(parsed: Parsed, cwd: str) -> Decision:
     if not ({"-m", "--message", "--no-edit"} & parsed.options.keys()):
         return deny("git commit needs -m <message> (or --amend --no-edit); no editor runs here")
     output = git(cwd, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "-z", "--name-only", "HEAD")
@@ -268,7 +268,7 @@ def _check_new_branch(args: list[str], flag: str, repository: "RegisteredReposit
     return allow()
 
 
-def _check_fetch(parsed: _Parsed, cwd: str) -> Decision:
+def _check_fetch(parsed: Parsed, cwd: str) -> Decision:
     if not parsed.positional:
         return allow() if "--all" in parsed.options else deny(f"name the remote to fetch; {LOCAL_GIT_FORM}")
     remote, refspecs = parsed.positional[0], parsed.positional[1:]
@@ -280,7 +280,7 @@ def _check_fetch(parsed: _Parsed, cwd: str) -> Decision:
     return allow()
 
 
-def _check_rebase(parsed: _Parsed) -> Decision:
+def _check_rebase(parsed: Parsed) -> Decision:
     control = {"--continue", "--abort", "--skip", "--quit"} & parsed.options.keys()
     if control:
         return allow() if len(parsed.options) == 1 and not parsed.positional else deny(LOCAL_GIT_FORM)
@@ -319,10 +319,10 @@ def registered_git(argv: list[str], cwd: str, repository: "RegisteredRepository"
         return _check_config(args)
     if sub == "remote":
         return _check_remote(args)
-    spec = _GIT_OPTIONS.get(sub)
+    spec = GIT_OPTIONS.get(sub)
     if spec is None:
         return deny(f"git {sub} is not allowed in a registered contribution; {LOCAL_GIT_FORM}")
-    parsed = _parse(args, spec)
+    parsed = parse_options(args, spec)
     if parsed is None:
         return deny(f"git {sub} with an option outside its allowlist is not allowed here; {LOCAL_GIT_FORM}")
     if sub in _PATHSPEC_COMMANDS and any(into_git_dir(p) for p in parsed.positional):
@@ -344,7 +344,7 @@ def registered_git(argv: list[str], cwd: str, repository: "RegisteredRepository"
     return allow()
 
 
-def _fork_push(parsed: _Parsed, cwd: str, repository: "RegisteredRepository") -> Decision:
+def _fork_push(parsed: Parsed, cwd: str, repository: "RegisteredRepository") -> Decision:
     if len(parsed.positional) != 2 or not _REMOTE_NAME.fullmatch(parsed.positional[0]) or not parsed.positional[1].startswith("HEAD:"):
         return deny(FORK_PUSH_FORM)
     remote, refspec = parsed.positional
@@ -383,7 +383,7 @@ _GH_READS = frozenset(
     | {("run", verb) for verb in ("view", "list", "watch")}
     | {("repo", "view")}
 )
-_GH_API_READ = _options("--paginate", "--jq -q --method -X")
+_GH_API_READ = option_set("--paginate", "--jq -q --method -X")
 
 
 def gh_exposes_token(argv: list[str]) -> bool:
@@ -395,7 +395,7 @@ def gh_exposes_token(argv: list[str]) -> bool:
 
 
 def _gh_api_read(args: list[str]) -> bool:
-    parsed = _parse(args, _GH_API_READ)
+    parsed = parse_options(args, _GH_API_READ)
     if parsed is None or len(parsed.positional) != 1 or ".." in parsed.positional[0] or not _ENDPOINT.fullmatch(parsed.positional[0]):
         return False
     methods = parsed.options.get("--method", []) + parsed.options.get("-X", [])

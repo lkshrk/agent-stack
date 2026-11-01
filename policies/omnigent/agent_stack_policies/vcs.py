@@ -5,16 +5,15 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
 from ._shell import OpaqueCommand, DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
-from .contribution_vcs import _GIT_OPTIONS, _options, _parse
+from .contribution_vcs import GIT_OPTIONS, option_set, parse_options
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
 from .tools import gh_api_mutates
 
 _VCS = frozenset({"git", "gh"})
 _GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "fetch", "merge-base"})
-_GIT_UNSAFE_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--ext-diff")
-_GIT_READ_OPTIONS = {
-    **{verb: _GIT_OPTIONS[verb] for verb in _GIT_READ - {"fetch"}},
-    "fetch": _options("-q --quiet -v --verbose"),
+GIT_READ_OPTIONS = {
+    **{verb: GIT_OPTIONS[verb] for verb in _GIT_READ - {"fetch"}},
+    "fetch": option_set("-q --quiet -v --verbose"),
 }
 _REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _FETCH_BRANCH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
@@ -98,7 +97,7 @@ def _check_push(args: list[str]) -> str | None:
     return None
 
 
-def _check_fetch(positional: list[str]) -> str | None:
+def check_fetch_positional(positional: list[str]) -> str | None:
     if not positional:
         return None
     remote, refspecs = positional[0], positional[1:]
@@ -121,10 +120,10 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if sub.startswith("-"):
         return f"git global options are not allowed; {GIT_FORM}"
     if sub in _GIT_READ:
-        parsed = _parse(args, _GIT_READ_OPTIONS[sub])
+        parsed = parse_options(args, GIT_READ_OPTIONS[sub])
         if parsed is None:
             return f"git {sub} with an option outside its allowlist is not allowed; {GIT_FORM}"
-        return _check_fetch(parsed.positional) if sub == "fetch" else None
+        return check_fetch_positional(parsed.positional) if sub == "fetch" else None
     if sub == "branch":
         flags = [a for a in args if a.startswith("-")]
         listing = all(f in _BRANCH_LIST_FLAGS for f in flags) and (
