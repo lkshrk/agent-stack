@@ -1247,6 +1247,80 @@ class PublicContributionEngineTest(unittest.TestCase):
                     self.assertIn("public_contributions", out)
                     self.assertNotEqual(out["public_contributions"].action.name, "DENY")
 
+    def test_native_bundles_allow_only_fork_staging_in_registered_context(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from .fork_checkout import FORK, commit, fork_checkout
+
+        allowed = (
+            ["git", "push", "fork", "HEAD:feat/x"],
+            ["git", "push", "-u", "fork", "HEAD:feat/x"],
+            ["gh", "pr", "create", "--repo", FORK, "--base", "main", "--head", "feat/x", "--title", "fix(web): a", "--body", "b"],
+            ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-ready"],
+            ["gh", "issue", "create", "--repo", FORK, "--title", "bug", "--body", "b"],
+        )
+        denied = (
+            ["git", "push", "origin", "HEAD:feat/x"],
+            ["git", "push", "fork", "HEAD:main"],
+            ["git", "push", "--force", "fork", "HEAD:feat/x"],
+            ["git", "push", "--tags", "fork", "HEAD:feat/x"],
+            ["git", "push", "--mirror", "fork"],
+            ["git", "push", "fork", ":feat/x"],
+            ["gh", "pr", "create", "--head", "feat/x", "--title", "t"],
+            ["gh", "pr", "create", "--repo", "omnigent-ai/omnigent", "--head", "feat/x", "--title", "t"],
+            ["gh", "pr", "merge", "7", "--repo", FORK],
+            ["gh", "release", "create", "v1", "--repo", FORK],
+            ["gh", "workflow", "run", "ci.yml", "--repo", FORK],
+            ["gh", "api", "-X", "POST", f"repos/{FORK}/pulls"],
+            "git push fork HEAD:feat/x",
+            ["bash", "-lc", "git push fork HEAD:feat/x"],
+        )
+        for agent in ("polly/agents/claude_code", "polly/agents/codex"):
+            with fork_checkout() as tree:
+                for command, want in [(c, "ALLOW") for c in allowed] + [(c, "DENY") for c in denied]:
+                    with self.subTest(agent=agent, command=command):
+                        out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": str(tree)}, ""))
+                        self.assertIn("public_contributions", out)
+                        self.assertEqual(out["public_contributions"].action.name, want)
+                commit(tree, ".github/workflows/release.yml", "on: push\n", "ci: add release")
+                with self.subTest(agent=agent, command="push touching workflows"):
+                    out = results(
+                        BUNDLES / agent,
+                        Case(agent, "tool_call", "Bash", {"command": ["git", "push", "fork", "HEAD:feat/x"], "cwd": str(tree)}, ""),
+                    )
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+
+
+class ContributionPromptTest(unittest.TestCase):
+    def prompt(self, bundle):
+        import yaml
+
+        return " ".join(yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["prompt"].split())
+
+    def test_writer_prompts_stage_contributions_in_the_fork(self):
+        implementer = self.prompt("polly/agents/claude_code")
+        for phrase in (
+            "git push -u <fork-remote> HEAD:<branch>",
+            "gh pr create --repo <fork> --base <default branch> --head <branch>",
+            "upstream-ready",
+            "only once the fork's CI is green",
+            "approved-upstream",
+            "upstream's own conventions",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, implementer)
+        for bundle in ("polly", "polly/agents/claude_code", "documenter", "planner"):
+            with self.subTest(bundle=bundle):
+                self.assertNotIn("publish request", self.prompt(bundle))
+                self.assertIn("fork", self.prompt(bundle))
+
+    def test_writer_prompts_use_semantic_release_commits_and_never_tag(self):
+        for bundle in ("polly", "polly/agents/claude_code"):
+            prompt = self.prompt(bundle)
+            for phrase in ("semantic-release", "`fix:`", "`feat:`", "`BREAKING CHANGE:`", "never create tags or releases"):
+                with self.subTest(bundle=bundle, phrase=phrase):
+                    self.assertIn(phrase, prompt)
+
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
 class BundleVerdictTest(unittest.TestCase):

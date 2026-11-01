@@ -2,6 +2,8 @@ version: 1
 repositories:
   omnigent:
     upstream: https://github.com/omnigent-ai/omnigent.git
+    fork: lkshrk/omnigent
+    ci: github-hosted
     checkout: omnigent
     default_branch: main
     visibility: public

@@ -35,6 +35,52 @@ class PublicContributionsTest(unittest.TestCase):
             ["lint", "typecheck", "test", "build"],
         )
         self.assertEqual(len(registry.revision), 64)
+        self.assertEqual(repository.fork, "lkshrk/omnigent")
+        self.assertEqual(repository.ci, "github-hosted")
+
+    def test_rejects_fork_outside_the_owner_account_or_equal_to_upstream(self):
+        for fork in [
+            "omnigent-ai/omnigent",
+            "someone/omnigent",
+            "lkshrk/other",
+            "Lkshrk/omnigent",
+            "lkshrk/omnigent.git",
+            "https://github.com/lkshrk/omnigent.git",
+            "lkshrk",
+            "lkshrk/omnigent/extra",
+            "",
+            None,
+        ]:
+            with self.subTest(fork=fork):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["fork"] = fork
+
+                with self.assertRaisesRegex(RegistryError, "fork"):
+                    self.load(registry)
+
+    def test_rejects_upstream_in_the_owner_account(self):
+        registry = self.registry()
+        entry = registry["repositories"]["omnigent"]
+        entry["upstream"] = "https://github.com/lkshrk/omnigent.git"
+
+        with self.assertRaisesRegex(RegistryError, "fork"):
+            self.load(registry)
+
+    def test_requires_fork_and_github_hosted_ci(self):
+        for field in ["fork", "ci"]:
+            with self.subTest(missing=field):
+                registry = self.registry()
+                del registry["repositories"]["omnigent"][field]
+
+                with self.assertRaisesRegex(RegistryError, f"missing field: {field}"):
+                    self.load(registry)
+        for ci in ["self-hosted", "cluster", True]:
+            with self.subTest(ci=ci):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["ci"] = ci
+
+                with self.assertRaisesRegex(RegistryError, "ci"):
+                    self.load(registry)
 
     def test_rejects_unknown_field(self):
         registry = self.registry()

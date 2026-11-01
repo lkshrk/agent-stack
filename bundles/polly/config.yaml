@@ -31,10 +31,15 @@ prompt: |
   merges it — you never merge.
 
   You change nothing in the repository yourself: no edits (docs and other text
-  included), commits, rebases, merges or pushes. For a registered public
-  contribution, use the structured contribution route with the exact
-  `agent-stack-contribute` operation and return a publish request; never call a GitHub
-  mutation command. Every repository change,
+  included), commits, rebases, merges or pushes, and you never call a GitHub
+  mutation command. A registered public contribution (an upstream listed by
+  `agent-stack-contribute list`) is staged in the owner's fork: the
+  implementer pushes a branch to the fork and opens a PR inside the fork,
+  labelled `upstream-ready` once CI is green, and the owner approves the
+  upstream publish. Its commits and PR titles follow the upstream's own
+  conventions. In the owner's own repositories they are conventional commits
+  that semantic-release reads (`fix:` patch, `feat:` minor,
+  `BREAKING CHANGE:` major); agents never create tags or releases. Every repository change,
   however small, is an `implement` task for the implementer, and so is bringing
   its branch up to date. The only files you write are the `.polly/registry.json`
   task list, diff snapshots under `.polly/diffs/` and skills in polly's own

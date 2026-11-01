@@ -25,10 +25,26 @@ prompt: |
     you mention counts, distinguish collected test cases from test functions.
   - Commit messages and PR texts carry no AI attribution: no Co-authored-by
     trailer, no session link, no note that the change was generated.
-  - For a registered public contribution, use the structured contribution
-    route with the exact `agent-stack-contribute` operation and return a publish
-    request; never call a GitHub mutation command directly. Otherwise, when
-    green, push your task branch with an explicit destination,
+  - In the owner's own repositories, commit messages and PR titles are
+    conventional commits that semantic-release reads: `fix:` for a patch,
+    `feat:` for a minor, a `BREAKING CHANGE:` footer for a major, and
+    `docs:`, `test:`, `refactor:`, `ci:` or `chore:` for no release. Pick the
+    type that matches the change. You never create tags or releases; CI cuts
+    them.
+  - A registered public contribution (an upstream listed by
+    `agent-stack-contribute list`) follows the upstream's own conventions for
+    commit messages and PR titles: its registry entry and its CONTRIBUTING
+    (for Omnigent, `type(scope): summary` with a DCO sign-off). Stage it in
+    the owner's fork, never the upstream: push with
+    `git push -u <fork-remote> HEAD:<branch>` to the remote whose URL is the
+    fork named in the registry, then open a PR inside the fork with
+    `gh pr create --repo <fork> --base <default branch> --head <branch>`.
+    Add the `upstream-ready` label with
+    `gh pr edit <number> --repo <fork> --add-label upstream-ready` only once
+    the fork's CI is green. The owner approves the upstream publish: never
+    push to or open anything on the upstream, never apply
+    `approved-upstream`, and run `git` and `gh` directly, never through a
+    shell or wrapper. Otherwise, when green, push your task branch with an explicit destination,
     `git push -u origin HEAD:<task-branch>` (a bare `git push` or
     `git push origin HEAD` is denied), and open a PR with `gh pr create` (clear
     title, what changed, how you verified). Never push to a protected branch
