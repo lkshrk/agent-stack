@@ -1,0 +1,35 @@
+version: 1
+repositories:
+  omnigent:
+    upstream: https://github.com/omnigent-ai/omnigent.git
+    checkout: omnigent
+    default_branch: main
+    visibility: public
+    upstream_commit: 194defcad8f5e6b63d31b0d05a65b80574266c3f
+    validation:
+      image: ghcr.io/lkshrk/agent-stack/public-validator@sha256:4f12f332b748445e41f8e53d1c728357baf66a5d6c1a43cfa93688957c43af7e
+      profile: web
+      install:
+        argv: [pnpm, install, --frozen-lockfile, --filter, web, --ignore-scripts]
+        lifecycle_scripts: denied
+      commands:
+        - name: lint
+          cwd: web
+          argv: [pnpm, run, lint]
+        - name: typecheck
+          cwd: web
+          argv: [pnpm, run, type-check]
+        - name: test
+          cwd: web
+          argv: [pnpm, test]
+        - name: build
+          cwd: web
+          argv: [pnpm, run, build]
+      package_registries: [https://registry.npmjs.org]
+      github_read_access: public-read
+    contribution:
+      issue_before_bugfix_pr: true
+      dco: required
+      demo_for_ui: required
+      no_ai_attribution: true
+    lifecycle: registered
