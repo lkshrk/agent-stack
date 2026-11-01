@@ -366,6 +366,7 @@ guardrails:
             - "polly/skills/**"
           deny:
             - ".github/workflows/**"
+            - "**/.git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"

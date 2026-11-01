@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from agent_stack_policies import public_contributions
+from agent_stack_policies import contribution_vcs
 from agent_stack_policies.public_contributions import prepare_operation
 
 from . import tool_call_event
@@ -129,10 +129,11 @@ class ForkStagingTest(unittest.TestCase):
         commit(self.tree, "web/b.ts", "export const b = 1\n", "feat(web): add b")
         self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
 
-    def test_denies_push_when_pushed_commits_cannot_be_listed(self):
-        git(self.tree, "update-ref", "-d", "refs/remotes/fork/main")
-        git(self.tree, "update-ref", "-d", "refs/remotes/origin/main")
-        self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
+    def test_denies_push_when_the_fork_head_is_unknown_or_not_fetched(self):
+        with patch.object(contribution_vcs, "fork_default_head", lambda repository: None):
+            self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
+        with patch.object(contribution_vcs, "fork_default_head", lambda repository: "0" * 40):
+            self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
 
     def test_allows_fork_pull_request_and_issue_writes(self):
         for command in (
@@ -323,7 +324,6 @@ class ForkStagingTest(unittest.TestCase):
             ["git", "fetch", "fork", "main"],
             ["git", "branch", "--show-current"],
             ["git", "config", "--get", "user.name"],
-            ["git", "config", "--list"],
             ["git", "remote", "-v"],
             ["git", "remote", "get-url", "fork"],
         ):
@@ -431,7 +431,7 @@ class ForkStagingTest(unittest.TestCase):
         def expire(*args, **kwargs):
             raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
-        with patch.object(public_contributions.subprocess, "run", side_effect=expire):
+        with patch.object(contribution_vcs.subprocess, "run", side_effect=expire):
             self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
             self.assertDenied(["git", "add", "web/a.ts"])
             self.assertDenied(["git", "commit", "-m", "fix(web): a"])
@@ -445,7 +445,7 @@ class ForkStagingTest(unittest.TestCase):
             return real_run(*args, **kwargs)
 
         secrets = {"GH_TOKEN": "x", "GITHUB_TOKEN": "x", "GIT_ASKPASS": "/bin/true", "SSH_AUTH_SOCK": "/tmp/s", "AWS_SECRET_ACCESS_KEY": "x"}
-        with patch.dict(os.environ, secrets), patch.object(public_contributions.subprocess, "run", side_effect=record):
+        with patch.dict(os.environ, secrets), patch.object(contribution_vcs.subprocess, "run", side_effect=record):
             self.assertAllowed(["git", "push", "fork", "HEAD:feat/x"])
             self.assertAllowed(["git", "commit", "-m", "fix(web): a"])
         self.assertTrue(calls)
@@ -453,6 +453,168 @@ class ForkStagingTest(unittest.TestCase):
             self.assertFalse(set(secrets) & set(kwargs["env"]), sorted(set(secrets) & set(kwargs["env"])))
             self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
             self.assertGreater(kwargs["timeout"], 0)
+
+    def test_review_probes_fail_closed(self):
+        for command in (
+            ["git", "rebase", "--exe", "git push origin HEAD:main", "HEAD~1"],
+            ["git", "rebase", "-kx", "git push origin HEAD:main", "HEAD~1"],
+            ["git", "rebase", "--inter", "HEAD~1"],
+            ["git", "rebase", "-i", "HEAD~1"],
+            ["git", "fetch", "--upload-pac=touch /tmp/pwn;:", "."],
+            ["git", "fetch", "--upload-pack=touch /tmp/pwn", "origin"],
+            ["git", "fetch", "--exe=x", "origin"],
+            ["git", "push", "--receive-pa=x", "fork", "HEAD:feat/x"],
+            ["git", "diff", "--outp=/tmp/out"],
+            ["git", "log", "--format=x", "--outp=.git/x"],
+            ["git", "show", "--outp=/tmp/x"],
+            ["git", "fetch", ".", "HEAD:refs/remotes/origin/forged"],
+            ["git", "fetch", "origin", "main:refs/remotes/origin/forged"],
+            ["git", "fetch", "origin", "+main"],
+            ["git", "fetch", "--set-upstream", "origin", "main"],
+            ["git", "fetch", "ext::sh -c touch% /tmp/ext"],
+            ["git", "fetch", "https://github.com/omnigent-ai/omnigent.git"],
+            ["git", "push", "fork", "HEAD:HEAD"],
+            ["git", "push", "fork", "HEAD:refs/heads/refs/tags/v1"],
+            ["git", "push", "fork", "HEAD:refs/tags/v1"],
+            ["git", "push", "fork", "HEAD:Main"],
+            ["git", "push", "fork", "HEAD:MASTER"],
+            ["git", "push", "fork", "HEAD:refs/heads/HEAD"],
+            ["git", "switch", "-c", "HEAD"],
+            ["git", "switch", "-c", "Main"],
+            ["git", "config", "--get-regexp", "."],
+            ["git", "config", "--get", "http.https://github.com/.extraheader"],
+            ["git", "config", "--get", "credential.helper"],
+            ["git", "config", "--list"],
+            ["gh", "api", "-X", "GET", "-X", "POST", "repos/omnigent-ai/omnigent/issues", "-f", "title=x"],
+            ["gh", "api", "--method=GET", "--method=POST", "repos/omnigent-ai/omnigent/issues"],
+            ["gh", "api", "-X", "GET", "graphql", "-f", "query={viewer{login}}"],
+            ["gh", "api", "user"],
+            ["gh", "api", "-H", "X-HTTP-Method-Override: POST", "repos/omnigent-ai/omnigent/issues"],
+            ["gh", "pr", "edit", "1", "--repo", "lkshrk/omnigent", "--add-label", "Approved-Upstream"],
+            ["gh", "issue", "edit", "1", "--repo", "lkshrk/omnigent", "--add-label", "APPROVED-UPSTREAM"],
+            ["gh", "issue", "create", "--repo", "lkshrk/omnigent", "--title", "t", "--label", " approved-UPSTREAM "],
+            ["gh", "auth", "status", "--show-token"],
+            ["gh", "auth", "status", "-t"],
+            ["gh", "auth", "token"],
+            ["gh", "pr", "-R", "omnigent-ai/omnigent", "create", "--head", "x"],
+            ["git", "st"],
+            ["git", "commit-tree", "HEAD^{tree}", "-m", "x"],
+            ["git", "reset", "--hard", "FETCH_HEAD"],
+            ["git", "cherry-pick", "FETCH_HEAD"],
+            ["git", "merge", "FETCH_HEAD"],
+            ["git", "stash"],
+            ["git", "am", "x.patch"],
+            ["git", "update-index", "--add", "x"],
+            ["git", "read-tree", "FETCH_HEAD"],
+            ["git", "gc"],
+            ["git", "pull", "--upload-pac=x", "."],
+            ["git", "bisect", "run", "sh"],
+            ["git", "difftool", "-x", "sh"],
+            ["git", "grep", "-O", "sh"],
+            ["git", "grep", "--open-files-in-pager=sh", "x"],
+            ["git", "maintenance", "run"],
+            ["git", "archive", "--remote=x", "HEAD"],
+            ["git", "send-email", "x"],
+            ["git", "request-pull", "x"],
+            ["git", "credential", "fill"],
+            ["git", "branch", "--list", "-D"],
+            ["git", "commit", "-m", "x", "-F", "/etc/passwd"],
+            ["git", "commit", "-am", "x"],
+            ["git", "commit"],
+            ["git", "add", "-p"],
+            ["git", "add", ".git/hooks/pre-commit"],
+            ["git", "restore", "--source=HEAD", ".git/config"],
+            ["git", "status", "--porcelain", "-uall"],
+            ["git"],
+            "git rebase --exe 'git push origin HEAD:main' HEAD~1",
+            "git push fork HEAD:feat/x\x00",
+            "git push fork 'HEAD:feat/x\x00'",
+            "git push fork HEAD:feat/x\r",
+            "git commit -m 'a\rb'",
+            "git push fork HEAD:feat/x # c",
+            "git -c x=y push",
+            "git push fork HEAD:feat/x\v",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_review_probe_controls_stay_allowed(self):
+        for command in (
+            ["git", "status", "--porcelain"],
+            ["git", "remote", "get-url", "fork"],
+            ["git", "commit", "--amend", "--no-edit"],
+            ["git", "switch", "-c", "x", "FETCH_HEAD"],
+            ["git", "fetch", "fork", "main"],
+            ["git", "fetch", "--prune", "origin"],
+            ["git", "log", "-5", "--format=%h %s"],
+            ["git", "log", "-n", "3", "--oneline", "--", "web"],
+            ["git", "diff", "--stat", "origin/main...HEAD"],
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            ["git", "rebase", "--onto", "origin/main", "HEAD~1"],
+            ["git", "config", "--get", "user.name"],
+            ["gh", "api", "repos/lkshrk/omnigent/pulls", "--jq", ".[].number"],
+            ["gh", "api", "-X", "GET", "repos/lkshrk/omnigent/actions/runs?branch=feat/x"],
+            "git commit -m 'a\nb'",
+            f"gh pr create --repo {FORK} --head x --title \"a\"\"b\"",
+            "git commit -m x y",
+        ):
+            with self.subTest(command=command):
+                decision = self.evaluate(command)
+                self.assertNotEqual((decision or {}).get("result"), "DENY", decision)
+
+    def test_forged_remote_refs_do_not_hide_workflow_commits(self):
+        commit(self.tree, ".github/workflows/evil.yml", "on: push\n", "ci: evil")
+        git(self.tree, "update-ref", "refs/remotes/origin/forged", "HEAD")
+        git(self.tree, "update-ref", "refs/remotes/fork/forged", "HEAD")
+        self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
+
+    def test_shell_paths_into_git_dir_are_denied_in_the_tree(self):
+        for command in (
+            ["cp", "/tmp/hook", ".git/hooks/pre-commit"],
+            ["tee", ".git/config"],
+            ["ln", "-s", "/tmp/x", "web/../.git/hooks/post-checkout"],
+            ["chmod", "+x", f"{self.tree}/.git/hooks/pre-commit"],
+            ["python3", "script.py", "--out=.git/config"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+        self.assertIsNone(self.evaluate(["ls", ".github"]))
+
+    def test_registered_context_cannot_be_escaped_with_cd_or_home_expansion(self):
+        home = self.tree.parent.parent
+        for command in (
+            "cd ~/work/omnigent && git push origin HEAD:feat/x",
+            "cd $HOME/work/omnigent && git push origin HEAD:feat/x",
+            "cd ${HOME}/work/omnigent && git push origin HEAD:feat/x",
+            "cd work/omnigent; git push origin HEAD:feat/x",
+            "cd work && cd omnigent && git push origin HEAD:feat/x",
+            "pushd work/omnigent && git push origin HEAD:feat/x",
+            "CDPATH=~/work cd omnigent && git push origin HEAD:feat/x",
+            "git -C ~/work/omnigent push fork HEAD:feat/x",
+            f"cd {home}/work/omni* && git push origin HEAD:main",
+            f"cd {home}/w*/o*gent && git push origin HEAD:main",
+            "cat ~/work/omnigent/.git/config",
+            "bash -c 'cd ~/work/omnigent && git push origin HEAD:main'",
+            ["bash", "-c", "cd ~/work/omnigent && git push origin HEAD:main"],
+            ["bash", "-c", "cd work/omnigent && git push origin HEAD:main"],
+            ["git", "-C", "work/omnigent", "push", "fork", "HEAD:feat/x"],
+            ["cp", "/tmp/hook", "work/omnigent/.git/hooks/pre-commit"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, cwd=home)
+        own = home / "work" / "agent-stack"
+        own.mkdir()
+        for command in (
+            "cd ~/work/agent-stack && git status",
+            ["git", "push", "origin", "HEAD:feat/x"],
+            "git status",
+        ):
+            with self.subTest(control=command):
+                self.assertIsNone(self.evaluate(command, cwd=own))
+        self.assertIsNone(self.evaluate("gh auth status", cwd=own))
+        self.assertDenied("gh auth status --show-token", cwd=own)
+        self.assertDenied(["gh", "auth", "token"], cwd=own)
+        self.assertDenied("gh auth status -t 2>&1 | cat", cwd=own)
 
     def test_own_repositories_keep_their_behaviour(self):
         own = self.tree.parent / "agent-stack"

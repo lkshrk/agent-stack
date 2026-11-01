@@ -124,6 +124,7 @@ guardrails:
         arguments:
           deny: &docs_deny
             - ".github/workflows/**"
+            - "**/.git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"

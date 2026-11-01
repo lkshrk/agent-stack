@@ -33,3 +33,45 @@ class DenyToolsTest(unittest.TestCase):
 
     def test_abstains_on_agent_start_probe(self):
         self.assertIsNone(deny_tools(patterns=["*"])(tool_call_event("sys_agent_start")))
+
+
+class GhApiMutatesTest(unittest.TestCase):
+    def test_last_method_wins_and_bodies_are_writes(self):
+        from agent_stack_policies.tools import gh_api_mutates
+
+        writes = (
+            ["-X", "GET", "-X", "POST", "repos/o/r/issues", "-f", "title=x"],
+            ["-X", "GET", "-X", "POST", "repos/o/r/issues"],
+            ["--method=GET", "--method=POST", "repos/o/r/issues"],
+            ["--method", "GET", "--method", "DELETE", "repos/o/r"],
+            ["-XGET", "-XPOST", "repos/o/r/issues"],
+            ["-X=GET", "-X=PATCH", "repos/o/r"],
+            ["-iXPOST", "repos/o/r/issues"],
+            ["-iX", "POST", "repos/o/r/issues"],
+            ["repos/o/r/issues", "-f", "title=x"],
+            ["repos/o/r/issues", "-ftitle=x"],
+            ["repos/o/r/issues", "-F", "title=x"],
+            ["repos/o/r/issues", "--field", "title=x"],
+            ["repos/o/r/issues", "--raw-field=title=x"],
+            ["repos/o/r/issues", "--input", "body.json"],
+            ["-X", "GET", "repos/o/r/issues", "-f", "q=x"],
+            ["graphql", "-f", "query=mutation{x}"],
+            ["-X"],
+            ["--method"],
+            ["-Z", "repos/o/r"],
+        )
+        for args in writes:
+            with self.subTest(args=args):
+                self.assertTrue(gh_api_mutates(args))
+        reads = (
+            ["repos/o/r/issues"],
+            ["-X", "GET", "repos/o/r/issues"],
+            ["-X", "POST", "-X", "GET", "repos/o/r/issues"],
+            ["--method=GET", "repos/o/r"],
+            ["-XGET", "repos/o/r"],
+            ["repos/o/r/pulls", "--jq", ".[].number", "--paginate"],
+            ["repos/o/r/pulls", "-q", ".[].title", "-H", "Accept: application/json"],
+        )
+        for args in reads:
+            with self.subTest(args=args):
+                self.assertFalse(gh_api_mutates(args))

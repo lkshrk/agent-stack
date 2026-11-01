@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_stack_policies import public_contributions
+from agent_stack_policies import contribution_vcs, public_contributions
 
 REGISTRY = Path(__file__).resolve().parents[3] / "config" / "public-contributions.yaml"
 UPSTREAM_URL = "https://github.com/omnigent-ai/omnigent.git"
@@ -46,20 +46,22 @@ def commit(tree: Path, name: str, text: str, message: str) -> None:
 
 @contextlib.contextmanager
 def fork_checkout():
-    """A registered omnigent checkout with `origin` = upstream, `fork` = the owner's fork and one unpushed commit."""
+    """A registered omnigent checkout under <tmp>/work with `origin` = upstream, `fork` = the owner's fork, one unpushed commit, and the fork default head pinned."""
     with tempfile.TemporaryDirectory() as directory:
-        workspace = Path(directory).resolve()
+        workspace = Path(directory).resolve() / "work"
         tree = workspace / "omnigent"
-        tree.mkdir()
+        tree.mkdir(parents=True)
         git(tree, "init", "-q", "-b", "main")
         commit(tree, ".github/workflows/ci.yml", "on: push\n", "chore: initial")
         git(tree, "remote", "add", "origin", UPSTREAM_URL)
         git(tree, "remote", "add", "fork", FORK_URL)
         git(tree, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(tree, "update-ref", "refs/remotes/fork/main", "HEAD")
+        fork_head = git(tree, "rev-parse", "HEAD").strip()
         commit(tree, "web/a.ts", "export const a = 1\n", "fix(web): change a")
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(public_contributions, "RUNTIME_REGISTRY", REGISTRY))
             stack.enter_context(patch.object(public_contributions, "CONTRIBUTION_WORKSPACE", workspace))
+            stack.enter_context(patch.object(contribution_vcs, "fork_default_head", lambda repository: fork_head))
             stack.enter_context(patch.dict(os.environ, _environment(), clear=True))
             yield tree

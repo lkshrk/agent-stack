@@ -3,9 +3,9 @@ import json
 import os
 import posixpath
 import re
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -13,7 +13,8 @@ from urllib.parse import urlparse
 import yaml
 
 from ._event import Decision, Event, allow, deny, tool_call
-from ._shell import DEFAULT_PROTECTED, OpaqueCommand, push_branch, resolve, shell_command, walk
+from ._shell import OpaqueCommand, resolve, shell_command, walk
+from .contribution_vcs import fork_gh, gh_exposes_token, into_git_dir, registered_git
 from .paths import SHELL_TOOLS
 from .tools import direct_public_write, gh_api_mutates
 
@@ -25,61 +26,12 @@ CONTRIBUTION_WORKSPACE = Path("/home/omnigent/work")
 FORK_OWNER = "lkshrk"
 CI_PROVIDERS = frozenset({"github-hosted"})
 TITLE_FORMATS = frozenset({"conventional-scoped"})
-_GIT_LOCAL = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "merge-base", "restore", "fetch"})
-_GIT_DENIED = frozenset(
-    {"clone", "worktree", "tag", "update-ref", "symbolic-ref", "submodule", "replace", "filter-branch", "notes", "send-pack", "http-push"}
-)
-_GIT_UNSAFE_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--ext-diff")
-_BRANCH_LIST_FLAGS = frozenset({"--show-current", "-a", "--all", "-r", "--remotes", "-l", "--list", "-v", "-vv", "--verbose"})
-_CONFIG_GETS = frozenset({"--get", "--get-all", "--get-regexp"})
-LOCAL_GIT_FORM = (
-    "in a registered contribution git allows status, diff, log, show, add, commit, restore, rebase, fetch, "
-    "`switch -c`/`checkout -b <branch>` onto a non-default branch, config and remote reads, and the fork push"
-)
-_GIT_PAGER_OFF = frozenset({"--no-pager", "-P"})
 _VCS_NAMES = frozenset({"git", "gh"})
 _UNQUOTED_LITERAL = re.compile(r"[A-Za-z0-9_./:=@,+%^-]")
-_GIT_TIMEOUT = 10
-_GIT_SAFE_CONFIG = (
-    "core.fsmonitor=false",
-    "core.hooksPath=/dev/null",
-    "core.pager=cat",
-    "diff.external=",
-    "log.showSignature=false",
-    "submodule.recurse=false",
-)
-_FILTER_DRIVER = re.compile(r"[A-Za-z0-9_.-]+")
-_GIT_ENV_KEEP = ("PATH", "HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM")
-_WORKFLOWS = ".github/workflows/"
-_OWNER_LABEL = "approved-upstream"
-_REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
-_BRANCH_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
+_QUOTED_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_GLOB = re.compile(r"[*?\[]")
 _GH_SLUG = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-_GH_READS = frozenset(
-    {("pr", verb) for verb in ("view", "diff", "checks", "list", "status")}
-    | {("issue", verb) for verb in ("view", "list", "status")}
-    | {("run", verb) for verb in ("view", "list", "watch")}
-    | {("repo", "view"), ("auth", "status")}
-)
-_GH_SHORT = {
-    "-R": "--repo", "-t": "--title", "-b": "--body", "-B": "--base", "-H": "--head", "-l": "--label",
-    "-a": "--assignee", "-m": "--milestone", "-p": "--project", "-r": "--reviewer", "-d": "--draft",
-}
-_GH_COMMON = {"--repo": True, "--title": True, "--body": True, "--milestone": True}
-_GH_CREATE = {**_GH_COMMON, "--label": True, "--assignee": True, "--project": True}
-_GH_EDIT = {
-    **_GH_COMMON,
-    "--add-label": True, "--remove-label": True, "--add-assignee": True, "--remove-assignee": True,
-    "--add-project": True, "--remove-project": True, "--remove-milestone": False,
-}
-_GH_FORK_WRITES: dict[tuple[str, str], dict[str, bool]] = {
-    ("pr", "create"): {**_GH_CREATE, "--base": True, "--head": True, "--reviewer": True, "--draft": False, "--no-maintainer-edit": False},
-    ("pr", "edit"): {**_GH_EDIT, "--base": True, "--add-reviewer": True, "--remove-reviewer": True},
-    ("issue", "create"): _GH_CREATE,
-    ("issue", "edit"): _GH_EDIT,
-}
-FORK_PUSH_FORM = "in a registered contribution only `git push [-u] <fork-remote> HEAD:<branch>` to a non-default branch of the owner's fork is allowed"
-FORK_GH_FORM = "in a registered contribution gh may write only through `gh pr create|edit` and `gh issue create|edit` with `--repo <fork>`"
+_WORD = re.compile(r"[^\s;&|<>()`'\"]+")
 
 
 class RegistryError(ValueError):
@@ -334,22 +286,93 @@ def _argv(value: Any, context: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _registered_repository(value: object, registry: Registry) -> RegisteredRepository | None:
+def _roots(registry: Registry) -> list[tuple[Path, RegisteredRepository]]:
+    return [(CONTRIBUTION_WORKSPACE / repository.checkout, repository) for repository in registry.repositories]
+
+
+def _registered_repository(value: object, registry: Registry, cwd: str | None = None) -> RegisteredRepository | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        path = Path(value).resolve(strict=False)
-    except OSError:
+        path = (Path(cwd) / value if cwd and not os.path.isabs(value) else Path(value)).resolve(strict=False)
+    except (OSError, ValueError):
         return None
-    for repository in registry.repositories:
-        root = CONTRIBUTION_WORKSPACE / repository.checkout
+    for root, repository in _roots(registry):
         if path == root or root in path.parents:
             return repository
     return None
 
 
-def _registered_path(value: object, registry: Registry) -> bool:
-    return _registered_repository(value, registry) is not None
+def _registered_path(value: object, registry: Registry, cwd: str | None = None) -> bool:
+    return _registered_repository(value, registry, cwd) is not None
+
+
+def _glob_reaches_root(pattern: str, registry: Registry) -> bool:
+    parts = Path(posixpath.normpath(pattern)).parts
+    for root, _ in _roots(registry):
+        root_parts = root.parts
+        if len(parts) >= len(root_parts) and all(fnmatchcase(r, p) for r, p in zip(root_parts, parts)):
+            return True
+    return False
+
+
+def _homes() -> list[str]:
+    homes = {str(CONTRIBUTION_WORKSPACE.parent), str(Path.home())}
+    if os.environ.get("HOME"):
+        homes.add(os.environ["HOME"])
+    return sorted(homes)
+
+
+def _expansions(word: str, bases: list[str]) -> list[str]:
+    candidates = [word]
+    if word.startswith("-") and not word.startswith("--") and len(word) > 2:
+        candidates.append(word[2:])
+    candidates += [part for part in (word.partition("=")[2],) if part]
+    expanded: list[str] = []
+    for candidate in candidates:
+        for prefix in ("${HOME}", "$HOME", "~"):
+            if candidate == prefix or candidate.startswith(prefix + "/"):
+                expanded += [home + candidate[len(prefix):] for home in _homes()]
+                break
+        else:
+            if candidate.startswith("~"):
+                expanded.append(os.path.expanduser(candidate))
+            else:
+                expanded.append(candidate)
+    return [path if os.path.isabs(path) else os.path.join(base, path) for path in expanded for base in (bases if not os.path.isabs(path) else [""])]
+
+
+def _refers_to_root(path: str, registry: Registry) -> bool:
+    return _glob_reaches_root(path, registry) if _GLOB.search(path) else _registered_path(path, registry)
+
+
+def _may_name_checkout(text: str, registry: Registry) -> bool:
+    if any(posixpath.basename(repository.checkout) in text for repository in registry.repositories):
+        return True
+    return bool(_GLOB.search(text)) and bool(re.search(r"/|(^|[\s;&|(])(cd|pushd)\b", text))
+
+
+def _references_registered_root(text: str, cwd: str | None, registry: Registry) -> bool:
+    """Whether any word, after lexical ~/$HOME expansion and a walk through cd/pushd, can name a registered checkout."""
+    if not _may_name_checkout(text, registry):
+        return False
+    try:
+        statements = walk(text)
+    except (OpaqueCommand, ValueError):
+        statements = [_WORD.findall(text)]
+    bases = [cwd] if cwd else []
+    for tokens in statements:
+        resolved = resolve(tokens)
+        for assignment in resolved.assignments:
+            if assignment.startswith("CDPATH="):
+                bases += [path for entry in assignment.removeprefix("CDPATH=").split(":") for path in _expansions(entry or ".", bases or ["/"])]
+        for token in tokens:
+            if any(_refers_to_root(path, registry) for path in _expansions(token, bases or ["/"])):
+                return True
+        if resolved.name in ("cd", "pushd"):
+            target = resolved.argv[-1] if len(resolved.argv) > 1 else "~"
+            bases = _expansions(target, bases or ["/"]) + bases
+    return False
 
 
 def _cwd(arguments: dict) -> str | None:
@@ -375,7 +398,7 @@ def _literal_words(command: str) -> list[str] | None:
             if end < 0:
                 return None
             body = command[index + 1 : end]
-            if char == '"' and any(c in body for c in "$`\\"):
+            if _QUOTED_CONTROL.search(body) or (char == '"' and any(c in body for c in "$`\\")):
                 return None
             word = (word or "") + body
             index = end + 1
@@ -405,10 +428,6 @@ def _simple_command(command: str) -> list[str] | None:
     return words
 
 
-def _registered_tree(arguments: dict, registry: Registry) -> bool:
-    return _registered_path(_cwd(arguments), registry)
-
-
 def _git_targets(argv: list[str]) -> tuple[str, ...]:
     if argv[:1] != ["git"]:
         return ()
@@ -416,6 +435,9 @@ def _git_targets(argv: list[str]) -> tuple[str, ...]:
     index = 1
     while index < len(argv):
         token = argv[index]
+        if token in {"--no-pager", "-P"}:
+            index += 1
+            continue
         if token in {"-c", "--config-env"}:
             index += 2
             continue
@@ -457,9 +479,9 @@ def _git_targets(argv: list[str]) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def _registered_git_target(argv: list[str], registry: Registry) -> bool:
+def _registered_git_target(argv: list[str], registry: Registry, cwd: str | None) -> bool:
     return any(
-        _registered_path(value, registry)
+        _registered_path(value, registry, cwd)
         for token in _git_targets(argv)
         for value in (token, token.partition("=")[2])
     )
@@ -481,13 +503,14 @@ def _mentions_helper(argv: object) -> bool:
     )
 
 
-def _raw_contribution_operation(command: str, registry: Registry) -> bool:
-    if _mentions_helper(command):
-        return True
-    return any(
-        _registered_path(token, registry)
-        for token in re.findall(r"/(?:[^\t \r\n;&|<>()'\"]+)", command)
-    )
+def _exposes_gh_token(text: str) -> bool:
+    if "gh" not in text or "auth" not in text:
+        return False
+    try:
+        statements = walk(text)
+    except (OpaqueCommand, ValueError):
+        return bool(re.search(r"token|(^|\s)-[a-z]*t", text))
+    return any(resolve(tokens).name == "gh" and gh_exposes_token(["gh", *resolve(tokens).argv[1:]]) for tokens in statements)
 
 
 def _vcs_argv(argv: list[str]) -> list[str] | None:
@@ -495,23 +518,17 @@ def _vcs_argv(argv: list[str]) -> list[str] | None:
     if not argv or posixpath.basename(argv[0]) != "git":
         return argv
     rest = argv[1:]
-    while rest[:1] and rest[0] in _GIT_PAGER_OFF:
+    while rest[:1] and rest[0] in ("--no-pager", "-P"):
         rest = rest[1:]
     if rest[:1] and rest[0].startswith("-"):
         return None
     return ["git", *rest]
 
 
-def _gh_read(argv: list[str]) -> bool:
-    if argv[1:2] == ["api"]:
-        return not gh_api_mutates(argv[2:])
-    return tuple(argv[1:3]) in _GH_READS
-
-
 def _public_write(argv: list[str]) -> bool:
     name = posixpath.basename(argv[0]) if argv else ""
     if name == "gh":
-        return not _gh_read(argv)
+        return argv[1:2] != ["api"] or gh_api_mutates(argv[2:]) or direct_public_write(argv)
     if name == "git":
         normalized = _vcs_argv(argv)
         return normalized is None or direct_public_write(normalized)
@@ -535,151 +552,6 @@ def _contains_direct_public_write(argv: list[str]) -> bool:
     return False
 
 
-def _run_git(cwd: str, overrides: list[str], args: tuple[str, ...]) -> str | None:
-    environment = {key: os.environ[key] for key in _GIT_ENV_KEEP if key in os.environ}
-    try:
-        completed = subprocess.run(
-            ["git", "--no-optional-locks", *overrides, "-C", cwd, *args],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env={**environment, "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"},
-            stdin=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return completed.stdout if completed.returncode == 0 else None
-
-
-def _filter_overrides(cwd: str, base: list[str]) -> list[str] | None:
-    listing = _run_git(cwd, base, ("config", "--name-only", "-z", "--get-regexp", r"^filter\."))
-    drivers = {key.removeprefix("filter.").rpartition(".")[0] for key in (listing or "").split("\0") if key}
-    if not all(_FILTER_DRIVER.fullmatch(driver) for driver in drivers):
-        return None
-    return [
-        item
-        for driver in sorted(drivers)
-        for setting in (f"filter.{driver}.clean=cat", f"filter.{driver}.smudge=cat", f"filter.{driver}.process=", f"filter.{driver}.required=false")
-        for item in ("-c", setting)
-    ]
-
-
-def _git(cwd: str, *args: str) -> str | None:
-    """Run git with every repository setting that can execute a program neutralised."""
-    base = [item for setting in _GIT_SAFE_CONFIG for item in ("-c", setting)]
-    filters = _filter_overrides(cwd, base)
-    if filters is None:
-        return None
-    return _run_git(cwd, base + filters, args)
-
-
-def _fork_urls(repository: RegisteredRepository) -> frozenset[str]:
-    return frozenset({f"https://github.com/{repository.fork}.git", f"https://github.com/{repository.fork}"})
-
-
-def _remote_is_fork(cwd: str, remote: str, repository: RegisteredRepository) -> bool:
-    if _git(cwd, "config", "--get-all", f"remote.{remote}.vcs") is not None:
-        return False
-    for key in (f"remote.{remote}.mirror", "push.followTags"):
-        if _git(cwd, "config", "--type=bool", "--get", key) != "false\n" and _git(cwd, "config", "--get", key) is not None:
-            return False
-    urls = _git(cwd, "remote", "get-url", "--push", "--all", remote)
-    if urls is None:
-        return False
-    lines = urls.splitlines()
-    return bool(lines) and all(line in _fork_urls(repository) for line in lines)
-
-
-def _pushed_paths(cwd: str) -> list[str] | None:
-    if not _git(cwd, "for-each-ref", "--count=1", "refs/remotes/"):
-        return None
-    output = _git(cwd, "log", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "-z", "--format=", "--name-only", "--no-renames", "-m", "HEAD", "--not", "--remotes")
-    if output is None:
-        return None
-    return [path.strip("\n") for path in output.split("\0") if path.strip("\n")]
-
-
-def _feature_branch(destination: str, repository: RegisteredRepository) -> bool:
-    branch = destination.removeprefix("refs/heads/")
-    return (
-        bool(_BRANCH_NAME.fullmatch(branch))
-        and ".." not in branch
-        and push_branch(destination) == branch
-        and branch not in DEFAULT_PROTECTED
-        and branch != repository.default_branch
-    )
-
-
-def _workflow_paths(paths: list[str]) -> bool:
-    return any(path.strip('"').startswith(_WORKFLOWS) for path in paths)
-
-
-def _check_add(args: list[str], cwd: str) -> Decision:
-    output = _git(cwd, "add", "--dry-run", *args)
-    if output is None:
-        return deny("cannot check what `git add` would stage")
-    staged = [line.removeprefix("add '").removesuffix("'") for line in output.splitlines()]
-    if _workflow_paths(staged):
-        return deny("staging changes under .github/workflows/ is not allowed")
-    return allow()
-
-
-def _check_commit(cwd: str) -> Decision:
-    output = _git(cwd, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "-z", "--name-only", "HEAD")
-    if output is None:
-        return deny("cannot check what `git commit` would record")
-    if _workflow_paths([path for path in output.split("\0") if path]):
-        return deny("committing changes under .github/workflows/ is not allowed")
-    return allow()
-
-
-def _check_new_branch(args: list[str], flag: str, repository: RegisteredRepository) -> Decision:
-    if args[:1] != [flag] or len(args) not in (2, 3) or any(a.startswith("-") for a in args[1:]):
-        return deny(LOCAL_GIT_FORM)
-    if args[1].startswith("refs/") or not _feature_branch(args[1], repository):
-        return deny(f"a new branch must not be {repository.default_branch} or another protected branch; {LOCAL_GIT_FORM}")
-    return allow()
-
-
-def _registered_git(argv: list[str], cwd: str, repository: RegisteredRepository) -> Decision | None:
-    normalized = _vcs_argv(argv)
-    if normalized is None:
-        return deny(f"git global options other than --no-pager are not allowed here; {LOCAL_GIT_FORM}")
-    if len(normalized) < 2:
-        return None
-    sub, args = normalized[1], normalized[2:]
-    if any(a.startswith(_GIT_UNSAFE_FLAGS) for a in args):
-        return deny(f"git {sub} with an output or exec option is not allowed")
-    if sub == "push":
-        return _fork_push(normalized, cwd, repository)
-    if sub in _GIT_LOCAL:
-        return allow()
-    if sub == "add":
-        return _check_add(args, cwd)
-    if sub == "commit":
-        return _check_commit(cwd)
-    if sub == "rebase":
-        if any(a in ("-i", "--interactive") or a.startswith(("-x", "--exec")) for a in args):
-            return deny("interactive rebase and rebase --exec are not allowed")
-        return allow()
-    if sub == "switch":
-        return _check_new_branch(args, "-c", repository)
-    if sub == "checkout":
-        return _check_new_branch(args, "-b", repository)
-    if sub == "branch":
-        listing = all(a in _BRANCH_LIST_FLAGS for a in args)
-        return allow() if listing else deny(f"git branch may only list here; {LOCAL_GIT_FORM}")
-    if sub == "config":
-        reading = args in (["--list"], ["-l"]) or (len(args) == 2 and args[0] in _CONFIG_GETS and not args[1].startswith("-"))
-        return allow() if reading else deny("git config writes are not allowed in a registered contribution")
-    if sub == "remote":
-        reading = args in ([], ["-v"]) or (len(args) == 2 and args[0] == "get-url" and not args[1].startswith("-"))
-        return allow() if reading else deny("changing git remotes is not allowed in a registered contribution")
-    if sub in _GIT_DENIED:
-        return deny(f"git {sub} is not allowed in a registered contribution; {LOCAL_GIT_FORM}")
-    return None
-
-
 def _indirect_vcs(argv: list[str]) -> bool:
     command = shell_command({"command": argv})
     if command is None:
@@ -689,73 +561,6 @@ def _indirect_vcs(argv: list[str]) -> bool:
     except (OpaqueCommand, ValueError):
         return True
     return any(resolve(tokens).name in ("git", "gh") for tokens in statements)
-
-
-def _fork_push(argv: list[str], cwd: str, repository: RegisteredRepository) -> Decision:
-    args = argv[2:]
-    if args[:1] in (["-u"], ["--set-upstream"]):
-        args = args[1:]
-    if len(args) != 2 or not _REMOTE_NAME.fullmatch(args[0]) or not args[1].startswith("HEAD:"):
-        return deny(FORK_PUSH_FORM)
-    remote, destination = args[0], args[1].removeprefix("HEAD:")
-    if not _feature_branch(destination, repository):
-        return deny(f"{FORK_PUSH_FORM} (got {args[1]})")
-    if not _remote_is_fork(cwd, remote, repository):
-        return deny(f"git remote {remote} does not push only to the registered fork {repository.fork}; {FORK_PUSH_FORM}")
-    paths = _pushed_paths(cwd)
-    if paths is None:
-        return deny("cannot list the commits this push sends; fetch the fork and upstream first")
-    if any(path.startswith(_WORKFLOWS) for path in paths):
-        return deny("a push that changes .github/workflows/ is not allowed")
-    return allow()
-
-
-def _gh_options(command: tuple[str, str], args: list[str]) -> dict[str, list[str]] | None:
-    """Values per long flag name, or None for an unknown flag, a fused short flag or a positional other than one number."""
-    flags = _GH_FORK_WRITES[command]
-    values: dict[str, list[str]] = {"positional": []}
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if not token.startswith("-"):
-            values["positional"].append(token)
-            index += 1
-            continue
-        name, equals, value = token.partition("=")
-        name = _GH_SHORT.get(name, name) if not name.startswith("--") else name
-        if name not in flags:
-            return None
-        if flags[name]:
-            if not equals:
-                if index + 1 >= len(args):
-                    return None
-                index += 1
-                value = args[index]
-            values.setdefault(name, []).append(value)
-        elif equals:
-            return None
-        index += 1
-    positional = values.pop("positional")
-    if len(positional) != (1 if command[1] == "edit" else 0) or not all(p.isdigit() for p in positional):
-        return None
-    return values
-
-
-def _fork_gh(argv: list[str], repository: RegisteredRepository) -> Decision | None:
-    command = (argv[1], argv[2]) if len(argv) >= 3 else None
-    if command is None or command not in _GH_FORK_WRITES:
-        return None if _gh_read(argv) else deny(FORK_GH_FORM)
-    values = _gh_options(command, argv[3:])
-    if values is None:
-        return deny(f"{FORK_GH_FORM}; use only documented flags with separate values, --body instead of a file, and a PR or issue number")
-    if values.get("--repo") != [repository.fork]:
-        return deny(f"{FORK_GH_FORM}; name the fork exactly once with --repo {repository.fork}")
-    labels = [label.strip() for name in ("--label", "--add-label") for value in values.get(name, []) for label in value.split(",")]
-    if _OWNER_LABEL in labels:
-        return deny(f"only the owner applies the {_OWNER_LABEL} label")
-    if command == ("pr", "create") and len(values.get("--head", [])) != 1:
-        return deny(f"{FORK_GH_FORM}; gh pr create needs exactly one --head <branch>")
-    return allow()
 
 
 def _exact_helper(argv: object, registry: Registry) -> bool:
@@ -787,10 +592,17 @@ def _prepare_operation(event: Event) -> Decision | None:
     except RegistryError:
         return deny("public contribution registry is unavailable")
     argv = arguments.get("command")
+    cwd = _cwd(arguments)
+    joined = shell_command({"command": argv}) if isinstance(argv, list) else None
+    texts = [argv] if isinstance(argv, str) else [item for item in argv if isinstance(item, str)] if isinstance(argv, list) else []
+    texts += [joined] if joined else []
+    if any(_exposes_gh_token(text) for text in texts):
+        return deny("gh commands that print the authentication token are not allowed")
+    repository = _registered_repository(cwd, registry)
     if isinstance(argv, str):
         simple = _simple_command(argv)
         if simple is None:
-            if _raw_contribution_operation(argv, registry) or _registered_tree(arguments, registry):
+            if repository is not None or _mentions_helper(argv) or _references_registered_root(argv, cwd, registry):
                 return deny("public contribution operations need structured argv or one literal git, gh or helper command")
             return None
         argv = simple
@@ -799,19 +611,22 @@ def _prepare_operation(event: Event) -> Decision | None:
     if _mentions_helper(argv):
         return deny("public contribution operations require the fixed helper path and exact argv")
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
-        if _registered_tree(arguments, registry):
+        if repository is not None:
             return deny("registered contribution operations require exact helper argv")
         return None
-    if _registered_git_target(argv, registry):
+    if _registered_git_target(argv, registry, cwd):
         return deny("direct Git operation targeting a registered contribution tree from elsewhere is not allowed")
-    cwd = _cwd(arguments)
-    repository = _registered_repository(cwd, registry)
     if repository is None or cwd is None:
+        if any(_references_registered_root(item, cwd, registry) for item in argv):
+            return deny("a command that names a registered contribution checkout must run from inside it")
         return None
+    checkout = str(Path(cwd).resolve(strict=False))
     if argv[:1] == ["git"]:
-        return _registered_git(argv, str(Path(cwd).resolve(strict=False)), repository)
+        return registered_git(argv, checkout, repository)
     if argv[:1] == ["gh"]:
-        return _fork_gh(argv, repository)
+        return fork_gh(argv, repository)
+    if any(into_git_dir(item) for item in argv[1:]):
+        return deny("paths inside .git/ are not allowed in a registered contribution")
     if _indirect_vcs(argv) or _contains_direct_public_write(argv):
         return deny("in a registered contribution run git and gh directly by bare name, with no wrapper or environment assignment")
     if _matches_validation(argv, registry):
