@@ -36,9 +36,9 @@ def no_process_secrets() -> Callable[[Event], Decision | None]:
         for pattern, what in _PATTERNS:
             if what == "STDIN":
                 if pattern.search(text) and re.search(_ENV_READ, text):
-                    return deny("interpreter environment reads are off limits to the security reviewer")
+                    return deny("interpreter environment reads are off limits to agents")
             elif pattern.search(text):
-                return deny(f"{what} are off limits to the security reviewer")
+                return deny(f"{what} are off limits to agents")
         return None
 
     return policy
