@@ -78,7 +78,12 @@ def platform_lists(cfg: dict) -> dict:
     return cfg.get("platform_toolsets") or {}
 
 
-DISPATCHER_KANBAN = {"auto_decompose": False, "review_dispatch": False, "failure_limit": 2}
+DISPATCHER_KANBAN = {
+    "auto_decompose": False,
+    "review_dispatch": False,
+    "failure_limit": 2,
+    "max_in_progress_per_profile": 3,
+}
 
 
 def strip_multiplex(cfg: dict) -> dict:

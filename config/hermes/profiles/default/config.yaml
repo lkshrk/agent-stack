@@ -43,6 +43,7 @@ kanban:
   auto_decompose: false
   review_dispatch: false
   failure_limit: 2
+  max_in_progress_per_profile: 3
 
 mcp_servers:
   linear_read:
