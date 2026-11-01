@@ -19,3 +19,12 @@ else
   echo "FAIL the profile must set sandbox_mode danger-full-access and approval_policy never"
   exit 1
 fi
+
+for f in "$HOME/.codex/config.toml" "$profile"; do
+  if grep -qx 'shell_snapshot = false' "$f"; then
+    echo "ok   shell snapshots are off in ${f##*/}"
+  else
+    echo "FAIL ${f##*/} must set shell_snapshot = false"
+    exit 1
+  fi
+done
