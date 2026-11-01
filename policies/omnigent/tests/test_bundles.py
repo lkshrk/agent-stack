@@ -1173,7 +1173,9 @@ class PublicContributionEngineTest(unittest.TestCase):
                 f"git clone https://github.com/omnigent-ai/omnigent.git {root}",
                 f"git worktree add {root}",
                 f"git -C {root} fetch origin",
+                "git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
                 "/opt/agent/bin/agent-stack-contribute prepare omnigent",
+                "agent-stack-contribute validate omnigent web",
                 "/opt/agent/bin/agent-stack-contribute publish omnigent",
             ):
                 with self.subTest(command=command):
@@ -1185,7 +1187,7 @@ class PublicContributionEngineTest(unittest.TestCase):
                     "polly/agents/claude_code",
                     "tool_call",
                     "Bash",
-                    {"command": ["/opt/agent/bin/agent-stack-contribute", "prepare", "omnigent"]},
+                    {"command": ["agent-stack-contribute", "validate", "omnigent", "web"]},
                     "",
                 ),
             )

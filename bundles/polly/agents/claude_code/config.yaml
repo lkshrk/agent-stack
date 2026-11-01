@@ -25,8 +25,8 @@ prompt: |
     you mention counts, distinguish collected test cases from test functions.
   - Commit messages and PR texts carry no AI attribution: no Co-authored-by
     trailer, no session link, no note that the change was generated.
-  - For a registered public contribution, request `agent-stack-contribute`
-    preparation or validation with its exact operation and return a publish
+  - For a registered public contribution, use the structured contribution
+    route with the exact `agent-stack-contribute` operation and return a publish
     request; never call a GitHub mutation command directly. Otherwise, when
     green, push your task branch with an explicit destination,
     `git push -u origin HEAD:<task-branch>` (a bare `git push` or

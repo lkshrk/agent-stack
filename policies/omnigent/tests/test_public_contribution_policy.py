@@ -36,9 +36,11 @@ class TestPrepareOperation(unittest.TestCase):
         self.assertTrue(decision["reason"].startswith("agent-stack: "), decision)
 
     def test_allows_only_exact_registered_helper_operations(self):
-        self.assertAllowed([HELPER, "prepare", "omnigent"])
-        self.assertAllowed([HELPER, "preflight", "omnigent"])
-        self.assertAllowed([HELPER, "validate", "omnigent", "web"])
+        for helper in (HELPER, "agent-stack-contribute"):
+            with self.subTest(helper=helper):
+                self.assertAllowed([helper, "prepare", "omnigent"])
+                self.assertAllowed([helper, "preflight", "omnigent"])
+                self.assertAllowed([helper, "validate", "omnigent", "web"])
 
     def test_rejects_unregistered_or_altered_helper_arguments(self):
         for argv in (
@@ -49,6 +51,8 @@ class TestPrepareOperation(unittest.TestCase):
             [HELPER, "validate", "omnigent", "web", "--base", "other"],
             [HELPER, "publish", "omnigent"],
             [HELPER, "list"],
+            ["agent-stack-contribute", "publish", "omnigent"],
+            ["agent-stack-contribute", "list"],
         ):
             with self.subTest(argv=argv):
                 self.assertDenied(argv)
@@ -82,9 +86,19 @@ class TestPrepareOperation(unittest.TestCase):
     def test_denies_registered_git_targets_without_a_registered_cwd(self):
         for argv in (
             ["git", "clone", "https://github.com/omnigent-ai/omnigent.git", TREE],
+            ["git", "-c", "advice.detachedHead=false", "clone", "https://github.com/omnigent-ai/omnigent.git", TREE],
             ["git", "worktree", "add", TREE],
             ["git", "-C", TREE, "fetch", "origin"],
+            ["git", "-c", "advice.detachedHead=false", "-C", TREE, "fetch", "origin"],
+            ["git", "--config-env", "core.editor=EDITOR", "-C", TREE, "fetch", "origin"],
+            ["git", "--config-env=core.editor=EDITOR", "--work-tree", f"{TREE}/web", "status"],
+            ["git", "-C", TREE, "clone", "https://github.com/omnigent-ai/omnigent.git", "/tmp/other"],
+            ["git", "-C", TREE, "worktree", "add", "/tmp/other"],
             ["git", "--work-tree", f"{TREE}/web", "status"],
+            ["git", f"--git-dir={TREE}/.git", "status"],
+            ["git", "--git-dir", f"{TREE}/.git", "status"],
+            ["git", "--mystery", TREE, "status"],
+            ["git", f"--mystery={TREE}", "status"],
         ):
             with self.subTest(argv=argv):
                 self.assertDenied(argv)
@@ -95,6 +109,9 @@ class TestPrepareOperation(unittest.TestCase):
         for command in (
             f"git clone https://github.com/omnigent-ai/omnigent.git {TREE}",
             f"git worktree add {TREE}",
+            f"git -C /home/omnigent/work/./omnigent commit -m x",
+            f"git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
+            f"git worktree add /home/omnigent/work/omnigent/../omnigent",
             f"git -C {TREE} fetch origin",
             f"{HELPER} prepare omnigent",
             f"{HELPER} publish omnigent",

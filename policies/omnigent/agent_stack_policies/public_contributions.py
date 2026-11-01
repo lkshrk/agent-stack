@@ -15,6 +15,7 @@ from .paths import SHELL_TOOLS
 
 RUNTIME_REGISTRY = Path("/opt/agent-stack/public-contributions.yaml")
 HELPER_PATH = "/opt/agent/bin/agent-stack-contribute"
+HELPER_NAMES = frozenset({HELPER_PATH, "agent-stack-contribute"})
 CONTRIBUTION_WORKSPACE = Path("/home/omnigent/work")
 _CONTROLLER_GIT = frozenset({"clone", "fetch", "worktree", "branch", "add", "commit", "remote"})
 
@@ -271,6 +272,12 @@ def _git_targets(argv: list[str]) -> tuple[str, ...]:
     index = 1
     while index < len(argv):
         token = argv[index]
+        if token in {"-c", "--config-env"}:
+            index += 2
+            continue
+        if (token.startswith("-c") and len(token) > 2) or token.startswith("--config-env="):
+            index += 1
+            continue
         if token in {"-C", "--work-tree", "--git-dir"}:
             if index + 1 < len(argv):
                 paths.append(argv[index + 1])
@@ -285,8 +292,7 @@ def _git_targets(argv: list[str]) -> tuple[str, ...]:
             index += 1
             continue
         if token.startswith("-"):
-            index += 1
-            continue
+            return tuple(paths + argv[index:])
         break
     if index == len(argv):
         return tuple(paths)
@@ -301,15 +307,18 @@ def _git_targets(argv: list[str]) -> tuple[str, ...]:
                 index += 2
                 continue
             if token.startswith("-"):
-                index += 1
-                continue
+                return tuple(paths + args[index:])
             paths.append(token)
             break
     return tuple(paths)
 
 
 def _registered_git_target(argv: list[str], registry: Registry) -> bool:
-    return any(_registered_path(path, registry) for path in _git_targets(argv))
+    return any(
+        _registered_path(value, registry)
+        for token in _git_targets(argv)
+        for value in (token, token.partition("=")[2])
+    )
 
 
 def _matches_validation(argv: list[str], registry: Registry) -> bool:
@@ -331,19 +340,22 @@ def _mentions_helper(argv: object) -> bool:
 def _raw_contribution_operation(command: str, registry: Registry) -> bool:
     if _mentions_helper(command):
         return True
-    return any(str(CONTRIBUTION_WORKSPACE / repository.checkout) in command for repository in registry.repositories)
+    return any(
+        _registered_path(token, registry)
+        for token in re.findall(r"/(?:[^\t \r\n;&|<>()'\"]+)", command)
+    )
 
 
 def _exact_helper(argv: object, registry: Registry) -> bool:
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
         return False
-    if len(argv) == 3 and argv[0] == HELPER_PATH and argv[1] in {"prepare", "preflight"}:
+    if len(argv) == 3 and argv[0] in HELPER_NAMES and argv[1] in {"prepare", "preflight"}:
         try:
             registry.repository(argv[2])
         except RegistryError:
             return False
         return True
-    if len(argv) == 4 and argv[0] == HELPER_PATH and argv[1] == "validate":
+    if len(argv) == 4 and argv[0] in HELPER_NAMES and argv[1] == "validate":
         try:
             registry.repository(argv[2]).validation_profile(argv[3])
         except RegistryError:
