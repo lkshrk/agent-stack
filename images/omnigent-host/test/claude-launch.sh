@@ -45,10 +45,12 @@ jq -n --arg dir "$work" '{hooks: {
 for mode in default auto; do
   rm -f "$work/session-start" "$work/prompt-submit"
   out=$(cd "$work" && timeout 30s env HOME="$home" ANTHROPIC_API_KEY=invalid ANTHROPIC_BASE_URL=http://127.0.0.1:9 \
-    claude --print "launch check" --permission-mode "$mode" \
+    claude --print "launch check" --permission-mode "$mode" --output-format stream-json --verbose \
     --mcp-config '{"mcpServers":{"omnigent":{"type":"stdio","command":"true"}}}' \
     --settings "$work/settings.json" 2>&1)
   expect "[$mode] Claude accepts a launcher MCP config" "$(grep -c 'enterprise MCP config' <<<"$out")" 0
+  expect "[$mode] the session starts in the requested permission mode" \
+    "$(jq -Rr 'fromjson? | select(.type == "system" and .subtype == "init") | .permissionMode' <<<"$out" | head -1)" "$mode"
   expect "[$mode] the launcher's SessionStart hook runs" "$(test -e "$work/session-start" && echo ran || echo blocked)" ran
   expect "[$mode] the launcher's UserPromptSubmit hook runs" "$(test -e "$work/prompt-submit" && echo ran || echo blocked)" ran
 done
