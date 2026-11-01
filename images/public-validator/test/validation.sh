@@ -43,8 +43,7 @@ open(sys.argv[2], "wb").write(key.public_key().public_bytes(serialization.Encodi
 EOF
 chmod 0400 "$key"
 head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$token"
-chown root:10001 "$token"
-chmod 0440 "$token"
+chmod 0444 "$token"
 nonce=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
 domain='agent-stack.public-validator.attestation.v1'
 
@@ -66,6 +65,7 @@ run() {
   [ -n "${ATTACK:-}" ] && printf '%s\n' "$ATTACK" >"$logs/attack"
   timeout 120 env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root GITHUB_TOKEN=leaked-writer GH_TOKEN=leaked-writer \
     OMNIGENT_API_KEY=leaked KUBECONFIG=/root/.kube/config \
+    setpriv --bounding-set=-all,+chown,+setuid,+setgid,+setpcap --inh-caps=-all --ambient-caps=-all --no-new-privs \
     "$launcher" "$@" >"$scratch/out" 2>"$scratch/err"
   echo $? >"$scratch/rc"
 }

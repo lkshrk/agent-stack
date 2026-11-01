@@ -169,10 +169,16 @@ def workspace(profile, head: str) -> tuple[Path, dict[str, str]]:
     root = Path(tempfile.mkdtemp(dir=WORK_ROOT))
     root.chmod(0o755)
     source, home, tmp = root / "src", root / "home", root / "tmp"
-    for directory, mode in ((source, 0o755), (home, 0o700), (tmp, 0o700)):
-        directory.mkdir(mode)
+    source.mkdir(0o755)
+    for directory in (home, tmp):
+        directory.mkdir(0o700)
         os.chown(directory, SANDBOX_UID, SANDBOX_GID)
+    # Root has no CAP_DAC_OVERRIDE, so directories stay root-owned until the tree is written.
     extract_verified(head, source)
+    for parent, directories, _ in os.walk(source):
+        for name in directories:
+            os.lchown(os.path.join(parent, name), SANDBOX_UID, SANDBOX_GID)
+    os.chown(source, SANDBOX_UID, SANDBOX_GID)
 
     env = {
         "PATH": SANDBOX_PATH,
@@ -250,7 +256,6 @@ def directory(tree: dict, parts: list[str], destination: Path) -> dict:
         if child is None:
             path = destination.joinpath(*parts[:depth])
             path.mkdir(0o755)
-            os.lchown(path, SANDBOX_UID, SANDBOX_GID)
             child = node[part] = {}
         elif not isinstance(child, dict):
             raise ValidationError(f"archive path runs through a file or symlink: {'/'.join(parts)}")
@@ -269,8 +274,8 @@ def write_blob(archive: tarfile.TarFile, member: tarfile.TarInfo, target: Path, 
             digest.update(chunk)
             handle.write(chunk)
             written += len(chunk)
-        os.fchown(fd, SANDBOX_UID, SANDBOX_GID)
         os.fchmod(fd, mode)
+        os.fchown(fd, SANDBOX_UID, SANDBOX_GID)
     if written != member.size:
         raise ValidationError(f"truncated archive entry: {member.name}")
     return digest.digest()
