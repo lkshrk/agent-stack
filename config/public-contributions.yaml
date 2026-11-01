@@ -34,4 +34,5 @@ repositories:
       dco: required
       demo_for_ui: required
       no_ai_attribution: true
+      title_format: conventional-scoped
     lifecycle: registered

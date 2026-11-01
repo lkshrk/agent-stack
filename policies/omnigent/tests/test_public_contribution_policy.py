@@ -73,14 +73,12 @@ class TestPrepareOperation(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
-    def test_denies_direct_controller_git_and_validation_in_registered_tree(self):
+    def test_denies_clone_worktree_branch_creation_and_validation_in_registered_tree(self):
         for argv in (
             ["git", "clone", "https://github.com/omnigent-ai/omnigent.git", TREE],
-            ["git", "fetch", "origin"],
+            ["git", "clone", "https://github.com/omnigent-ai/omnigent.git", "/tmp/other"],
             ["git", "worktree", "add", "/tmp/other"],
             ["git", "branch", "contribution/fix"],
-            ["git", "add", "src/a.py"],
-            ["git", "commit", "-m", "fix"],
             ["pnpm", "install", "--ignore-scripts"],
             ["pnpm", "run", "lint"],
             ["pnpm", "test"],
@@ -133,7 +131,8 @@ class TestPrepareOperation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             link = Path(directory) / "link"
             link.symlink_to(TREE, target_is_directory=True)
-            self.assertDenied(["git", "fetch", "origin"], cwd=str(link))
+            self.assertDenied(["git", "config", "core.hooksPath", "/tmp/hooks"], cwd=str(link))
+            self.assertDenied(["git", "tag", "v1.0.0"], cwd=str(link))
 
     def test_ignores_unrelated_tools_and_trees(self):
         self.assertIsNone(prepare_operation()(tool_call_event("Read", {"file_path": "README.md"})))

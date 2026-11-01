@@ -228,6 +228,93 @@ class ForkStagingTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
+    def test_allows_local_git_work_in_the_registered_tree(self):
+        (self.tree / "web" / "a.ts").write_text("export const a = 2\n")
+        for command in (
+            ["git", "status"],
+            ["git", "--no-pager", "diff"],
+            ["git", "log", "--oneline", "-5"],
+            ["git", "show", "HEAD"],
+            ["git", "add", "web/a.ts"],
+            ["git", "add", "-A"],
+            ["git", "commit", "-m", "fix(web): change a again"],
+            ["git", "commit", "-s", "-m", "fix(web): a", "-m", "body"],
+            ["git", "commit", "-a", "-m", "fix(web): a"],
+            ["git", "restore", "web/a.ts"],
+            ["git", "restore", "--staged", "web/a.ts"],
+            ["git", "switch", "-c", "feat/x"],
+            ["git", "switch", "-c", "feat/x", "origin/main"],
+            ["git", "checkout", "-b", "fix/web-a"],
+            ["git", "rebase", "origin/main"],
+            ["git", "rebase", "--continue"],
+            ["git", "fetch", "origin"],
+            ["git", "fetch", "fork", "main"],
+            ["git", "branch", "--show-current"],
+            ["git", "config", "--get", "user.name"],
+            ["git", "config", "--list"],
+            ["git", "remote", "-v"],
+            ["git", "remote", "get-url", "fork"],
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+        self.assertAllowed(["git", "add", "a.ts"], cwd=self.tree / "web")
+
+    def test_denies_config_remote_tag_and_ref_writes(self):
+        for command in (
+            ["git", "config", "core.hooksPath", "/tmp/hooks"],
+            ["git", "config", "--local", "credential.helper", "store"],
+            ["git", "config", "url.https://github.com/omnigent-ai/.pushInsteadOf", "https://github.com/lkshrk/"],
+            ["git", "config", "remote.fork.pushurl", UPSTREAM_URL],
+            ["git", "config", "--unset", "remote.fork.url"],
+            ["git", "config", "--add", "push.followTags", "true"],
+            ["git", "config", "--global", "user.name", "x"],
+            ["git", "config", "--get-all", "x", "--add"],
+            ["git", "remote", "add", "evil", UPSTREAM_URL],
+            ["git", "remote", "set-url", "fork", UPSTREAM_URL],
+            ["git", "remote", "set-url", "--push", "fork", UPSTREAM_URL],
+            ["git", "remote", "rename", "fork", "x"],
+            ["git", "remote", "remove", "fork"],
+            ["git", "tag", "v1.0.0"],
+            ["git", "tag", "-a", "v1.0.0", "-m", "x"],
+            ["git", "update-ref", "refs/remotes/fork/x", "HEAD"],
+            ["git", "submodule", "add", UPSTREAM_URL],
+            ["git", "worktree", "add", "/tmp/other"],
+            ["git", "branch", "feat/x"],
+            ["git", "branch", "-D", "main"],
+            ["git", "switch", "-c", "main"],
+            ["git", "checkout", "-b", "master"],
+            ["git", "switch", "main"],
+            ["git", "checkout", "main"],
+            ["git", "checkout", "--", "web/a.ts"],
+            ["git", "switch", "-c", "feat/x", "--track", "origin/main", "extra"],
+            ["git", "rebase", "-i", "origin/main"],
+            ["git", "rebase", "--exec", "make", "origin/main"],
+            ["git", "rebase", "-x", "make", "origin/main"],
+            ["git", "fetch", "--upload-pack=touch /tmp/x", "origin"],
+            ["git", "-c", "core.hooksPath=/tmp/hooks", "commit", "-m", "x"],
+            ["/usr/bin/git", "commit", "-m", "x"],
+            ["/usr/bin/git", "config", "core.hooksPath", "/tmp/hooks"],
+            ["GIT_CONFIG_COUNT=1", "git", "commit", "-m", "x"],
+            ["env", "git", "commit", "-m", "x"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_denies_staging_or_committing_workflow_changes(self):
+        (self.tree / ".github" / "workflows" / "ci.yml").write_text("on: pull_request\n")
+        (self.tree / ".github" / "workflows" / "new.yml").write_text("on: push\n")
+        for command in (
+            ["git", "add", ".github/workflows/ci.yml"],
+            ["git", "add", "-A"],
+            ["git", "add", "."],
+            ["git", "commit", "-a", "-m", "x"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+        self.assertDenied(["git", "add", "../.github"], cwd=self.tree / "web")
+        git(self.tree, "add", ".github/workflows/new.yml")
+        self.assertDenied(["git", "commit", "-m", "ci: new"])
+
     def test_own_repositories_keep_their_behaviour(self):
         own = self.tree.parent / "agent-stack"
         own.mkdir()

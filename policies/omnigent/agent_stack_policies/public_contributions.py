@@ -24,7 +24,18 @@ HELPER_NAMES = frozenset({HELPER_PATH, "agent-stack-contribute"})
 CONTRIBUTION_WORKSPACE = Path("/home/omnigent/work")
 FORK_OWNER = "lkshrk"
 CI_PROVIDERS = frozenset({"github-hosted"})
-_CONTROLLER_GIT = frozenset({"clone", "fetch", "worktree", "branch", "add", "commit", "remote"})
+TITLE_FORMATS = frozenset({"conventional-scoped"})
+_GIT_LOCAL = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "merge-base", "restore", "fetch"})
+_GIT_DENIED = frozenset(
+    {"clone", "worktree", "tag", "update-ref", "symbolic-ref", "submodule", "replace", "filter-branch", "notes", "send-pack", "http-push"}
+)
+_GIT_UNSAFE_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--ext-diff")
+_BRANCH_LIST_FLAGS = frozenset({"--show-current", "-a", "--all", "-r", "--remotes", "-l", "--list", "-v", "-vv", "--verbose"})
+_CONFIG_GETS = frozenset({"--get", "--get-all", "--get-regexp"})
+LOCAL_GIT_FORM = (
+    "in a registered contribution git allows status, diff, log, show, add, commit, restore, rebase, fetch, "
+    "`switch -c`/`checkout -b <branch>` onto a non-default branch, config and remote reads, and the fork push"
+)
 _GIT_PAGER_OFF = frozenset({"--no-pager", "-P"})
 _GIT_TIMEOUT = 10
 _WORKFLOWS = ".github/workflows/"
@@ -109,6 +120,7 @@ class ContributionRequirements:
     dco: str
     demo_for_ui: str
     no_ai_attribution: bool
+    title_format: str
 
 
 @dataclass(frozen=True)
@@ -503,6 +515,98 @@ def _pushed_paths(cwd: str) -> list[str] | None:
     return [path.strip("\n") for path in output.split("\0") if path.strip("\n")]
 
 
+def _feature_branch(destination: str, repository: RegisteredRepository) -> bool:
+    branch = destination.removeprefix("refs/heads/")
+    return (
+        bool(_BRANCH_NAME.fullmatch(branch))
+        and ".." not in branch
+        and push_branch(destination) == branch
+        and branch not in DEFAULT_PROTECTED
+        and branch != repository.default_branch
+    )
+
+
+def _workflow_paths(paths: list[str]) -> bool:
+    return any(path.strip('"').startswith(_WORKFLOWS) for path in paths)
+
+
+def _check_add(args: list[str], cwd: str) -> Decision:
+    output = _git(cwd, "add", "--dry-run", *args)
+    if output is None:
+        return deny("cannot check what `git add` would stage")
+    staged = [line.removeprefix("add '").removesuffix("'") for line in output.splitlines()]
+    if _workflow_paths(staged):
+        return deny("staging changes under .github/workflows/ is not allowed")
+    return allow()
+
+
+def _check_commit(cwd: str) -> Decision:
+    output = _git(cwd, "diff", "-z", "--name-only", "HEAD")
+    if output is None:
+        return deny("cannot check what `git commit` would record")
+    if _workflow_paths([path for path in output.split("\0") if path]):
+        return deny("committing changes under .github/workflows/ is not allowed")
+    return allow()
+
+
+def _check_new_branch(args: list[str], flag: str, repository: RegisteredRepository) -> Decision:
+    if args[:1] != [flag] or len(args) not in (2, 3) or any(a.startswith("-") for a in args[1:]):
+        return deny(LOCAL_GIT_FORM)
+    if args[1].startswith("refs/") or not _feature_branch(args[1], repository):
+        return deny(f"a new branch must not be {repository.default_branch} or another protected branch; {LOCAL_GIT_FORM}")
+    return allow()
+
+
+def _registered_git(argv: list[str], cwd: str, repository: RegisteredRepository) -> Decision | None:
+    normalized = _vcs_argv(argv)
+    if normalized is None:
+        return deny(f"git global options other than --no-pager are not allowed here; {LOCAL_GIT_FORM}")
+    if len(normalized) < 2:
+        return None
+    sub, args = normalized[1], normalized[2:]
+    if any(a.startswith(_GIT_UNSAFE_FLAGS) for a in args):
+        return deny(f"git {sub} with an output or exec option is not allowed")
+    if sub == "push":
+        return _fork_push(normalized, cwd, repository)
+    if sub in _GIT_LOCAL:
+        return allow()
+    if sub == "add":
+        return _check_add(args, cwd)
+    if sub == "commit":
+        return _check_commit(cwd)
+    if sub == "rebase":
+        if any(a in ("-i", "--interactive") or a.startswith(("-x", "--exec")) for a in args):
+            return deny("interactive rebase and rebase --exec are not allowed")
+        return allow()
+    if sub == "switch":
+        return _check_new_branch(args, "-c", repository)
+    if sub == "checkout":
+        return _check_new_branch(args, "-b", repository)
+    if sub == "branch":
+        listing = all(a in _BRANCH_LIST_FLAGS for a in args)
+        return allow() if listing else deny(f"git branch may only list here; {LOCAL_GIT_FORM}")
+    if sub == "config":
+        reading = args in (["--list"], ["-l"]) or (len(args) == 2 and args[0] in _CONFIG_GETS and not args[1].startswith("-"))
+        return allow() if reading else deny("git config writes are not allowed in a registered contribution")
+    if sub == "remote":
+        reading = args in ([], ["-v"]) or (len(args) == 2 and args[0] == "get-url" and not args[1].startswith("-"))
+        return allow() if reading else deny("changing git remotes is not allowed in a registered contribution")
+    if sub in _GIT_DENIED:
+        return deny(f"git {sub} is not allowed in a registered contribution; {LOCAL_GIT_FORM}")
+    return None
+
+
+def _indirect_vcs(argv: list[str]) -> bool:
+    command = shell_command({"command": argv})
+    if command is None:
+        return True
+    try:
+        statements = walk(command)
+    except (OpaqueCommand, ValueError):
+        return True
+    return any(resolve(tokens).name in ("git", "gh") for tokens in statements)
+
+
 def _fork_push(argv: list[str], cwd: str, repository: RegisteredRepository) -> Decision:
     args = argv[2:]
     if args[:1] in (["-u"], ["--set-upstream"]):
@@ -510,14 +614,7 @@ def _fork_push(argv: list[str], cwd: str, repository: RegisteredRepository) -> D
     if len(args) != 2 or not _REMOTE_NAME.fullmatch(args[0]) or not args[1].startswith("HEAD:"):
         return deny(FORK_PUSH_FORM)
     remote, destination = args[0], args[1].removeprefix("HEAD:")
-    branch = destination.removeprefix("refs/heads/")
-    if (
-        not _BRANCH_NAME.fullmatch(branch)
-        or ".." in branch
-        or push_branch(destination) != branch
-        or branch in DEFAULT_PROTECTED
-        or branch == repository.default_branch
-    ):
+    if not _feature_branch(destination, repository):
         return deny(f"{FORK_PUSH_FORM} (got {args[1]})")
     if not _remote_is_fork(cwd, remote, repository):
         return deny(f"git remote {remote} does not push only to the registered fork {repository.fork}; {FORK_PUSH_FORM}")
@@ -618,23 +715,19 @@ def _prepare_operation(event: Event) -> Decision | None:
         if _registered_tree(arguments, registry):
             return deny("registered contribution operations require exact helper argv")
         return None
+    if _registered_git_target(argv, registry):
+        return deny("direct Git operation targeting a registered contribution tree from elsewhere is not allowed")
     repository = _registered_repository(_cwd(arguments), registry)
-    registered_tree = repository is not None
-    registered_git_target = _registered_git_target(argv, registry)
-    if repository is not None and argv[:2] == ["git", "push"]:
-        return _fork_push(argv, str(Path(_cwd(arguments)).resolve(strict=False)), repository)
-    if repository is not None and argv[:1] == ["gh"]:
-        return _fork_gh(argv, repository)
-    if registered_tree and _contains_direct_public_write(argv):
-        return deny("direct public publishing in a registered contribution tree is not allowed; stage it in the owner's fork instead")
-    if registered_git_target:
-        return deny("direct Git operation targeting a registered contribution tree is not allowed; request preparation instead")
-    if registered_tree and argv[:1] == ["git"] and any(item in _CONTROLLER_GIT for item in argv[1:]):
-        return deny("direct Git controller operation in a registered contribution tree is not allowed; request preparation instead")
-    if registered_tree:
-        if _matches_validation(argv, registry):
-            return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
+    if repository is None:
         return None
+    if argv[:1] == ["git"]:
+        return _registered_git(argv, str(Path(_cwd(arguments)).resolve(strict=False)), repository)
+    if argv[:1] == ["gh"]:
+        return _fork_gh(argv, repository)
+    if _indirect_vcs(argv) or _contains_direct_public_write(argv):
+        return deny("in a registered contribution run git and gh directly by bare name, with no wrapper or environment assignment")
+    if _matches_validation(argv, registry):
+        return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
     return None
 
 
@@ -646,15 +739,18 @@ def _contribution(repository: str, entry: Any) -> ContributionRequirements:
     entry = _mapping(
         entry,
         f"repository {repository}.contribution",
-        {"issue_before_bugfix_pr", "dco", "demo_for_ui", "no_ai_attribution"},
+        {"issue_before_bugfix_pr", "dco", "demo_for_ui", "no_ai_attribution", "title_format"},
     )
+    title_format = entry["title_format"]
+    if not isinstance(title_format, str) or title_format not in TITLE_FORMATS:
+        raise RegistryError(f"repository {repository}.contribution.title_format must be one of {sorted(TITLE_FORMATS)}")
     if not isinstance(entry["issue_before_bugfix_pr"], bool) or not isinstance(entry["no_ai_attribution"], bool):
         raise RegistryError(f"repository {repository}.contribution booleans are invalid")
     dco = _string(entry["dco"], f"repository {repository}.contribution.dco")
     demo = _string(entry["demo_for_ui"], f"repository {repository}.contribution.demo_for_ui")
     if dco != "required" or demo != "required" or not entry["issue_before_bugfix_pr"] or not entry["no_ai_attribution"]:
         raise RegistryError(f"repository {repository}.contribution requirements are invalid")
-    return ContributionRequirements(entry["issue_before_bugfix_pr"], dco, demo, entry["no_ai_attribution"])
+    return ContributionRequirements(entry["issue_before_bugfix_pr"], dco, demo, entry["no_ai_attribution"], title_format)
 
 
 def _unique_checkouts(repositories: tuple[RegisteredRepository, ...]) -> None:

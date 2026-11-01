@@ -33,9 +33,13 @@ prompt: |
     them.
   - A registered public contribution (an upstream listed by
     `agent-stack-contribute list`) follows the upstream's own conventions for
-    commit messages and PR titles: its registry entry and its CONTRIBUTING
-    (for Omnigent, `type(scope): summary` with a DCO sign-off). Stage it in
-    the owner's fork, never the upstream: push with
+    commit messages and PR titles: the registry entry's `title_format`
+    (`conventional-scoped` means `type(scope): summary`) and contribution
+    rules, and the upstream's CONTRIBUTING (for Omnigent, a DCO sign-off
+    too). Commit locally in the checkout on a new branch
+    (`git switch -c <branch>`, never the default branch); you never change
+    git config or remotes and never tag. Stage it in the owner's fork, never
+    the upstream: push with
     `git push -u <fork-remote> HEAD:<branch>` to the remote whose URL is the
     fork named in the registry, then open a PR inside the fork with
     `gh pr create --repo <fork> --base <default branch> --head <branch>`.

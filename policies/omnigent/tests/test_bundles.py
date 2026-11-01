@@ -1258,8 +1258,15 @@ class PublicContributionEngineTest(unittest.TestCase):
             ["gh", "pr", "create", "--repo", FORK, "--base", "main", "--head", "feat/x", "--title", "fix(web): a", "--body", "b"],
             ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-ready"],
             ["gh", "issue", "create", "--repo", FORK, "--title", "bug", "--body", "b"],
+            ["git", "add", "web/a.ts"],
+            ["git", "commit", "-m", "fix(web): a"],
+            ["git", "switch", "-c", "feat/x"],
+            ["git", "fetch", "origin"],
         )
         denied = (
+            ["git", "config", "core.hooksPath", "/tmp/hooks"],
+            ["git", "remote", "set-url", "fork", "https://github.com/omnigent-ai/omnigent.git"],
+            ["git", "tag", "v1.0.0"],
             ["git", "push", "origin", "HEAD:feat/x"],
             ["git", "push", "fork", "HEAD:main"],
             ["git", "push", "--force", "fork", "HEAD:feat/x"],
@@ -1306,6 +1313,7 @@ class ContributionPromptTest(unittest.TestCase):
             "only once the fork's CI is green",
             "approved-upstream",
             "upstream's own conventions",
+            "`title_format`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, implementer)

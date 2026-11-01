@@ -66,6 +66,21 @@ class PublicContributionsTest(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "fork"):
             self.load(registry)
 
+    def test_records_the_upstream_title_format(self):
+        repository = Registry.load(REGISTRY_PATH).repository("omnigent")
+        self.assertEqual(repository.contribution.title_format, "conventional-scoped")
+        for value in ["conventional", "free", "", None]:
+            with self.subTest(title_format=value):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["contribution"]["title_format"] = value
+
+                with self.assertRaisesRegex(RegistryError, "title_format"):
+                    self.load(registry)
+        registry = self.registry()
+        del registry["repositories"]["omnigent"]["contribution"]["title_format"]
+        with self.assertRaisesRegex(RegistryError, "missing field: title_format"):
+            self.load(registry)
+
     def test_requires_fork_and_github_hosted_ci(self):
         for field in ["fork", "ci"]:
             with self.subTest(missing=field):
