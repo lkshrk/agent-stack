@@ -1458,6 +1458,13 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(run_sequence("planner", [send, launched, status], state), ["ALLOW", "ALLOW", "ALLOW"])
         self.assertEqual(state.get("agent_stack_dispatches"), 1)
 
+    def test_planner_steered_critic_send_is_awaited(self):
+        steered = json.dumps({"task_id": "c1", "agent": "critic", "title": "plan-critic", "status": "running"})
+        run = [("sys_session_send", CRITIC_SEND), ("tool_result", ("sys_session_send", steered)), ("response", "Sent.")]
+        state = {}
+        self.assertEqual(run_sequence("planner", run, state), ["ALLOW"] * 3)
+        self.assertEqual(state.get("agent_stack_dispatches"), 1)
+
     def test_planner_critic_rounds_after_a_failed_send(self):
         plan = infra_plan()
         plan["critic"]["rounds"] = 1
