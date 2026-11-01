@@ -7,9 +7,7 @@ executor:
   model: anthropic-auto
   config:
     harness: claude-native
-    # Headless workers can't answer ApprovalCards, and managed Claude
-    # settings disable ``bypassPermissions``. ``auto`` auto-approves without
-    # prompting and is allowed under managed settings (-> ``--permission-mode auto``).
+    # Nobody answers prompts here: auto keeps the classifier, the managed settings add the workspace as a working directory.
     permission_mode: auto
 
 prompt: |

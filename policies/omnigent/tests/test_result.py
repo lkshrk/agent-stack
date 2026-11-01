@@ -539,6 +539,21 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(policy({**response(plan), "session_state": {}})["result"], "DENY")
         self.assertEqual(result.result_contract(kind="planner")(final({}))["result"], "ALLOW")
 
+    def test_polly_status_turn_passes_while_a_child_runs(self):
+        policy = result.result_contract(kind="polly", await_dispatches=True)
+        status = {**response("Implementer is running; waiting for its result.", True), "session_state": {"agent_stack_dispatches": 2, "agent_stack_collections": 1}}
+        self.assertIsNone(policy(status))
+        done = {**status, "session_state": {"agent_stack_dispatches": 2, "agent_stack_collections": 2}}
+        self.assertEqual(policy(done)["result"], "DENY")
+        self.assertEqual(policy(response("all done", True))["result"], "DENY")
+
+    def test_polly_result_needs_no_critic(self):
+        policy = result.result_contract(kind="polly", await_dispatches=True)
+        state = {"agent_stack_dispatches": 1, "agent_stack_collections": 1}
+        for data in (load("polly-valid.json"), {"status": "BLOCKED", "blocked": {"class": "decision", "question": "A or B?"}}):
+            decision = policy({**response(fenced(data), True), "session_state": state})
+            self.assertEqual(decision["result"], "ALLOW", decision)
+
     def test_contract_rejects_unknown_kind(self):
         with self.assertRaises(ValueError):
             result.result_contract(kind="coder")

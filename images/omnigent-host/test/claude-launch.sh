@@ -26,6 +26,10 @@ for f in .codex/AGENTS.md .omp/agent/AGENTS.md; do
 done
 expect "the managed settings keep the deny list" \
   "$(jq -r '.permissions.deny | length' /etc/claude-code/managed-settings.json)" 4
+expect "the sandbox workspace is a working directory, so file tools never prompt for sibling worktrees" \
+  "$(jq -c '.permissions.additionalDirectories' /etc/claude-code/managed-settings.json)" '["/home/omnigent/workspace"]'
+expect "the managed settings leave Omnigent's hook settings in force" \
+  "$(jq -r '[.allowManagedHooksOnly, .disableAllHooks, .permissions.defaultMode] | map(select(. != null)) | length' /etc/claude-code/managed-settings.json)" 0
 expect "a seeded HOME enables the runner plugins" \
   "$(jq -r '.enabledPlugins["runner@agent-stack"]' "$home/.claude/settings.json" 2>&1)" true
 expect "a seeded HOME has the gateway MCP servers" \
@@ -38,12 +42,15 @@ jq -n --arg dir "$work" '{hooks: {
   SessionStart: [{hooks: [{type: "command", command: "touch \($dir)/session-start"}]}],
   UserPromptSubmit: [{hooks: [{type: "command", command: "touch \($dir)/prompt-submit"}]}]
 }}' >"$work/settings.json"
-out=$(cd "$work" && timeout 30s env HOME="$home" ANTHROPIC_API_KEY=invalid ANTHROPIC_BASE_URL=http://127.0.0.1:9 \
-  claude --print "launch check" \
-  --mcp-config '{"mcpServers":{"omnigent":{"type":"stdio","command":"true"}}}' \
-  --settings "$work/settings.json" 2>&1)
-expect "Claude accepts a launcher MCP config" "$(grep -c 'enterprise MCP config' <<<"$out")" 0
-expect "the launcher's SessionStart hook runs" "$(test -e "$work/session-start" && echo ran || echo blocked)" ran
-expect "the launcher's UserPromptSubmit hook runs" "$(test -e "$work/prompt-submit" && echo ran || echo blocked)" ran
+for mode in default auto; do
+  rm -f "$work/session-start" "$work/prompt-submit"
+  out=$(cd "$work" && timeout 30s env HOME="$home" ANTHROPIC_API_KEY=invalid ANTHROPIC_BASE_URL=http://127.0.0.1:9 \
+    claude --print "launch check" --permission-mode "$mode" \
+    --mcp-config '{"mcpServers":{"omnigent":{"type":"stdio","command":"true"}}}' \
+    --settings "$work/settings.json" 2>&1)
+  expect "[$mode] Claude accepts a launcher MCP config" "$(grep -c 'enterprise MCP config' <<<"$out")" 0
+  expect "[$mode] the launcher's SessionStart hook runs" "$(test -e "$work/session-start" && echo ran || echo blocked)" ran
+  expect "[$mode] the launcher's UserPromptSubmit hook runs" "$(test -e "$work/prompt-submit" && echo ran || echo blocked)" ran
+done
 
 exit "$fail"

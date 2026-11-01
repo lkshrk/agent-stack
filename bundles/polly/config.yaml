@@ -416,9 +416,13 @@ guardrails:
         path: agent_stack_policies.spawn.max_dispatches_per_session
         arguments:
           limit: 24
+          collect_tools: [sys_read_inbox]
+          parallel: true
+    # A turn-final response while a dispatched child is still running is a status turn, not the result.
     result_contract:
       type: function
       function:
         path: agent_stack_policies.result.result_contract
         arguments:
           kind: polly
+          await_dispatches: true
