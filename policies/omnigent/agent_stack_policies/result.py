@@ -403,7 +403,7 @@ def result_contract(*, kind: str, await_dispatches: bool = False) -> Callable[[E
         errors = validate_result(kind, result)
         if errors:
             return deny(f"invalid {kind} result: " + "; ".join(errors[:MAX_ERRORS_SHOWN]))
-        if await_dispatches and result.get("status") != "BLOCKED":
+        if await_dispatches and kind == "planner" and result.get("status") != "BLOCKED":
             reason = _critic_gap(result, session_state(event))
             if reason:
                 return deny(f"{kind} result without the critic: {reason}")

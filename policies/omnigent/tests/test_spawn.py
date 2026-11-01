@@ -111,6 +111,37 @@ class SpawnTest(unittest.TestCase):
         self.assertIsNone(policy(tool_result_event("sys_read_inbox", {"result": quoted}, {DISPATCH_STATE_KEY: 1})))
         self.assertEqual(policy(tool_result_event("sys_read_inbox", {"result": "\n" + real}, {DISPATCH_STATE_KEY: 1}))["result"], "ALLOW")
 
+    def test_parallel_counts_every_finished_child(self):
+        policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
+        done = "[System: sub-agent task t-1 completed — claude_code:fix-x returned: done]"
+        failed = "[System: sub-agent task t-2 failed — codex:review-x error: boom]"
+        cancelled = "[System: sub-agent task t-3 cancelled — omp:explore-x]"
+        empty = "[System: sub-agent task t-4 completed — claude_code:fix-y produced no output]"
+        inbox = "\n\n".join([done, failed, cancelled, empty])
+        decision = policy(tool_result_event("sys_read_inbox", {"result": inbox}, {DISPATCH_STATE_KEY: 5, COLLECT_STATE_KEY: 1}))
+        self.assertEqual(decision["state_updates"], [{"key": COLLECT_STATE_KEY, "action": "increment", "value": 4}])
+        capped = policy(tool_result_event("sys_read_inbox", {"result": inbox}, {DISPATCH_STATE_KEY: 3, COLLECT_STATE_KEY: 1}))
+        self.assertEqual(capped["state_updates"], [{"key": COLLECT_STATE_KEY, "action": "increment", "value": 2}])
+        self.assertIsNone(policy(tool_result_event("sys_read_inbox", {"result": "Inbox is empty — no completed tasks."}, {DISPATCH_STATE_KEY: 2})))
+        self.assertIsNone(policy(tool_result_event("sys_read_inbox", {"result": "Inbox: " + done}, {DISPATCH_STATE_KEY: 2})))
+
+    def test_parallel_sends_while_children_run(self):
+        policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
+        self.assertEqual(policy(tool_call_event("sys_session_send", {}, {DISPATCH_STATE_KEY: 3}))["result"], "ALLOW")
+        self.assertEqual(policy(tool_call_event("sys_session_send", {}, {DISPATCH_STATE_KEY: 24}))["result"], "DENY")
+
+    def test_parallel_settles_sends_that_start_no_turn(self):
+        policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
+        state = {DISPATCH_STATE_KEY: 2, COLLECT_STATE_KEY: 0}
+        launched = '{"handle_id": "c1", "kind": "sub_agent", "status": "launching"}'
+        self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": launched}, state)))
+        settled = [{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}]
+        for text in ('{"handle_id": "c1", "kind": "sub_agent", "status": "running"}', "Error: session 'c1' is still starting its turn"):
+            with self.subTest(text=text):
+                self.assertEqual(policy(tool_result_event("sys_session_send", {"result": text}, state))["state_updates"], settled)
+        self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": "Error: x"}, {DISPATCH_STATE_KEY: 1, COLLECT_STATE_KEY: 1})))
+        self.assertIsNone(max_dispatches_per_session(limit=3)(tool_result_event("sys_session_send", {"result": "Error: x"}, state)))
+
     def test_awaiting(self):
         self.assertFalse(awaiting({}))
         self.assertTrue(awaiting({DISPATCH_STATE_KEY: 1}))

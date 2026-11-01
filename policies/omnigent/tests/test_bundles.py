@@ -1335,7 +1335,10 @@ class BundleVerdictTest(unittest.TestCase):
         spec = load(BUNDLES / "polly", expand_env=False)
         last = agent_policies(spec)[-1]
         self.assertEqual(last.function.path, "agent_stack_policies.result.result_contract")
-        self.assertEqual(last.function.arguments, {"kind": "polly"})
+        self.assertEqual(last.function.arguments, {"kind": "polly", "await_dispatches": True})
+        dispatches = agent_policies(spec)[-2]
+        self.assertEqual(dispatches.function.path, "agent_stack_policies.spawn.max_dispatches_per_session")
+        self.assertEqual(dispatches.function.arguments, {"limit": 24, "collect_tools": ["sys_read_inbox"], "parallel": True})
 
     def test_planner_prompt_sends_critic_model(self):
         import yaml

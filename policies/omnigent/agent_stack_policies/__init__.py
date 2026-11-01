@@ -5,7 +5,9 @@ POLICY_REGISTRY: list[dict] = [
         "name": "max_dispatches_per_session",
         "description": (
             "Deny session dispatches beyond a per-session cap, and count a collection when a collect_tools "
-            "tool_result carries a completed reply from collect_from, capped at the dispatches."
+            "tool_result carries a completed reply from collect_from, capped at the dispatches. With parallel, "
+            "sends are not held back, every finished inbox entry counts, and a send that starts no new turn is "
+            "settled at once."
         ),
         "params_schema": {
             "type": "object",
@@ -14,6 +16,7 @@ POLICY_REGISTRY: list[dict] = [
                 "dispatch_tools": {"type": "array", "items": {"type": "string"}},
                 "collect_tools": {"type": "array", "items": {"type": "string"}},
                 "collect_from": {"type": "string"},
+                "parallel": {"type": "boolean"},
             },
             "required": ["limit"],
             "additionalProperties": False,
@@ -196,7 +199,7 @@ POLICY_REGISTRY: list[dict] = [
         "params_schema": {
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["planner", "security", "documenter"]},
+                "kind": {"type": "string", "enum": ["planner", "security", "documenter", "polly"]},
                 "await_dispatches": {"type": "boolean"},
             },
             "required": ["kind"],
