@@ -19,6 +19,9 @@ RUN if [ -n "$AGENT_STACK_VERSION" ]; then \
       && grep -Fqx "    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}" /etc/omnigent/config.yaml; \
     fi
 
+COPY images/omnigent-server/patch-web-ui.sh /tmp/patch-web-ui.sh
+RUN sh /tmp/patch-web-ui.sh /build/omnigent/server/static/web-ui/assets && rm /tmp/patch-web-ui.sh
+
 # The database URI is a secret, so the deployment appends --database-uri "$(DATABASE_URL)".
 CMD ["omnigent", "server", "--host", "0.0.0.0", "--port", "8000", "--no-open", "--config", "/etc/omnigent/config.yaml"]
 
@@ -32,6 +35,7 @@ WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 COPY images/omnigent-server/test/ /src/images/omnigent-server/test/
 RUN /opt/venv/bin/python3 images/omnigent-server/test/agent_label.py
+RUN sh images/omnigent-server/test/web-ui-admin-owner.sh
 RUN pin='^    image: ghcr\.io/lkshrk/agent-stack/omnigent-host:' \
  && got=$(grep -E "$pin" /etc/omnigent/config.yaml) \
  && if [ -n "$AGENT_STACK_VERSION" ]; then want="    image: ghcr.io/lkshrk/agent-stack/omnigent-host:${AGENT_STACK_VERSION}"; \
