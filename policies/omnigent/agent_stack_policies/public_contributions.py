@@ -357,7 +357,13 @@ def _contains_direct_public_write(argv: list[str]) -> bool:
         statements = walk(command)
     except (OpaqueCommand, ValueError):
         return True
-    return any(direct_public_write(resolve(tokens).argv) for tokens in statements)
+    for tokens in statements:
+        resolved = resolve(tokens)
+        if resolved.wrappers or resolved.stdin_exec or resolved.nested:
+            return True
+        if direct_public_write(resolved.argv):
+            return True
+    return False
 
 
 def _exact_helper(argv: object, registry: Registry) -> bool:
@@ -378,9 +384,7 @@ def _exact_helper(argv: object, registry: Registry) -> bool:
     return False
 
 
-def prepare_operation(event: Event | None = None) -> Callable[[Event], Decision | None] | Decision | None:
-    if event is None:
-        return prepare_operation
+def _prepare_operation(event: Event) -> Decision | None:
     arguments = tool_call(event, SHELL_TOOLS)
     if arguments is None:
         return None
@@ -416,6 +420,10 @@ def prepare_operation(event: Event | None = None) -> Callable[[Event], Decision 
             return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
         return None
     return None
+
+
+def prepare_operation() -> Callable[[Event], Decision | None]:
+    return _prepare_operation
 
 
 def _contribution(repository: str, entry: Any) -> ContributionRequirements:

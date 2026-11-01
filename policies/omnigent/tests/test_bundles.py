@@ -1214,6 +1214,14 @@ class PublicContributionEngineTest(unittest.TestCase):
             ["bash", "-lc", "git push origin HEAD:contribution/fix"],
             ["env", "git", "push", "origin", "HEAD:contribution/fix"],
             ["sh", "-c", "gh issue create --title fix"],
+            ["zsh", "-c", "git status"],
+            ["command", "git", "status"],
+            ["builtin", "echo", "x"],
+            ["nice", "git", "status"],
+            ["nohup", "git", "status"],
+            "bash -lc 'git push origin HEAD:contribution/fix'",
+            "env git push origin HEAD:contribution/fix",
+            "sh -c 'gh issue create --title fix'",
         )
         with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
             for agent in ("polly/agents/claude_code", "polly/agents/codex"):

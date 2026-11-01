@@ -29,7 +29,7 @@ class TestPrepareOperation(unittest.TestCase):
         self.addCleanup(self.registry_path.stop)
 
     def evaluate(self, argv, **arguments):
-        return prepare_operation(tool_call_event("Bash", {"command": argv, **arguments}))
+        return prepare_operation()(tool_call_event("Bash", {"command": argv, **arguments}))
 
     def assertAllowed(self, argv, **arguments):
         decision = self.evaluate(argv, **arguments)
@@ -136,7 +136,7 @@ class TestPrepareOperation(unittest.TestCase):
             self.assertDenied(["git", "fetch", "origin"], cwd=str(link))
 
     def test_ignores_unrelated_tools_and_trees(self):
-        self.assertIsNone(prepare_operation(tool_call_event("Read", {"file_path": "README.md"})))
+        self.assertIsNone(prepare_operation()(tool_call_event("Read", {"file_path": "README.md"})))
         self.assertIsNone(self.evaluate(["git", "fetch", "origin"], cwd="/home/omnigent/work/other"))
         self.assertIsNone(self.evaluate(["pnpm", "test"], cwd="/home/omnigent/work/other"))
 

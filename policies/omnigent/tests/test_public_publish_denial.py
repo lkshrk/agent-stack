@@ -23,7 +23,7 @@ class PublicPublishDenialTest(unittest.TestCase):
         self.addCleanup(registry_path.stop)
 
     def evaluate(self, command):
-        return prepare_operation(tool_call_event("Bash", {"command": command, "cwd": TREE}))
+        return prepare_operation()(tool_call_event("Bash", {"command": command, "cwd": TREE}))
 
     def assertDenied(self, command):
         decision = self.evaluate(command)
@@ -46,11 +46,19 @@ class PublicPublishDenialTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
-    def test_denies_direct_public_writes_through_structured_wrappers(self):
+    def test_denies_structured_and_raw_wrappers_in_registered_context(self):
         for command in (
             ["bash", "-lc", "git push origin HEAD:contribution/fix"],
             ["env", "git", "push", "origin", "HEAD:contribution/fix"],
             ["sh", "-c", "gh issue create --title fix"],
+            ["zsh", "-c", "git status"],
+            ["command", "git", "status"],
+            ["builtin", "echo", "x"],
+            ["nice", "git", "status"],
+            ["nohup", "git", "status"],
+            "bash -lc 'git push origin HEAD:contribution/fix'",
+            "env git push origin HEAD:contribution/fix",
+            "sh -c 'gh issue create --title fix'",
         ):
             with self.subTest(command=command):
                 self.assertDenied(command)
@@ -60,7 +68,7 @@ class PublicPublishDenialTest(unittest.TestCase):
         self.assertEqual(decision["result"], "ALLOW", decision)
 
     def test_allows_internal_feature_push_outside_registered_tree(self):
-        decision = prepare_operation(
+        decision = prepare_operation()(
             tool_call_event("Bash", {"command": ["git", "push", "origin", "HEAD:feature/internal"], "cwd": "/home/omnigent/work/agent-stack"})
         )
         self.assertIsNone(decision, decision)
