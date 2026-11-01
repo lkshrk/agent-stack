@@ -76,12 +76,42 @@ For every changed hunk, check:
 - CI workflows: `pull_request_target` with checkout of the PR head,
   untrusted input in `run:`, broad `permissions:`, unpinned actions.
 
-## 4. Severity
+## 4. Finding gate and severity
+
+Before reporting a finding, state in its `evidence` or `title` the lower-trust
+principal or attacker, the control or trust boundary they cross, and the
+concrete result (data read, code run, privilege gained, release changed). If
+you cannot name all three from the source, it is not a finding: drop it, or
+record the missing fact as a gap (below). Intended same-principal authority
+and self-impact do not cross a boundary. Do not claim an effect stronger
+than the code shows.
+
+A deployment fact the source does not contain (how a service is exposed,
+an env value, branch protection, a runner or registry default) is never
+guessed. Record it as a gap under the prompt's no-assumptions rule.
+
+CI and supply chain, for changed workflows, build files and manifests:
+
+- A mutable or vulnerable dependency, tag or action is not a finding by
+  itself: show who can influence what is resolved and which build or
+  release consumes it.
+- A workflow is authorization code: establish the trigger, whose code runs,
+  which secrets and tokens it holds, and what it can publish or mutate.
+- Untrusted input (branch name, PR title, issue field) reaching `run:`,
+  expressions or paths, and a cache or artifact from a lower-trust job
+  restored by a higher-trust one, are findings only with that reachable path.
+- Missing least privilege alone is hardening (`low`).
+
+Severity:
 
 - `critical`: exploitable now, or a secret is exposed.
 - `high`: exploitable with one precondition.
 - `medium`: needs several preconditions, or weakens a defence.
 - `low`: hardening or hygiene.
+
+A defence-in-depth weakness or checklist deviation with no reachable boundary
+violation is not a vulnerability: report it as `low` at most, never higher.
+The contract has no informational level.
 
 Every finding needs `file:line` evidence from the head revision: `file` is
 the path, `line` the 1-based line, `evidence` the quoted code or the
