@@ -1,12 +1,13 @@
 #!/usr/bin/python3 -I
 import argparse
 import base64
+import ctypes
 import hashlib
 import hmac
 import json
 import os
 import re
-import signal
+import select
 import subprocess
 import sys
 import tarfile
@@ -31,7 +32,12 @@ WORK_ROOT = Path("/work")
 SANDBOX_UID = 10001
 SANDBOX_GID = 10001
 SANDBOX_PATH = "/usr/local/bin:/usr/bin:/bin"
+KILLER = "/opt/agent-stack/bin/kill-sandbox"
+KILLER_TIMEOUT = 60
 MAX_COMMIT_BYTES = 1 << 20
+PR_CAPBSET_DROP = 24
+PR_SET_CHILD_SUBREAPER = 36
+PR_SET_NO_NEW_PRIVS = 38
 
 
 class ValidationError(Exception):
@@ -46,17 +52,54 @@ def main() -> int:
     parser.add_argument("--source-head-sha", required=True)
     args = parser.parse_args()
     try:
-        profile, key, source, env = prepare(args)
-    except (ValidationError, RegistryError, OSError) as error:
-        print(f"run-validation: {error}", file=sys.stderr)
+        attestation = validate(args)
+    except Exception as error:
+        print(f"run-validation: {type(error).__name__}: {error}", file=sys.stderr)
         return 2
+    print(json.dumps(attestation, sort_keys=True))
+    return 0 if attestation["status"] == "passed" else 1
+
+
+def validate(args) -> dict:
+    if os.getuid() != 0:
+        raise ValidationError("must start as root to keep the signing key from the sandbox user")
+    if KUBERNETES_SECRETS.exists():
+        raise ValidationError("a Kubernetes service account token is mounted")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.registry_hash):
+        raise ValidationError("registry hash must be 64 lowercase hex characters")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.source_head_sha):
+        raise ValidationError("source head must be a full lowercase commit SHA")
+    prctl(PR_SET_NO_NEW_PRIVS, 1)
+    prctl(PR_SET_CHILD_SUBREAPER, 1)
+    killer = SandboxKiller()
+    try:
+        for capability in range(int(Path("/proc/sys/kernel/cap_last_cap").read_text()) + 1):
+            prctl(PR_CAPBSET_DROP, capability)
+        return run_profile(args, killer)
+    finally:
+        killer.close()
+
+
+def run_profile(args, killer: "SandboxKiller") -> dict:
+    root_owned(REGISTRY, private=False)
+    registry = Registry.load(REGISTRY)
+    if not hmac.compare_digest(registry.revision, args.registry_hash):
+        raise ValidationError("registry hash does not match the mounted registry")
+    profile = registry.repository(args.repo).validation_profile(args.profile)
+    key = signing_key()
+    source, env = workspace(profile, args.source_head_sha)
 
     steps = [("install", ".", profile.install.argv)]
     steps += [(command.name, command.cwd, command.argv) for command in profile.commands]
     results = []
     failed = False
     for name, cwd, argv in steps:
-        exit_code = None if failed else execute(argv, source, cwd, env)
+        exit_code = None
+        if not failed:
+            try:
+                exit_code = execute(argv, source, cwd, env)
+            finally:
+                killer.kill()
         status = "skipped" if failed else "passed" if exit_code == 0 else "failed"
         results.append({"name": name, "cwd": cwd, "argv": list(argv), "status": status, "exit_code": exit_code})
         failed = failed or status == "failed"
@@ -73,33 +116,58 @@ def main() -> int:
     }
     message = json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode()
     attestation["signature"] = base64.b64encode(key.sign(message)).decode()
-    print(json.dumps(attestation, sort_keys=True))
-    return 1 if failed else 0
+    return attestation
 
 
-def prepare(args):
-    if os.getuid() != 0:
-        raise ValidationError("must start as root to keep the signing key from the sandbox user")
-    if KUBERNETES_SECRETS.exists():
-        raise ValidationError("a Kubernetes service account token is mounted")
-    if not re.fullmatch(r"[0-9a-f]{64}", args.registry_hash):
-        raise ValidationError("registry hash must be 64 lowercase hex characters")
-    if not re.fullmatch(r"[0-9a-f]{40}", args.source_head_sha):
-        raise ValidationError("source head must be a full lowercase commit SHA")
-    root_owned(REGISTRY, private=False)
-    registry = Registry.load(REGISTRY)
-    if not hmac.compare_digest(registry.revision, args.registry_hash):
-        raise ValidationError("registry hash does not match the mounted registry")
-    profile = registry.repository(args.repo).validation_profile(args.profile)
-    key = signing_key()
+def prctl(option: int, argument: int) -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    zero = ctypes.c_ulong(0)
+    if libc.prctl(ctypes.c_int(option), ctypes.c_ulong(argument), zero, zero, zero) != 0:
+        raise ValidationError(f"prctl {option} failed: {os.strerror(ctypes.get_errno())}")
 
-    workspace = Path(tempfile.mkdtemp(dir=WORK_ROOT))
-    workspace.chmod(0o755)
-    source, home, tmp = workspace / "src", workspace / "home", workspace / "tmp"
+
+class SandboxKiller:
+    def __init__(self) -> None:
+        # Started before the signing key is loaded, so its memory never holds the key.
+        self.process = subprocess.Popen(
+            [KILLER], env={}, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True, text=True
+        )
+        self.expect("ready")
+
+    def kill(self) -> None:
+        self.process.stdin.write("kill\n")
+        self.process.stdin.flush()
+        self.expect("done")
+        reap_orphans()
+
+    def expect(self, word: str) -> None:
+        ready, _, _ = select.select([self.process.stdout], [], [], KILLER_TIMEOUT)
+        if not ready or self.process.stdout.readline().strip() != word:
+            raise ValidationError("sandbox process killer failed")
+
+    def close(self) -> None:
+        self.process.stdin.close()
+        self.process.wait(timeout=KILLER_TIMEOUT)
+
+
+def reap_orphans() -> None:
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+
+def workspace(profile, head: str) -> tuple[Path, dict[str, str]]:
+    root = Path(tempfile.mkdtemp(dir=WORK_ROOT))
+    root.chmod(0o755)
+    source, home, tmp = root / "src", root / "home", root / "tmp"
     for directory, mode in ((source, 0o755), (home, 0o700), (tmp, 0o700)):
         directory.mkdir(mode)
         os.chown(directory, SANDBOX_UID, SANDBOX_GID)
-    extract_verified(args.source_head_sha, source)
+    extract_verified(head, source)
 
     env = {
         "PATH": SANDBOX_PATH,
@@ -111,7 +179,7 @@ def prepare(args):
     }
     if GITHUB_TOKEN_FILE.exists():
         env["AGENT_STACK_GITHUB_TOKEN_FILE"] = str(GITHUB_TOKEN_FILE)
-    return profile, key, source, env
+    return source, env
 
 
 def root_owned(path: Path, *, private: bool) -> None:
@@ -139,13 +207,11 @@ def extract_verified(head: str, destination: Path) -> None:
         raise ValidationError("commit object has no tree")
 
     tree: dict = {}
-    directories = []
     with tarfile.open(SOURCE_ARCHIVE, mode="r|") as archive:
         for member in archive:
             parts = member_parts(member.name)
             if member.isdir():
                 directory(tree, parts, destination)
-                directories.append(parts)
                 continue
             parent = directory(tree, parts[:-1], destination)
             if parts[-1] in parent:
@@ -161,9 +227,6 @@ def extract_verified(head: str, destination: Path) -> None:
             else:
                 raise ValidationError(f"unsupported archive entry type: {member.name}")
 
-    for parts in directories:
-        if not has_blob(directory(tree, parts, destination)):
-            raise ValidationError(f"archive has an empty directory: {'/'.join(parts)}")
     if tree_id(tree).hex() != match.group(1).decode():
         raise ValidationError("archive does not match the source head tree")
 
@@ -212,21 +275,28 @@ def blob_id(content: bytes) -> bytes:
     return hashlib.sha1(b"blob %d\0" % len(content) + content).digest()
 
 
-def has_blob(node: dict) -> bool:
-    return any(not isinstance(child, dict) or has_blob(child) for child in node.values())
-
-
-def tree_id(node: dict) -> bytes:
-    entries = []
-    for name, child in node.items():
-        encoded = name.encode("utf-8", "surrogateescape")
-        if isinstance(child, dict):
-            entries.append((encoded + b"/", b"40000 " + encoded + b"\0" + tree_id(child)))
-        else:
-            mode, object_id = child
-            entries.append((encoded, mode.encode() + b" " + encoded + b"\0" + object_id))
-    body = b"".join(entry for _, entry in sorted(entries))
-    return hashlib.sha1(b"tree %d\0" % len(body) + body).digest()
+def tree_id(root: dict) -> bytes:
+    ids: dict[int, bytes] = {}
+    stack = [(root, False)]
+    while stack:
+        node, children_done = stack.pop()
+        if not children_done:
+            stack.append((node, True))
+            stack.extend((child, False) for child in node.values() if isinstance(child, dict))
+            continue
+        if not node:
+            raise ValidationError("archive has an empty directory")
+        entries = []
+        for name, child in node.items():
+            encoded = name.encode("utf-8", "surrogateescape")
+            if isinstance(child, dict):
+                entries.append((encoded + b"/", b"40000 " + encoded + b"\0" + ids[id(child)]))
+            else:
+                mode, object_id = child
+                entries.append((encoded, mode.encode() + b" " + encoded + b"\0" + object_id))
+        body = b"".join(entry for _, entry in sorted(entries))
+        ids[id(node)] = hashlib.sha1(b"tree %d\0" % len(body) + body).digest()
+    return ids[id(root)]
 
 
 def execute(argv: tuple[str, ...], source: Path, cwd: str, env: dict[str, str]) -> int | None:
@@ -252,27 +322,6 @@ def execute(argv: tuple[str, ...], source: Path, cwd: str, env: dict[str, str]) 
     except OSError as error:
         print(f"run-validation: cannot run {argv[0]}: {error}", file=sys.stderr)
         return None
-    finally:
-        kill_sandbox()
-
-
-def kill_sandbox() -> None:
-    pid = os.fork()
-    if pid == 0:
-        code = 1
-        try:
-            os.setgroups([])
-            os.setresgid(SANDBOX_GID, SANDBOX_GID, SANDBOX_GID)
-            os.setresuid(SANDBOX_UID, SANDBOX_UID, SANDBOX_UID)
-            os.kill(-1, signal.SIGKILL)
-            code = 0
-        except ProcessLookupError:
-            code = 0
-        finally:
-            os._exit(code)
-    _, status = os.waitpid(pid, 0)
-    if os.waitstatus_to_exitcode(status) != 0:
-        raise RuntimeError("could not stop leftover sandbox processes")
 
 
 if __name__ == "__main__":

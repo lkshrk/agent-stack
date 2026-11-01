@@ -26,6 +26,7 @@ check "sandbox user is 10001 without a home" bash -c '[ "$(id -u validator)" = 1
 check "no git or system git config" bash -c '! command -v git && [ ! -e /etc/gitconfig ] && [ ! -e /root/.gitconfig ]'
 check "launcher and policies are root-owned and not writable by others" \
   bash -c '[ "$(stat -c %U:%a '"$launcher"')" = root:755 ] && [ -z "$(find /opt/agent-stack ! -user root -o -perm /022)" ]'
+check "no setuid or setgid files" bash -c '[ -z "$(find / -xdev -perm /6000 -type f)" ]'
 check "launcher never invokes a shell" bash -c '! grep -nE "shell=True|\"sh\"|/bin/sh|bash|os\.system|popen\(" '"$launcher"
 
 rm /usr/local/bin/pnpm
@@ -60,7 +61,8 @@ run() {
   rm -rf "$logs"
   install -d -m 0777 "$logs"
   [ -n "${FAIL_ON:-}" ] && printf '%s\n' "$FAIL_ON" >"$logs/fail-on"
-  env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root GITHUB_TOKEN=leaked-writer GH_TOKEN=leaked-writer \
+  [ -n "${ATTACK:-}" ] && printf '%s\n' "$ATTACK" >"$logs/attack"
+  timeout 120 env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/root GITHUB_TOKEN=leaked-writer GH_TOKEN=leaked-writer \
     OMNIGENT_API_KEY=leaked KUBECONFIG=/root/.kube/config \
     "$launcher" "$@" >"$scratch/out" 2>"$scratch/err"
   echo $? >"$scratch/rc"
@@ -110,6 +112,8 @@ token = Path(token_path).read_text()
 allowed = {"PATH", "HOME", "TMPDIR", "LANG", "CI", "NPM_CONFIG_REGISTRY", "AGENT_STACK_GITHUB_TOKEN_FILE"}
 for call in calls:
     assert call["uid"] == call["euid"] == 10001 and call["gid"] == 10001, call
+    assert call["status"]["NoNewPrivs"] == "1", call["status"]
+    assert all(int(call["status"][cap], 16) == 0 for cap in ("CapPrm", "CapEff", "CapAmb", "CapBnd")), call["status"]
     assert 0 not in call["groups"], call["groups"]
     assert call["parent_cmdline"] == ["/usr/bin/python3", "-I", "/opt/agent-stack/bin/run-validation"], call["parent_cmdline"]
     env = call["env"]
@@ -148,11 +152,32 @@ calls = Path("/var/log/validator-test/calls.jsonl").read_text().splitlines()
 assert len(calls) == 3, calls
 EOF
 
+no_sandbox_processes() {
+  py <<'PYEOF'
+import os
+leftover = []
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        uids = [line for line in open(f"/proc/{pid}/status") if line.startswith("Uid:")][0].split()[1:]
+    except (OSError, IndexError):
+        continue
+    if "10001" in uids:
+        leftover.append(pid)
+assert not leftover, leftover
+PYEOF
+}
+
+for signal in STOP KILL; do
+  ATTACK=$signal run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+  check "leftover process sending SIG$signal to everything cannot stop cleanup" rc 0 || cat "$scratch/err"
+  check "every sandbox process is gone after a SIG$signal attack" no_sandbox_processes
+done
+
 rejected() {
   local name=$1
   shift
   run "$@"
-  check "$name is rejected before any command" bash -c "[ \"\$(cat $scratch/rc)\" = 2 ] && [ ! -s $scratch/out ] && [ ! -s $logs/calls.jsonl ]"
+  check "$name is rejected before any command" bash -c "[ \"\$(cat $scratch/rc)\" = 2 ] && [ ! -s $scratch/out ] && [ ! -s $logs/calls.jsonl ] && ! grep -q Traceback $scratch/err" || cat "$scratch/err"
 }
 
 rejected "unknown profile" omnigent nope --registry-hash "$registry_hash" --source-head-sha "$head_sha"
@@ -168,7 +193,27 @@ rejected "archive with a planted file" omnigent web --registry-hash "$registry_h
 use_source escape
 rejected "archive writing through a symlink" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
 check "symlink escape wrote nothing outside the workspace" test ! -e /etc/x
+install -d "$scratch/garbage" "$scratch/deep"
+printf 'not a tar archive\n' >"$scratch/garbage/source.tar"
+py "$scratch/deep/source.tar" <<'PYEOF'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w", format=tarfile.PAX_FORMAT) as archive:
+    member = tarfile.TarInfo("/".join(["a"] * 1200) + "/f")
+    member.size = 2
+    archive.addfile(member, io.BytesIO(b"x\n"))
+PYEOF
+cp "$fixture/good/commit" "$scratch/garbage/"
+cp "$fixture/good/commit" "$scratch/deep/"
+install -m 0444 "$scratch/garbage/source.tar" "$scratch/garbage/commit" "$source_dir/"
+rejected "unreadable archive" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+install -m 0444 "$scratch/deep/source.tar" "$scratch/deep/commit" "$source_dir/"
+rejected "archive 1200 directories deep" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
 use_source good
+
+cp "$key" "$scratch/key.pem"
+printf -- '-----BEGIN PRIVATE KEY-----\nbm90IGEga2V5\n-----END PRIVATE KEY-----\n' >"$key"
+rejected "malformed signing key" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+install -m 0400 "$scratch/key.pem" "$key"
 
 chmod 0664 "$registry"
 rejected "group-writable registry" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"

@@ -9,7 +9,7 @@ pre-commit:
     shellcheck:
       glob: "{images/*/bin/*,images/*/cont-init.d/*,images/*/profile.d/*.sh,images/*/test/*.sh,config/**/*.sh}"
       exclude:
-        - "images/public-validator/bin/run-validation"
+        - "images/public-validator/bin/*"
       run: shellcheck -S warning {staged_files}
     yaml:
       glob: "*.{yaml,yml}"

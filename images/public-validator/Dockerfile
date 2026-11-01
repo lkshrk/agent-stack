@@ -12,13 +12,14 @@ RUN apt-get update \
  && userdel --remove node \
  && groupadd --gid 10001 validator \
  && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin validator \
- && install -d -m 0755 /work /opt/agent-stack/bin
+ && install -d -m 0755 /work /opt/agent-stack/bin \
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
-COPY images/public-validator/bin/run-validation /opt/agent-stack/bin/run-validation
+COPY images/public-validator/bin/ /opt/agent-stack/bin/
 RUN chown -R root:root /opt/agent-stack \
  && chmod -R u=rwX,go=rX /opt/agent-stack \
- && chmod 0755 /opt/agent-stack/bin/run-validation
+ && chmod 0755 /opt/agent-stack/bin/*
 
 ENV PATH=/usr/local/bin:/usr/bin:/bin
 WORKDIR /work
