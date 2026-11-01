@@ -10,8 +10,9 @@
   "permissions": {
     "defaultMode": "bypassPermissions",
     "additionalDirectories": ["/home/omnigent/workspace"],
-    "allow": ["EnterWorktree", "ExitWorktree"],
     "deny": [
+      "EnterWorktree",
+      "ExitWorktree",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
       "Bash(gh pr merge:*)",

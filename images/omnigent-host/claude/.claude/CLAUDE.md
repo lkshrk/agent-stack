@@ -32,6 +32,7 @@ Default: no comment. When one is truly warranted, one short line. Never restate 
 
 ## Tools
 
+- You already start in your worktree. `EnterWorktree` and `ExitWorktree` are denied; use `cd` and `git worktree` instead.
 - `rtk` compresses command output; prefer `rtk <cmd>` for noisy commands.
 - `codebase-memory-mcp` holds the code graph; use it for definitions, callers and impact before grepping whole files.
 - Toolchains and language servers come from mise (`mise ls`).

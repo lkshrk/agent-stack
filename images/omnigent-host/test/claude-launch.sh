@@ -25,11 +25,13 @@ for f in .codex/AGENTS.md .omp/agent/AGENTS.md; do
   expect "$f points at runner rules that exist" "$(test -s "${rules/#\~/$home}" && echo exists || echo "missing ${rules:-reference}")" exists
 done
 expect "the managed settings keep the deny list" \
-  "$(jq -r '.permissions.deny | length' /etc/claude-code/managed-settings.json)" 4
+  "$(jq -r '.permissions.deny | length' /etc/claude-code/managed-settings.json)" 6
 expect "the sandbox workspace is a working directory, so file tools never prompt for sibling worktrees" \
   "$(jq -c '.permissions.additionalDirectories' /etc/claude-code/managed-settings.json)" '["/home/omnigent/workspace"]'
-expect "the managed settings pre-approve only switching between worktrees" \
-  "$(jq -c '.permissions.allow' /etc/claude-code/managed-settings.json)" '["EnterWorktree","ExitWorktree"]'
+expect "worktree switching is denied, since a path outside .claude/worktrees always prompts even in bypass mode" \
+  "$(jq -c '[.permissions.deny[] | select(test("Worktree"))]' /etc/claude-code/managed-settings.json)" '["EnterWorktree","ExitWorktree"]'
+expect "the managed settings pre-approve nothing beyond bypass mode" \
+  "$(jq -c '.permissions.allow' /etc/claude-code/managed-settings.json)" null
 expect "the managed settings leave Omnigent's hook settings in force" \
   "$(jq -r '[.allowManagedHooksOnly, .disableAllHooks, .disableBypassPermissionsMode] | map(select(. != null)) | length' /etc/claude-code/managed-settings.json)" 0
 expect "agents never prompt: the managed default permission mode bypasses prompts" \
