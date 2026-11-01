@@ -31,7 +31,9 @@ expect "the sandbox workspace is a working directory, so file tools never prompt
 expect "the managed settings pre-approve only switching between worktrees" \
   "$(jq -c '.permissions.allow' /etc/claude-code/managed-settings.json)" '["EnterWorktree","ExitWorktree"]'
 expect "the managed settings leave Omnigent's hook settings in force" \
-  "$(jq -r '[.allowManagedHooksOnly, .disableAllHooks, .permissions.defaultMode] | map(select(. != null)) | length' /etc/claude-code/managed-settings.json)" 0
+  "$(jq -r '[.allowManagedHooksOnly, .disableAllHooks, .disableBypassPermissionsMode] | map(select(. != null)) | length' /etc/claude-code/managed-settings.json)" 0
+expect "agents never prompt: the managed default permission mode bypasses prompts" \
+  "$(jq -r '.permissions.defaultMode' /etc/claude-code/managed-settings.json)" bypassPermissions
 expect "a seeded HOME enables the runner plugins" \
   "$(jq -r '.enabledPlugins["runner@agent-stack"]' "$home/.claude/settings.json" 2>&1)" true
 expect "a seeded HOME has the gateway MCP servers" \
@@ -44,7 +46,7 @@ jq -n --arg dir "$work" '{hooks: {
   SessionStart: [{hooks: [{type: "command", command: "touch \($dir)/session-start"}]}],
   UserPromptSubmit: [{hooks: [{type: "command", command: "touch \($dir)/prompt-submit"}]}]
 }}' >"$work/settings.json"
-for mode in default auto; do
+for mode in default auto bypassPermissions; do
   rm -f "$work/session-start" "$work/prompt-submit"
   out=$(cd "$work" && timeout 30s env HOME="$home" ANTHROPIC_API_KEY=invalid ANTHROPIC_BASE_URL=http://127.0.0.1:9 \
     claude --print "launch check" --permission-mode "$mode" --output-format stream-json --verbose \

@@ -7,8 +7,8 @@ executor:
   model: anthropic-auto
   config:
     harness: claude-native
-    # Nobody answers prompts here: auto keeps the classifier, the managed settings add the workspace as a working directory.
-    permission_mode: auto
+    # Nobody answers prompts here; Omnigent's PreToolUse policies, the agent tokens and the post-run check are the gates.
+    permission_mode: bypassPermissions
 
 prompt: |
   You are Claude Code, a coding sub-agent dispatched by the polly
@@ -97,6 +97,12 @@ guardrails:
           startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc]
           startup_home: /home/omnigent
           exempt: ["**/.env.example"]
+    no_process_secrets:
+      type: function
+      function:
+        # Pattern-based and best effort: harnesses run without their own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
     blast_radius:
       type: function
       on: [tool_call]

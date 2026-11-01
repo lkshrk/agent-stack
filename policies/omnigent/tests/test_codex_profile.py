@@ -51,7 +51,7 @@ class DefaultCodexConfigTest(unittest.TestCase):
     def test_unified_exec_disabled(self):
         self.assertIs(load("config.toml.tmpl")["features"]["unified_exec"], False)
 
-    def test_no_bypass_in_default_config(self):
+    def test_default_config_never_prompts(self):
         config = load("config.toml.tmpl")
-        self.assertNotIn("approval_policy", config)
-        self.assertNotIn("sandbox_mode", config)
+        self.assertEqual(config["approval_policy"], "never")
+        self.assertEqual(config["sandbox_mode"], "danger-full-access")

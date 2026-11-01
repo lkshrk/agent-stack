@@ -148,6 +148,12 @@ guardrails:
           allow_paths: *docs_allow
           deny: *docs_deny
           exempt: *docs_exempt
+    no_process_secrets:
+      type: function
+      function:
+        # Pattern-based and best effort: harnesses run without their own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
     blast_radius:
       type: function
       function:
