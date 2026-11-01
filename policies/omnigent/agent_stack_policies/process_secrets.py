@@ -6,12 +6,11 @@ from ._shell import shell_command
 from .paths import SHELL_TOOLS
 
 _LEAD = r"(?:^|[;&|(`\n]|\$\(|-\w*c)\s*(?:\S*/)?"
-_HOME = r"(?:~[\w-]*|\$HOME|\$\{HOME\}|/home/[^/\s;&|]+|/root)"
+_HOME = r"(?:~[\w-]*|\$HOME|\$\{HOME\}|/home/+[^/\s;&|]+|/root)"
 _ENV_READ = r"os\.environ|os\.getenv|process\.env|%ENV|\$ENV\{|ENVIRON\b|ENV\["
 _PATTERNS = (
     (re.compile(r"(?<![\w-])/proc(?![\w.-])|(?<![\w-])/pro[?*\[]|\*\S*/(?:environ|cmdline)(?![\w.])"), "process environment and command lines"),
     (re.compile(r"CODEX_HOME|" + _HOME + r"(?:/+\.?(?=/))*/+\.codex(?![\w-])"), "the Codex home"),
-    (re.compile(r"(?:^|[;&|(`\n]|\$\(|-\w*c)\s*(?:cd|pushd)(?:\s+" + _HOME + r"/*)?\s*(?:$|[;&|)])[^\n]*(?<![\w])\.codex(?![\w-])", re.S), "the Codex home"),
     (re.compile(_LEAD + r"printenv\b"), "environment dumps"),
     (re.compile(_LEAD + r"env(?:\s+-[0a-z]+)*\s*(?:$|[;&|)`])"), "environment dumps"),
     (re.compile(_LEAD + r"(?:export\s+-p|declare\s+-\w*[px]|compgen\s+-\w*e)\b"), "environment dumps"),
