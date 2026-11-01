@@ -396,7 +396,7 @@ def gh_exposes_token(argv: list[str]) -> bool:
 
 def _gh_api_read(args: list[str]) -> bool:
     parsed = _parse(args, _GH_API_READ)
-    if parsed is None or len(parsed.positional) != 1 or not _ENDPOINT.fullmatch(parsed.positional[0]):
+    if parsed is None or len(parsed.positional) != 1 or ".." in parsed.positional[0] or not _ENDPOINT.fullmatch(parsed.positional[0]):
         return False
     methods = parsed.options.get("--method", []) + parsed.options.get("-X", [])
     return all(method.upper() == "GET" for method in methods)

@@ -31,6 +31,9 @@ _UNQUOTED_LITERAL = re.compile(r"[A-Za-z0-9_./:=@,+%^-]")
 _QUOTED_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 _GLOB = re.compile(r"[*?\[]")
 _GH_SLUG = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_REDIRECT = re.compile(r"[0-9]*(>>?|<<?<?|&>>?|>&|<&|>\|)")
+_FUSED_REDIRECT = re.compile(r"[0-9]*(>>?|<|&>>?|>&|<&)\S")
+_DECLARATIONS = frozenset({"export", "declare", "typeset", "local", "readonly"})
 _WORD = re.compile(r"[^\s;&|<>()`'\"]+")
 
 
@@ -346,32 +349,53 @@ def _refers_to_root(path: str, registry: Registry) -> bool:
     return _glob_reaches_root(path, registry) if _GLOB.search(path) else _registered_path(path, registry)
 
 
-def _may_name_checkout(text: str, registry: Registry) -> bool:
-    if any(posixpath.basename(repository.checkout) in text for repository in registry.repositories):
+def _may_name_checkout(statements: list[list[str]], registry: Registry) -> bool:
+    names = [posixpath.basename(repository.checkout) for repository in registry.repositories]
+    tokens = [token for statement in statements for token in statement]
+    if any(name in token for name in names for token in tokens):
         return True
-    return bool(_GLOB.search(text)) and bool(re.search(r"/|(^|[\s;&|(])(cd|pushd)\b", text))
+    return any(_GLOB.search(t) for t in tokens) and any("/" in t or t in ("cd", "pushd") for t in tokens)
+
+
+def _without_redirects(argv: list[str]) -> list[str]:
+    words: list[str] = []
+    skip = False
+    for token in argv:
+        if skip:
+            skip = False
+        elif _REDIRECT.fullmatch(token):
+            skip = True
+        elif not _FUSED_REDIRECT.match(token):
+            words.append(token)
+    return words
+
+
+def _cdpath_entries(resolved_argv: list[str], assignments: list[str]) -> list[str]:
+    values = [a.removeprefix("CDPATH=") for a in assignments if a.startswith("CDPATH=")]
+    if resolved_argv[:1] and resolved_argv[0] in _DECLARATIONS:
+        values += [a.removeprefix("CDPATH=") for a in resolved_argv[1:] if a.startswith("CDPATH=")]
+    return [entry or "." for value in values for entry in value.split(":")]
 
 
 def _references_registered_root(text: str, cwd: str | None, registry: Registry) -> bool:
-    """Whether any word, after lexical ~/$HOME expansion and a walk through cd/pushd, can name a registered checkout."""
-    if not _may_name_checkout(text, registry):
-        return False
+    """Whether any dequoted word, after lexical ~/$HOME expansion and a walk through cd/pushd, can name a registered checkout."""
     try:
         statements = walk(text)
     except (OpaqueCommand, ValueError):
-        statements = [_WORD.findall(text)]
+        statements = [_WORD.findall(re.sub(r"\\\n|['\"\\]", "", text))]
+    if not _may_name_checkout(statements, registry):
+        return False
     bases = [cwd] if cwd else []
     for tokens in statements:
         resolved = resolve(tokens)
-        for assignment in resolved.assignments:
-            if assignment.startswith("CDPATH="):
-                bases += [path for entry in assignment.removeprefix("CDPATH=").split(":") for path in _expansions(entry or ".", bases or ["/"])]
+        for entry in _cdpath_entries(resolved.argv, resolved.assignments):
+            bases += _expansions(entry, bases or ["/"])
         for token in tokens:
             if any(_refers_to_root(path, registry) for path in _expansions(token, bases or ["/"])):
                 return True
         if resolved.name in ("cd", "pushd"):
-            target = resolved.argv[-1] if len(resolved.argv) > 1 else "~"
-            bases = _expansions(target, bases or ["/"]) + bases
+            targets = [w for w in _without_redirects(resolved.argv)[1:] if not w.startswith("-") and not w.isdigit()] or ["~"]
+            bases = [path for target in targets for path in _expansions(target, bases or ["/"])] + bases
     return False
 
 

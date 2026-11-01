@@ -1356,6 +1356,44 @@ class GitDirPathGuardTest(unittest.TestCase):
                 for guard in guards:
                     self.assertIn("**/.git/**", guard["function"]["arguments"]["deny"])
 
+    def test_every_writer_path_guard_denies_global_git_config(self):
+        import yaml
+
+        from agent_stack_policies.paths import path_guard
+
+        from . import tool_call_event
+
+        targets = (
+            "/home/omnigent/.gitconfig",
+            "~/.gitconfig",
+            "/home/omnigent/.gitattributes",
+            "/home/omnigent/.config/git/config",
+            "~/.config/git/config",
+            "/home/omnigent/.config/git/attributes",
+            "/home/omnigent/.config/git/ignore",
+            "/home/omnigent/.config/git/hooks/pre-commit",
+        )
+        for bundle in ("polly", "polly/agents/claude_code", "documenter"):
+            policies = yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["guardrails"]["policies"]
+            guards = [p for p in policies.values() if p.get("function", {}).get("path") == "agent_stack_policies.paths.path_guard"]
+            for guard in guards:
+                policy = path_guard(**guard["function"]["arguments"])
+                for target in targets:
+                    with self.subTest(bundle=bundle, target=target):
+                        decision = policy(tool_call_event("Write", {"file_path": target, "content": "[core]\n\tfsmonitor = /tmp/x\n"}))
+                        self.assertEqual(decision["result"], "DENY", decision)
+        policies = yaml.safe_load((BUNDLES / "polly/agents/claude_code" / "config.yaml").read_text())["guardrails"]["policies"]
+        policy = path_guard(**policies["path_guard"]["function"]["arguments"])
+        for command in (
+            "printf '[core]\\n\\tfsmonitor=/tmp/x\\n' >> ~/.gitconfig",
+            "cp /tmp/x /home/omnigent/.config/git/config",
+            "tee $HOME/.gitattributes",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(policy(tool_call_event("Bash", {"command": command}))["result"], "DENY")
+        self.assertEqual(policy(tool_call_event("Write", {"file_path": "src/app.py", "content": "x"}))["result"], "ALLOW")
+        self.assertEqual(policy(tool_call_event("Bash", {"command": "git config --get user.name"}))["result"], "ALLOW")
+
     def test_git_internals_are_denied_through_the_engine(self):
         if not IN_IMAGE:
             self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
@@ -1364,6 +1402,10 @@ class GitDirPathGuardTest(unittest.TestCase):
             ("Write", {"file_path": ".git/hooks/pre-commit", "content": "#!/bin/sh\nid\n"}),
             ("Edit", {"file_path": "/home/omnigent/work/agent-stack/.git/config", "old_string": "a", "new_string": "b"}),
             ("Bash", {"command": "cp /tmp/hook .git/hooks/pre-commit"}),
+            ("Write", {"file_path": "/home/omnigent/.gitconfig", "content": "[core]\n\tfsmonitor = /tmp/x\n"}),
+            ("Write", {"file_path": "/home/omnigent/.config/git/config", "content": "[core]\n\thooksPath = /tmp\n"}),
+            ("Write", {"file_path": "/home/omnigent/.config/git/attributes", "content": "* filter=x\n"}),
+            ("Bash", {"command": "printf x >> ~/.gitconfig"}),
         ):
             with self.subTest(tool=tool, data=data):
                 self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, data, "")), "DENY")

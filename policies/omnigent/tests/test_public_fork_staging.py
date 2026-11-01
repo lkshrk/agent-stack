@@ -489,6 +489,7 @@ class ForkStagingTest(unittest.TestCase):
             ["gh", "api", "--method=GET", "--method=POST", "repos/omnigent-ai/omnigent/issues"],
             ["gh", "api", "-X", "GET", "graphql", "-f", "query={viewer{login}}"],
             ["gh", "api", "user"],
+            ["gh", "api", "repos/omnigent-ai/omnigent/contents/../../../graphql"],
             ["gh", "api", "-H", "X-HTTP-Method-Override: POST", "repos/omnigent-ai/omnigent/issues"],
             ["gh", "pr", "edit", "1", "--repo", "lkshrk/omnigent", "--add-label", "Approved-Upstream"],
             ["gh", "issue", "edit", "1", "--repo", "lkshrk/omnigent", "--add-label", "APPROVED-UPSTREAM"],
@@ -615,6 +616,49 @@ class ForkStagingTest(unittest.TestCase):
         self.assertDenied("gh auth status --show-token", cwd=own)
         self.assertDenied(["gh", "auth", "token"], cwd=own)
         self.assertDenied("gh auth status -t 2>&1 | cat", cwd=own)
+
+    def test_quoted_and_exported_scoping_escapes_are_denied(self):
+        home = self.tree.parent.parent
+        for command in (
+            "cd ~/work/omni''gent && git push origin HEAD:main",
+            'cd ~/work/omni"gent" && git push origin HEAD:main',
+            "cd ~/work/omni\\gent && git push origin HEAD:main",
+            "cd ~/work/omnigen[t] && git push origin HEAD:main",
+            "cd ~/work && cd omn?gent && git push origin HEAD:main",
+            "export CDPATH=~/work; cd omnigent && git push origin HEAD:main",
+            "declare -x CDPATH=~/work; cd omnigent && git push origin HEAD:main",
+            "typeset CDPATH=~/work; cd omnigent && git push origin HEAD:main",
+            "CDPATH=~/work; cd omnigent && git push origin HEAD:main",
+            "CDPATH=~/work cd omnigent && git push origin HEAD:main",
+            "cd work; cd omnigent; git push origin HEAD:main",
+            "(cd ~/work/omnigent && git push origin HEAD:main)",
+            "cd $'~/work/omni\\x67ent' && git push origin HEAD:main",
+            "cd ~/work/./omnigent/ && git push origin HEAD:main",
+            "pushd ~/work >/dev/null; pushd omnigent; git push origin HEAD:main",
+            "pushd ~/work 2>/dev/null; pushd omnigent >/dev/null; git push origin HEAD:main",
+            "env -C ~/work/omnigent git push origin HEAD:main",
+            "cd ~/work/omnige\\\nnt && git push origin HEAD:main",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command, cwd=home)
+
+    def test_scoping_has_no_false_positives_in_own_repositories(self):
+        home = self.tree.parent.parent
+        own = self.tree.parent / "agent-stack"
+        (own / "policies" / "omnigent").mkdir(parents=True)
+        for command, cwd in (
+            ("cd policies/omnigent && python3 -m unittest", own),
+            ("grep -rn omnigent policies", own),
+            ("docker build -t omnigent .", own),
+            (["git", "commit", "-m", "fix(omnigent): x"], own),
+            (["git", "push", "origin", "HEAD:feat/omnigent"], own),
+            ("git log --oneline -- policies/omnigent", own),
+            ("ls ~/work", home),
+            ("rg 'omni*' src", own),
+            ("ls policies/*", own),
+        ):
+            with self.subTest(command=command):
+                self.assertIsNone(self.evaluate(command, cwd=cwd))
 
     def test_own_repositories_keep_their_behaviour(self):
         own = self.tree.parent / "agent-stack"

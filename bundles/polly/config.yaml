@@ -360,6 +360,8 @@ guardrails:
       function:
         path: agent_stack_policies.paths.path_guard
         arguments:
+          startup_files: [.gitconfig, .gitattributes, .config/git/config, .config/git/attributes, .config/git/ignore]
+          startup_home: /home/omnigent
           allow_only:
             - .polly/registry.json
             - ".polly/diffs/**"
@@ -367,6 +369,7 @@ guardrails:
           deny:
             - ".github/workflows/**"
             - "**/.git/**"
+            - "/home/omnigent/.config/git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"

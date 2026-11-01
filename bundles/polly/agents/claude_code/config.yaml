@@ -118,6 +118,7 @@ guardrails:
           deny:
             - ".github/workflows/**"
             - "**/.git/**"
+            - "/home/omnigent/.config/git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"
@@ -128,7 +129,7 @@ guardrails:
             - CLAUDE.md
             - "lefthook.y*ml"
             - CODEOWNERS
-          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc]
+          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc, .gitconfig, .gitattributes, .config/git/config, .config/git/attributes, .config/git/ignore]
           startup_home: /home/omnigent
           exempt: ["**/.env.example"]
     no_process_secrets:
