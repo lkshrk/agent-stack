@@ -1,5 +1,10 @@
 sandbox:
   provider: kubernetes
+  # Backstop for the h-cloud sandbox-reaper: hosts whose Job it deleted go offline, and terminate() removes their token Secret.
+  reaper:
+    enabled: true
+    terminate_after_offline_days: 1
+    sweep_interval_s: 3600
   server_url: http://omnigent.ai.svc.cluster.local
   host_config:
     providers:
@@ -34,7 +39,7 @@ sandbox:
     pod_ready_timeout_s: 600
     home_size_limit: 20Gi
     resources:
-      requests: {cpu: "1", memory: 4Gi, ephemeral-storage: 4Gi}
+      requests: {cpu: "1", memory: 1Gi, ephemeral-storage: 4Gi}
       limits: {cpu: "4", memory: 12Gi, ephemeral-storage: 24Gi}
 
 policy_modules: [agent_stack_policies]

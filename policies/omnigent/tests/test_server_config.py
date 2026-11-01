@@ -26,6 +26,23 @@ class ServerConfigTest(unittest.TestCase):
         mounts = _secret_mounts(yaml.safe_load(SERVER_CONFIG.read_text()))
         self.assertEqual([m for m in mounts if m.get("secret_name") == "agent-github-tokens"], [])
 
+    def test_sandbox_resources(self):
+        import yaml
+
+        # h-cloud's ResourceQuota in omnigent-sandboxes is sized for this request.
+        resources = yaml.safe_load(SERVER_CONFIG.read_text())["sandbox"]["kubernetes"]["resources"]
+        self.assertEqual(resources["requests"]["memory"], "1Gi")
+        self.assertEqual(resources["requests"]["cpu"], "1")
+        self.assertEqual(resources["limits"]["memory"], "12Gi")
+        self.assertEqual(resources["limits"]["cpu"], "4")
+
+    def test_offline_sandbox_reaper(self):
+        import yaml
+
+        # Backstop for h-cloud's sandbox-reaper, which deletes only the Job and leaves its token Secret.
+        reaper = yaml.safe_load(SERVER_CONFIG.read_text())["sandbox"]["reaper"]
+        self.assertEqual(reaper, {"enabled": True, "terminate_after_offline_days": 1, "sweep_interval_s": 3600})
+
     def test_the_check_finds_a_nested_mount(self):
         config = {"sandbox": {"kubernetes": {"secret_mounts": [{"secret_name": "agent-github-tokens"}]}}}
         self.assertEqual(_secret_mounts(config), [{"secret_name": "agent-github-tokens"}])
