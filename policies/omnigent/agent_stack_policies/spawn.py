@@ -98,12 +98,15 @@ def max_dispatches_per_session(
             return None
         if _delivered_child_output(event) or _launched(_result_text(event)):
             return None
-        return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
+        if parallel:
+            return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
+        # Serial collections stand for collected replies, so a send that started no turn is uncounted instead.
+        return allow(state_updates=[{"key": DISPATCH_STATE_KEY, "action": "increment", "value": -1}])
 
     def policy(event: Event) -> Decision | None:
         if collectors and _result_tool(event, collectors):
             return collect(event)
-        if parallel and _result_tool(event, tools):
+        if _result_tool(event, tools):
             return settle_send(event)
         if tool_call(event, tools) is None:
             return None

@@ -1447,6 +1447,29 @@ class BundleVerdictTest(unittest.TestCase):
         expected[-3] = "DENY"
         self.assertEqual(run_sequence("planner", run), expected)
 
+    def test_planner_failed_critic_send_is_not_awaited(self):
+        failed = ("tool_result", ("sys_session_send", "Error: failed to send message to child: 503 upstream unavailable"))
+        launched = ("tool_result", ("sys_session_send", json.dumps({"task_id": "c1", "agent": "critic", "title": "plan-critic", "status": "launching"})))
+        send = ("sys_session_send", CRITIC_SEND)
+        status = ("response", "Draft sent to the critic for round 1.")
+        state = {}
+        self.assertEqual(run_sequence("planner", [send, failed, status], state), ["ALLOW", "ALLOW", "DENY"])
+        self.assertEqual(state.get("agent_stack_dispatches"), 0)
+        self.assertEqual(run_sequence("planner", [send, launched, status], state), ["ALLOW", "ALLOW", "ALLOW"])
+        self.assertEqual(state.get("agent_stack_dispatches"), 1)
+
+    def test_planner_critic_rounds_after_a_failed_send(self):
+        plan = infra_plan()
+        plan["critic"]["rounds"] = 1
+        response = "Plan for ROU-12.\n```json\n" + json.dumps(plan, indent=2) + "\n```"
+        failed = ("tool_result", ("sys_session_send", "Error: failed to create child session: 500 boom"))
+        launched = ("tool_result", ("sys_session_send", json.dumps({"task_id": "c1", "status": "launching"})))
+        send = ("sys_session_send", CRITIC_SEND)
+        run = [send, failed, ("response", response), send, launched, ("response", "Sent."), ("request", WAKE), *COLLECT, ("response", response)]
+        expected = ["ALLOW"] * len(run)
+        expected[2] = "DENY"
+        self.assertEqual(run_sequence("planner", run), expected)
+
     def test_planner_one_critic_per_turn(self):
         send = ("sys_session_send", CRITIC_SEND)
         self.assertEqual(run_sequence("planner", [send, send]), ["ALLOW", "DENY"])
