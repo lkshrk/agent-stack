@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from agent_stack_policies import spawn
@@ -133,14 +134,34 @@ class SpawnTest(unittest.TestCase):
     def test_parallel_settles_sends_that_start_no_turn(self):
         policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
         state = {DISPATCH_STATE_KEY: 2, COLLECT_STATE_KEY: 0}
-        launched = '{"handle_id": "c1", "kind": "sub_agent", "status": "launching"}'
-        self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": launched}, state)))
+        handle = {"task_id": "c1", "handle_id": "c1", "conversation_id": "c1", "kind": "sub_agent", "agent": "claude_code", "title": "fix-x"}
+        launched = json.dumps({**handle, "status": "launching", "message": "Launched sub-agent 'claude_code'."})
+        for name in ("sys_session_send", "omnigent__sys_session_send"):
+            self.assertIsNone(policy(tool_result_event(name, {"result": launched}, state)))
+        steered = json.dumps({**handle, "status": "running", "message": "Steered the in-flight turn of sub-agent 'claude_code' title 'fix-x'."})
         settled = [{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}]
-        for text in ('{"handle_id": "c1", "kind": "sub_agent", "status": "running"}', "Error: session 'c1' is still starting its turn"):
+        for text in (
+            steered,
+            "Error: sub-agent 'claude_code' title 'fix-x' is still starting its turn; retry the send in a moment, or use a distinct task-based title for independent parallel work.",
+            "Error: session 'c1' is still starting its turn; retry the send in a moment",
+            "Error: failed to send message to child: 500 boom",
+        ):
             with self.subTest(text=text):
                 self.assertEqual(policy(tool_result_event("sys_session_send", {"result": text}, state))["state_updates"], settled)
         self.assertIsNone(policy(tool_result_event("sys_session_send", {"result": "Error: x"}, {DISPATCH_STATE_KEY: 1, COLLECT_STATE_KEY: 1})))
         self.assertIsNone(max_dispatches_per_session(limit=3)(tool_result_event("sys_session_send", {"result": "Error: x"}, state)))
+
+    def test_parallel_ignores_delivered_child_output(self):
+        policy = max_dispatches_per_session(limit=24, collect_tools=["sys_read_inbox"], parallel=True)
+        delivered = {
+            **tool_result_event("sys_session_send", {"result": "Opened PR #12."}, {DISPATCH_STATE_KEY: 2}),
+            "request_data": {
+                "name": "sys_session_send",
+                "tool": "sys_session_send",
+                "args": {"agent": "claude_code", "title": "fix-x", "conversation_id": "conv_child"},
+            },
+        }
+        self.assertIsNone(policy(delivered))
 
     def test_awaiting(self):
         self.assertFalse(awaiting({}))
