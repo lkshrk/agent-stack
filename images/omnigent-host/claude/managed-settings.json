@@ -8,6 +8,7 @@
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
   "permissions": {
+    "additionalDirectories": ["/home/omnigent/workspace"],
     "deny": [
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
