@@ -230,6 +230,7 @@ class ForkStagingTest(unittest.TestCase):
             'git add "web/a.ts"',
             f'gh pr create --repo {FORK} --base main --head fix/x --title "fix(web): x" --body "What changed.\n\nTested with pnpm test."',
             f"gh pr edit 7 --repo={FORK} --add-label upstream-ready",
+            "git commit -m 'fix(web): it'\"'\"'s fixed'",
         ):
             with self.subTest(command=command):
                 self.assertAllowed(command)
@@ -425,6 +426,15 @@ class ForkStagingTest(unittest.TestCase):
         self.assertDenied(["git", "add", "web/a.ts"])
         self.assertDenied(["git", "commit", "-a", "-m", "fix(web): a"])
         self.assertFalse(marker.exists())
+
+    def test_a_policy_git_timeout_is_a_denial(self):
+        def expire(*args, **kwargs):
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+        with patch.object(public_contributions.subprocess, "run", side_effect=expire):
+            self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
+            self.assertDenied(["git", "add", "web/a.ts"])
+            self.assertDenied(["git", "commit", "-m", "fix(web): a"])
 
     def test_policy_git_calls_use_a_minimal_environment_with_a_timeout(self):
         calls = []

@@ -1327,6 +1327,7 @@ class ContributionPromptTest(unittest.TestCase):
             "approved-upstream",
             "upstream's own conventions",
             "`title_format`",
+            "`'it'\"'\"'s'`",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, implementer)
