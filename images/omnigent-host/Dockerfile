@@ -123,6 +123,7 @@ RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
  && chmod -R a+rX /opt/agent
 
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
+COPY config/public-contributions.yaml /opt/agent-stack/public-contributions.yaml
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
  && chmod -R a+rX /opt/agent-stack
 
@@ -136,6 +137,7 @@ FROM image AS test
 COPY policies/omnigent/ /src/policies/omnigent/
 COPY bundles/ /src/bundles/
 COPY config/omnigent/ /src/config/omnigent/
+COPY config/public-contributions.yaml /src/config/public-contributions.yaml
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
 COPY --from=upstream-env /upstream.env /src/upstream.env

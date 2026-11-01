@@ -12,6 +12,8 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 
 Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside both images with `AGENT_STACK_IN_IMAGE=1`, in each Dockerfile's `test` stage (`docker buildx build --target test`); the default target is the published image without it.
 
+The host image installs the root-owned `/opt/agent-stack/public-contributions.yaml` registry and `agent-stack-contribute` helper. The helper resolves only that fixed registry path and emits JSON for `list`, `prepare <repo>`, `preflight <repo>`, and `validate <repo> <profile>`; it provides no publishing operation and never runs upstream lifecycle scripts.
+
 ## Runner pin in the server image
 
 The bundles resolve `agent_stack_policies` handlers inside the runner, so a server image must never point at a runner older than its bundles. `images.yml` builds `omnigent-server` with `AGENT_STACK_VERSION` set to the release version (the leading `v` removed), and the Dockerfile rewrites `sandbox.kubernetes.image` in the baked config to `ghcr.io/lkshrk/agent-stack/omnigent-host:<version>`, the runner built in the same release run. The rewrite is a tag pin without a digest. PR and local builds leave the argument empty and keep the pin checked in to `config/omnigent/config.yaml`. CI builds the server once more with the argument set and checks the rewritten line.
