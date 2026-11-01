@@ -184,8 +184,16 @@ def _start(env, kanban: KanbanPort, omni, gh, task_id: str, spec: RunSpec, link,
     share_with = env.get("OMNIGENT_SHARE_WITH")
     if share_with:
         with contextlib.suppress(Exception):
-            omni.share(session_id, share_with, 1)
+            omni.share(session_id, share_with, _share_level(env))
     return session_id, notes + (session_note,)
+
+
+def _share_level(env) -> int:
+    try:
+        level = int(env.get("OMNIGENT_SHARE_LEVEL", "1"))
+    except ValueError:
+        return 1
+    return level if 1 <= level <= 3 else 1
 
 
 class _Heartbeat:
