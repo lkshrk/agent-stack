@@ -14,5 +14,7 @@ hits=$(grep -oE "$owner" "$files" | wc -l)
 sed -i -E 's/'"$owner"'/function \1(\2,\3){let \4=\2.owner??null;return \4===null||\4===\3||\2.permission_level!=null\&\&\2.permission_level>=4}/' "$files"
 
 patched=$(grep -oE 'permission_level!=null&&[a-z]\.permission_level>=4\}' "$files" | wc -l)
-[ "$patched" -eq 1 ] && ! grep -qE "$owner" "$files" \
-  || { echo "sidebar owner helper: patch did not apply cleanly to $files" >&2; exit 1; }
+if [ "$patched" -ne 1 ] || grep -qE "$owner" "$files"; then
+  echo "sidebar owner helper: patch did not apply cleanly to $files" >&2
+  exit 1
+fi
