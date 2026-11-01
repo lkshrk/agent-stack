@@ -45,6 +45,8 @@ chmod 0400 "$key"
 head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$token"
 chown root:10001 "$token"
 chmod 0440 "$token"
+nonce=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+domain='agent-stack.public-validator.attestation.v1'
 
 registry_hash=$(py <<'EOF'
 import sys
@@ -74,18 +76,20 @@ no_attestation() { [ ! -s "$scratch/out" ]; }
 
 head_sha=$(cat "$fixture/good/head")
 use_source good
-run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 check "passing run exits 0" rc 0 || cat "$scratch/err"
-check "passing attestation, argv, sandbox and cleanup" py "$scratch" "$registry_hash" "$head_sha" "$token" <<'EOF'
+check "passing attestation, argv, sandbox and cleanup" py "$scratch" "$registry_hash" "$head_sha" "$token" "$nonce" "$domain" <<'EOF'
 import base64, json, os, sys
 from pathlib import Path
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
-scratch, registry_hash, head, token_path = sys.argv[1:]
+scratch, registry_hash, head, token_path, nonce, domain = sys.argv[1:]
 lines = Path(scratch, "out").read_text().splitlines()
 assert len(lines) == 1, lines
 attestation = json.loads(lines[0])
-assert set(attestation) == {"registry_hash", "repo", "profile", "source_head_sha", "validator_image_digest", "commands", "status", "finished_at", "signature"}, attestation
+assert set(attestation) == {"registry_hash", "repo", "profile", "source_head_sha", "nonce", "validator_image_digest", "commands", "status", "finished_at", "signature"}, attestation
 assert attestation["registry_hash"] == registry_hash
+assert attestation["nonce"] == nonce
 assert (attestation["repo"], attestation["profile"], attestation["source_head_sha"]) == ("omnigent", "web", head)
 assert attestation["validator_image_digest"] == "sha256:4f12f332b748445e41f8e53d1c728357baf66a5d6c1a43cfa93688957c43af7e"
 assert attestation["status"] == "passed"
@@ -101,7 +105,20 @@ assert [(c["name"], c["cwd"], c["argv"]) for c in attestation["commands"]] == ex
 assert all(c["status"] == "passed" and c["exit_code"] == 0 for c in attestation["commands"])
 public = serialization.load_pem_public_key(Path(scratch, "public.pem").read_bytes())
 signature = base64.b64decode(attestation.pop("signature"))
-public.verify(signature, json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode())
+message = json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode()
+public.verify(signature, domain.encode() + b"\0" + message)
+try:
+    public.verify(signature, message)
+except InvalidSignature:
+    pass
+else:
+    raise AssertionError("signature verifies without the domain prefix")
+for field, value in (("nonce", "0" * 64), ("source_head_sha", "a" * 40)):
+    try:
+        public.verify(signature, domain.encode() + b"\0" + json.dumps({**attestation, field: value}, sort_keys=True, separators=(",", ":")).encode())
+    except InvalidSignature:
+        continue
+    raise AssertionError(f"signature still verifies with another {field}")
 
 calls = [json.loads(line) for line in Path("/var/log/validator-test/calls.jsonl").read_text().splitlines()]
 assert [call["argv"][1:] for call in calls] == [argv[1:] for _, _, argv in expected], calls
@@ -134,20 +151,21 @@ assert not leftover, leftover
 EOF
 check "command output stays off stdout" grep -q 'fake attestation line' "$scratch/err"
 
-FAIL_ON="run type-check" run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+FAIL_ON="run type-check" run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 check "failing command exits 1" rc 1
-check "failing command is attested and later commands are skipped" py "$scratch" <<'EOF'
+check "failing command is attested and later commands are skipped" py "$scratch" "$nonce" "$domain" <<'EOF'
 import base64, json, sys
 from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 attestation = json.loads(Path(sys.argv[1], "out").read_text())
 assert attestation["status"] == "failed"
+assert attestation["nonce"] == sys.argv[2]
 assert [(c["name"], c["status"], c["exit_code"]) for c in attestation["commands"]] == [
     ("install", "passed", 0), ("lint", "passed", 0), ("typecheck", "failed", 3), ("test", "skipped", None), ("build", "skipped", None)
 ], attestation["commands"]
 public = serialization.load_pem_public_key(Path(sys.argv[1], "public.pem").read_bytes())
 signature = base64.b64decode(attestation.pop("signature"))
-public.verify(signature, json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode())
+public.verify(signature, sys.argv[3].encode() + b"\0" + json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode())
 calls = Path("/var/log/validator-test/calls.jsonl").read_text().splitlines()
 assert len(calls) == 3, calls
 EOF
@@ -168,7 +186,7 @@ PYEOF
 }
 
 for signal in STOP KILL; do
-  ATTACK=$signal run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+  ATTACK=$signal run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
   check "leftover process sending SIG$signal to everything cannot stop cleanup" rc 0 || cat "$scratch/err"
   check "every sandbox process is gone after a SIG$signal attack" no_sandbox_processes
 done
@@ -180,18 +198,21 @@ rejected() {
   check "$name is rejected before any command" bash -c "[ \"\$(cat $scratch/rc)\" = 2 ] && [ ! -s $scratch/out ] && [ ! -s $logs/calls.jsonl ] && ! grep -q Traceback $scratch/err" || cat "$scratch/err"
 }
 
-rejected "unknown profile" omnigent nope --registry-hash "$registry_hash" --source-head-sha "$head_sha"
-rejected "unknown repository" nope web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
-rejected "wrong registry hash" omnigent web --registry-hash "$(printf '0%.0s' {1..64})" --source-head-sha "$head_sha"
+rejected "unknown profile" omnigent nope --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
+rejected "unknown repository" nope web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
+rejected "wrong registry hash" omnigent web --registry-hash "$(printf '0%.0s' {1..64})" --source-head-sha "$head_sha" --nonce "$nonce"
 rejected "wrong source head" omnigent web --registry-hash "$registry_hash" --source-head-sha "$(printf 'a%.0s' {1..40})"
 rejected "missing arguments" omnigent web --registry-hash "$registry_hash"
+rejected "missing nonce" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "short nonce" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "${nonce:0:32}"
+rejected "uppercase nonce" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "${nonce^^}"
 
 use_source stale
-rejected "archive of another commit" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "archive of another commit" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 use_source extra
-rejected "archive with a planted file" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "archive with a planted file" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 use_source escape
-rejected "archive writing through a symlink" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "archive writing through a symlink" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 check "symlink escape wrote nothing outside the workspace" test ! -e /etc/x
 install -d "$scratch/garbage" "$scratch/deep"
 printf 'not a tar archive\n' >"$scratch/garbage/source.tar"
@@ -205,30 +226,30 @@ PYEOF
 cp "$fixture/good/commit" "$scratch/garbage/"
 cp "$fixture/good/commit" "$scratch/deep/"
 install -m 0444 "$scratch/garbage/source.tar" "$scratch/garbage/commit" "$source_dir/"
-rejected "unreadable archive" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "unreadable archive" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 install -m 0444 "$scratch/deep/source.tar" "$scratch/deep/commit" "$source_dir/"
-rejected "archive 1200 directories deep" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "archive 1200 directories deep" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 use_source good
 
 cp "$key" "$scratch/key.pem"
 printf -- '-----BEGIN PRIVATE KEY-----\nbm90IGEga2V5\n-----END PRIVATE KEY-----\n' >"$key"
-rejected "malformed signing key" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "malformed signing key" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 install -m 0400 "$scratch/key.pem" "$key"
 
 chmod 0664 "$registry"
-rejected "group-writable registry" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "group-writable registry" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 chmod 0644 "$registry"
 
 chmod 0444 "$key"
-rejected "signing key readable by the sandbox" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "signing key readable by the sandbox" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 chmod 0400 "$key"
 
 install -d /var/run/secrets/kubernetes.io/serviceaccount
 echo not-a-token >/var/run/secrets/kubernetes.io/serviceaccount/token
-rejected "mounted Kubernetes token" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+rejected "mounted Kubernetes token" omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 rm -rf /var/run/secrets
 
-run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha"
+run omnigent web --registry-hash "$registry_hash" --source-head-sha "$head_sha" --nonce "$nonce"
 check "clean setup still passes after the rejections" rc 0
 
 exit "$fail"

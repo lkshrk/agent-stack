@@ -38,6 +38,7 @@ MAX_COMMIT_BYTES = 1 << 20
 PR_CAPBSET_DROP = 24
 PR_SET_CHILD_SUBREAPER = 36
 PR_SET_NO_NEW_PRIVS = 38
+ATTESTATION_DOMAIN = b"agent-stack.public-validator.attestation.v1\0"
 
 
 class ValidationError(Exception):
@@ -50,6 +51,7 @@ def main() -> int:
     parser.add_argument("profile")
     parser.add_argument("--registry-hash", required=True)
     parser.add_argument("--source-head-sha", required=True)
+    parser.add_argument("--nonce", required=True)
     args = parser.parse_args()
     try:
         attestation = validate(args)
@@ -69,6 +71,8 @@ def validate(args) -> dict:
         raise ValidationError("registry hash must be 64 lowercase hex characters")
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_head_sha):
         raise ValidationError("source head must be a full lowercase commit SHA")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.nonce):
+        raise ValidationError("nonce must be 64 lowercase hex characters")
     prctl(PR_SET_NO_NEW_PRIVS, 1)
     prctl(PR_SET_CHILD_SUBREAPER, 1)
     killer = SandboxKiller()
@@ -109,13 +113,14 @@ def run_profile(args, killer: "SandboxKiller") -> dict:
         "repo": args.repo,
         "profile": args.profile,
         "source_head_sha": args.source_head_sha,
+        "nonce": args.nonce,
         "validator_image_digest": profile.image.split("@", 1)[1],
         "commands": results,
         "status": "failed" if failed else "passed",
         "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     message = json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode()
-    attestation["signature"] = base64.b64encode(key.sign(message)).decode()
+    attestation["signature"] = base64.b64encode(key.sign(ATTESTATION_DOMAIN + message)).decode()
     return attestation
 
 
