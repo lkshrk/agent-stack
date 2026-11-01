@@ -1,5 +1,7 @@
 # shellcheck shell=sh
 export PATH="/opt/mise/shims:/opt/agent/bin:${PATH}"
+export MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/etc/mise MISE_GLOBAL_CONFIG_FILE=/etc/mise/config.toml MISE_YES=1
+export MISE_CACHE_DIR="${MISE_CACHE_DIR:-/tmp/mise-cache}"
 export GH_TOKEN_FILE="${GH_TOKEN_FILE:-/agent-secrets/github/code}"
 export KNOWLEDGE_TOKEN_FILE="${KNOWLEDGE_TOKEN_FILE:-/agent-secrets/github/knowledge}"
 

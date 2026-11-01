@@ -35,8 +35,16 @@ class SecurityReviewProfileTest(unittest.TestCase):
         env = self.profile["shell_environment_policy"]["set"]
         self.assertTrue(env)
         for key, value in env.items():
+            if key.startswith("MISE_"):
+                continue
             with self.subTest(key=key):
                 self.assertTrue(value.startswith("/tmp/"), value)
+
+    def test_mise_shims_resolve_without_inherited_env(self):
+        env = self.profile["shell_environment_policy"]["set"]
+        self.assertEqual(env["MISE_DATA_DIR"], "/opt/mise")
+        self.assertEqual(env["MISE_GLOBAL_CONFIG_FILE"], "/etc/mise/config.toml")
+        self.assertTrue(env["MISE_CACHE_DIR"].startswith("/tmp/"))
 
 
 class DefaultCodexConfigTest(unittest.TestCase):
