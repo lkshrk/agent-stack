@@ -93,8 +93,8 @@ class Registry:
         except (OSError, yaml.YAMLError) as error:
             raise RegistryError(f"cannot load registry: {error}") from error
         _mapping(data, "registry", {"version", "repositories"})
-        if data["version"] != 1:
-            raise RegistryError("registry version must be 1")
+        if type(data["version"]) is not int or data["version"] != 1:
+            raise RegistryError("registry version must be the integer 1")
         repositories_data = data["repositories"]
         if not isinstance(repositories_data, dict) or not repositories_data:
             raise RegistryError("repositories must be a non-empty mapping")
@@ -183,7 +183,7 @@ def _github_upstream(upstream: str) -> None:
 def _relative_path(value: Any, context: str) -> str:
     value = _string(value, context)
     normalized = posixpath.normpath(value)
-    if value != normalized or normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
+    if "\\" in value or value != normalized or normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
         raise RegistryError(f"{context} must be a normalized relative path")
     return normalized
 
@@ -213,8 +213,8 @@ def _validation(repository: str, entry: Any) -> ValidationProfile:
     if len(names) != len(set(names)):
         raise RegistryError(f"repository {repository}.validation has duplicate command names")
     registries = entry["package_registries"]
-    if not isinstance(registries, list) or not registries or any(not isinstance(url, str) or urlparse(url).scheme != "https" for url in registries):
-        raise RegistryError(f"repository {repository}.validation.package_registries must contain HTTPS URLs")
+    if not isinstance(registries, list) or not registries or any(url != "https://registry.npmjs.org" for url in registries):
+        raise RegistryError(f"repository {repository}.validation.package_registries must contain the public npm registry")
     access = _string(entry["github_read_access"], f"repository {repository}.validation.github_read_access")
     if access != "public-read":
         raise RegistryError(f"repository {repository}.validation.github_read_access must be public-read")
@@ -236,7 +236,7 @@ def _command(repository: str, profile: str, entry: Any) -> ValidationCommand:
 def _argv(value: Any, context: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value or any(not isinstance(item, str) or not item for item in value):
         raise RegistryError(f"{context} must be a non-empty argv list")
-    if any(re.search(r"[;&|`$<>\n\r]", item) for item in value):
+    if any(re.search(r"[;&|`$<>\n\r()\[\]*?\\\\]", item) for item in value):
         raise RegistryError(f"{context} contains shell syntax")
     return tuple(value)
 

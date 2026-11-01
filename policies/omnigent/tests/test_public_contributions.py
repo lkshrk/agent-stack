@@ -43,21 +43,22 @@ class PublicContributionsTest(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "unknown field"):
             self.load(registry)
 
-    def test_rejects_duplicate_normalized_checkout(self):
+    def test_rejects_duplicate_checkout(self):
         registry = self.registry()
         duplicate = copy.deepcopy(registry["repositories"]["omnigent"])
-        duplicate["checkout"] = "omnigent"
         registry["repositories"]["duplicate"] = duplicate
 
         with self.assertRaisesRegex(RegistryError, "duplicate checkout"):
             self.load(registry)
 
-    def test_rejects_parent_checkout(self):
-        registry = self.registry()
-        registry["repositories"]["omnigent"]["checkout"] = "../omnigent"
+    def test_rejects_non_normalized_or_parent_checkout(self):
+        for checkout in ["./omnigent", "nested/../omnigent", "../omnigent", "..\\omnigent"]:
+            with self.subTest(checkout=checkout):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["checkout"] = checkout
 
-        with self.assertRaisesRegex(RegistryError, "checkout"):
-            self.load(registry)
+                with self.assertRaisesRegex(RegistryError, "checkout"):
+                    self.load(registry)
 
     def test_rejects_non_public_or_non_https_upstream(self):
         for upstream, visibility in [
@@ -95,12 +96,32 @@ class PublicContributionsTest(unittest.TestCase):
         with self.assertRaisesRegex(RegistryError, "duplicate command"):
             self.load(registry)
 
-    def test_rejects_shell_string_command(self):
-        registry = self.registry()
-        registry["repositories"]["omnigent"]["validation"]["commands"][0]["argv"] = "pnpm run lint"
+    def test_rejects_invalid_registry_version_types(self):
+        for version in [True, 1.0]:
+            with self.subTest(version=version):
+                registry = self.registry()
+                registry["version"] = version
 
-        with self.assertRaisesRegex(RegistryError, "argv"):
-            self.load(registry)
+                with self.assertRaisesRegex(RegistryError, "version"):
+                    self.load(registry)
+
+    def test_rejects_non_public_package_registry(self):
+        for registry_url in ["https:", "https://packages.example.invalid/private"]:
+            with self.subTest(registry_url=registry_url):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["validation"]["package_registries"] = [registry_url]
+
+                with self.assertRaisesRegex(RegistryError, "package_registries"):
+                    self.load(registry)
+
+    def test_rejects_shell_syntax_in_argv(self):
+        for argv in ["pnpm run lint", ["pnpm", "run", "(lint)"], ["pnpm", "run", "lint*"], ["pnpm", "run", "lint\\\\"]]:
+            with self.subTest(argv=argv):
+                registry = self.registry()
+                registry["repositories"]["omnigent"]["validation"]["commands"][0]["argv"] = argv
+
+                with self.assertRaisesRegex(RegistryError, "argv|shell syntax"):
+                    self.load(registry)
 
 
 if __name__ == "__main__":
