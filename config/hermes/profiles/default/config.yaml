@@ -85,6 +85,7 @@ plugins:
 
 cron:
   catch_up_missed: true
+  wrap_response: false
 
 terminal:
   cwd: .

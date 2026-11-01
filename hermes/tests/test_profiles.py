@@ -22,6 +22,7 @@ MANAGED_BEFORE = Path(__file__).resolve().parent / "testdata" / "hermes" / "mana
 STOCK_TEMPLATE = Path(__file__).resolve().parent / "testdata" / "hermes" / "stock-cli-config-v0.22.5.yaml"
 INSTALLED = Path("/opt/agent-stack")
 SECONDARY = ("delivery", "omnigent-runner")
+PA_INTENDED_CHANGES = {"cron": {"wrap_response": False}}
 
 H16_PER_PROFILE = {
     "model": None,
@@ -198,8 +199,12 @@ class ProfilesTest(unittest.TestCase):
     def test_pa_config_unchanged_except_multiplex(self):
         before = strip_multiplex(deep_merge(load(STOCK_TEMPLATE), load(MANAGED_BEFORE)))
         before.pop("gateway", None)
+        before = deep_merge(before, PA_INTENDED_CHANGES)
         after = effective("default")
         self.assertEqual(strip_multiplex(after), before)
+
+    def test_pa_cron_messages_are_unwrapped(self):
+        self.assertIs(effective("default")["cron"]["wrap_response"], False)
 
     def test_pa_multiplexes(self):
         self.assertIs(profile("default")["gateway"]["multiplex_profiles"], True)
