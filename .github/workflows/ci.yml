@@ -66,7 +66,7 @@ jobs:
       - name: Images to build, only the changed ones when the changes are known
         id: images
         env:
-          ALL: '["omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui"]'
+          ALL: '["omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui", "public-validator"]'
           CHANGES: ${{ steps.filter.outputs.changes }}
         run: |
           if [ -n "$CHANGES" ]; then

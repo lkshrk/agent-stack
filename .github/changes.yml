@@ -64,3 +64,8 @@ hermes-webui:
   - 'images/hermes/gitconfig'
   - 'config/hermes/config.yaml'
   - 'config/hermes/profiles/default/config.yaml'
+public-validator:
+  - *shared
+  - 'images/public-validator/**'
+  - 'policies/omnigent/agent_stack_policies/**'
+  - 'config/public-contributions.yaml'

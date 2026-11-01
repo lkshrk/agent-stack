@@ -5,7 +5,7 @@ set -euo pipefail
 semver='^v?[0-9]+\.[0-9]+\.[0-9]+$'
 inspect=${INSPECT:-docker buildx imagetools inspect}
 modes='{}'
-for image in omnigent-host omnigent-server agent-tools hermes hermes-webui; do
+for image in omnigent-host omnigent-server agent-tools hermes hermes-webui public-validator; do
   mode=build
   changed=$(jq -r --arg image "$image" 'if type == "array" then (index($image) != null | tostring) else error end' \
     <<<"${CHANGES:-}" 2>/dev/null) || changed=unknown

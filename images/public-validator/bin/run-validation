@@ -1,0 +1,279 @@
+#!/usr/bin/python3 -I
+import argparse
+import base64
+import hashlib
+import hmac
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tarfile
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, "/opt/agent-stack/policies")
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from agent_stack_policies.public_contributions import Registry, RegistryError
+
+REGISTRY = Path("/opt/agent-stack/public-contributions.yaml")
+SOURCE_ARCHIVE = Path("/var/run/agent-stack/source/source.tar")
+SOURCE_COMMIT = Path("/var/run/agent-stack/source/commit")
+GITHUB_TOKEN_FILE = Path("/var/run/agent-stack/github/token")
+SIGNING_KEY = Path("/var/run/agent-stack/attestation/signing-key")
+KUBERNETES_SECRETS = Path("/var/run/secrets/kubernetes.io")
+WORK_ROOT = Path("/work")
+SANDBOX_UID = 10001
+SANDBOX_GID = 10001
+SANDBOX_PATH = "/usr/local/bin:/usr/bin:/bin"
+MAX_COMMIT_BYTES = 1 << 20
+
+
+class ValidationError(Exception):
+    pass
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="run-validation")
+    parser.add_argument("repo")
+    parser.add_argument("profile")
+    parser.add_argument("--registry-hash", required=True)
+    parser.add_argument("--source-head-sha", required=True)
+    args = parser.parse_args()
+    try:
+        profile, key, source, env = prepare(args)
+    except (ValidationError, RegistryError, OSError) as error:
+        print(f"run-validation: {error}", file=sys.stderr)
+        return 2
+
+    steps = [("install", ".", profile.install.argv)]
+    steps += [(command.name, command.cwd, command.argv) for command in profile.commands]
+    results = []
+    failed = False
+    for name, cwd, argv in steps:
+        exit_code = None if failed else execute(argv, source, cwd, env)
+        status = "skipped" if failed else "passed" if exit_code == 0 else "failed"
+        results.append({"name": name, "cwd": cwd, "argv": list(argv), "status": status, "exit_code": exit_code})
+        failed = failed or status == "failed"
+
+    attestation = {
+        "registry_hash": args.registry_hash,
+        "repo": args.repo,
+        "profile": args.profile,
+        "source_head_sha": args.source_head_sha,
+        "validator_image_digest": profile.image.split("@", 1)[1],
+        "commands": results,
+        "status": "failed" if failed else "passed",
+        "finished_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    message = json.dumps(attestation, sort_keys=True, separators=(",", ":")).encode()
+    attestation["signature"] = base64.b64encode(key.sign(message)).decode()
+    print(json.dumps(attestation, sort_keys=True))
+    return 1 if failed else 0
+
+
+def prepare(args):
+    if os.getuid() != 0:
+        raise ValidationError("must start as root to keep the signing key from the sandbox user")
+    if KUBERNETES_SECRETS.exists():
+        raise ValidationError("a Kubernetes service account token is mounted")
+    if not re.fullmatch(r"[0-9a-f]{64}", args.registry_hash):
+        raise ValidationError("registry hash must be 64 lowercase hex characters")
+    if not re.fullmatch(r"[0-9a-f]{40}", args.source_head_sha):
+        raise ValidationError("source head must be a full lowercase commit SHA")
+    root_owned(REGISTRY, private=False)
+    registry = Registry.load(REGISTRY)
+    if not hmac.compare_digest(registry.revision, args.registry_hash):
+        raise ValidationError("registry hash does not match the mounted registry")
+    profile = registry.repository(args.repo).validation_profile(args.profile)
+    key = signing_key()
+
+    workspace = Path(tempfile.mkdtemp(dir=WORK_ROOT))
+    workspace.chmod(0o755)
+    source, home, tmp = workspace / "src", workspace / "home", workspace / "tmp"
+    for directory, mode in ((source, 0o755), (home, 0o700), (tmp, 0o700)):
+        directory.mkdir(mode)
+        os.chown(directory, SANDBOX_UID, SANDBOX_GID)
+    extract_verified(args.source_head_sha, source)
+
+    env = {
+        "PATH": SANDBOX_PATH,
+        "HOME": str(home),
+        "TMPDIR": str(tmp),
+        "LANG": "C.UTF-8",
+        "CI": "true",
+        "NPM_CONFIG_REGISTRY": profile.package_registries[0],
+    }
+    if GITHUB_TOKEN_FILE.exists():
+        env["AGENT_STACK_GITHUB_TOKEN_FILE"] = str(GITHUB_TOKEN_FILE)
+    return profile, key, source, env
+
+
+def root_owned(path: Path, *, private: bool) -> None:
+    status = path.stat()
+    if status.st_uid != 0 or status.st_mode & (0o077 if private else 0o022):
+        raise ValidationError(f"{path} must be root-owned and {'private' if private else 'not writable by others'}")
+
+
+def signing_key() -> Ed25519PrivateKey:
+    root_owned(SIGNING_KEY, private=True)
+    key = serialization.load_pem_private_key(SIGNING_KEY.read_bytes(), password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise ValidationError("signing key must be an Ed25519 private key")
+    return key
+
+
+def extract_verified(head: str, destination: Path) -> None:
+    commit = SOURCE_COMMIT.read_bytes()
+    if len(commit) > MAX_COMMIT_BYTES:
+        raise ValidationError("commit object is too large")
+    if hashlib.sha1(b"commit %d\0" % len(commit) + commit).hexdigest() != head:
+        raise ValidationError("commit object does not hash to the source head")
+    match = re.match(rb"tree ([0-9a-f]{40})\n", commit)
+    if not match:
+        raise ValidationError("commit object has no tree")
+
+    tree: dict = {}
+    directories = []
+    with tarfile.open(SOURCE_ARCHIVE, mode="r|") as archive:
+        for member in archive:
+            parts = member_parts(member.name)
+            if member.isdir():
+                directory(tree, parts, destination)
+                directories.append(parts)
+                continue
+            parent = directory(tree, parts[:-1], destination)
+            if parts[-1] in parent:
+                raise ValidationError(f"duplicate archive entry: {member.name}")
+            target = destination.joinpath(*parts)
+            if member.isreg():
+                executable = bool(member.mode & 0o111)
+                parent[parts[-1]] = ("100755" if executable else "100644", write_blob(archive, member, target, executable))
+            elif member.issym():
+                os.symlink(member.linkname, target)
+                os.lchown(target, SANDBOX_UID, SANDBOX_GID)
+                parent[parts[-1]] = ("120000", blob_id(member.linkname.encode("utf-8", "surrogateescape")))
+            else:
+                raise ValidationError(f"unsupported archive entry type: {member.name}")
+
+    for parts in directories:
+        if not has_blob(directory(tree, parts, destination)):
+            raise ValidationError(f"archive has an empty directory: {'/'.join(parts)}")
+    if tree_id(tree).hex() != match.group(1).decode():
+        raise ValidationError("archive does not match the source head tree")
+
+
+def member_parts(name: str) -> list[str]:
+    parts = name.split("/")
+    if name.startswith("/") or "\0" in name or any(part in {"", ".", ".."} or part.lower() == ".git" for part in parts):
+        raise ValidationError(f"unsafe archive path: {name!r}")
+    return parts
+
+
+def directory(tree: dict, parts: list[str], destination: Path) -> dict:
+    node = tree
+    for depth, part in enumerate(parts, 1):
+        child = node.get(part)
+        if child is None:
+            path = destination.joinpath(*parts[:depth])
+            path.mkdir(0o755)
+            os.lchown(path, SANDBOX_UID, SANDBOX_GID)
+            child = node[part] = {}
+        elif not isinstance(child, dict):
+            raise ValidationError(f"archive path runs through a file or symlink: {'/'.join(parts)}")
+        node = child
+    return node
+
+
+def write_blob(archive: tarfile.TarFile, member: tarfile.TarInfo, target: Path, executable: bool) -> bytes:
+    mode = 0o755 if executable else 0o644
+    digest = hashlib.sha1(b"blob %d\0" % member.size)
+    reader = archive.extractfile(member)
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
+    with os.fdopen(fd, "wb") as handle:
+        written = 0
+        while chunk := reader.read(1 << 20):
+            digest.update(chunk)
+            handle.write(chunk)
+            written += len(chunk)
+        os.fchown(fd, SANDBOX_UID, SANDBOX_GID)
+        os.fchmod(fd, mode)
+    if written != member.size:
+        raise ValidationError(f"truncated archive entry: {member.name}")
+    return digest.digest()
+
+
+def blob_id(content: bytes) -> bytes:
+    return hashlib.sha1(b"blob %d\0" % len(content) + content).digest()
+
+
+def has_blob(node: dict) -> bool:
+    return any(not isinstance(child, dict) or has_blob(child) for child in node.values())
+
+
+def tree_id(node: dict) -> bytes:
+    entries = []
+    for name, child in node.items():
+        encoded = name.encode("utf-8", "surrogateescape")
+        if isinstance(child, dict):
+            entries.append((encoded + b"/", b"40000 " + encoded + b"\0" + tree_id(child)))
+        else:
+            mode, object_id = child
+            entries.append((encoded, mode.encode() + b" " + encoded + b"\0" + object_id))
+    body = b"".join(entry for _, entry in sorted(entries))
+    return hashlib.sha1(b"tree %d\0" % len(body) + body).digest()
+
+
+def execute(argv: tuple[str, ...], source: Path, cwd: str, env: dict[str, str]) -> int | None:
+    directory = os.path.realpath(source / cwd)
+    if directory != str(source) and not directory.startswith(f"{source}/"):
+        print(f"run-validation: {cwd} resolves outside the source", file=sys.stderr)
+        return None
+    try:
+        return subprocess.run(
+            list(argv),
+            cwd=directory,
+            env=env,
+            user=SANDBOX_UID,
+            group=SANDBOX_GID,
+            extra_groups=[],
+            umask=0o022,
+            stdin=subprocess.DEVNULL,
+            stdout=sys.stderr.fileno(),
+            stderr=sys.stderr.fileno(),
+            close_fds=True,
+            start_new_session=True,
+        ).returncode
+    except OSError as error:
+        print(f"run-validation: cannot run {argv[0]}: {error}", file=sys.stderr)
+        return None
+    finally:
+        kill_sandbox()
+
+
+def kill_sandbox() -> None:
+    pid = os.fork()
+    if pid == 0:
+        code = 1
+        try:
+            os.setgroups([])
+            os.setresgid(SANDBOX_GID, SANDBOX_GID, SANDBOX_GID)
+            os.setresuid(SANDBOX_UID, SANDBOX_UID, SANDBOX_UID)
+            os.kill(-1, signal.SIGKILL)
+            code = 0
+        except ProcessLookupError:
+            code = 0
+        finally:
+            os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    if os.waitstatus_to_exitcode(status) != 0:
+        raise RuntimeError("could not stop leftover sandbox processes")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

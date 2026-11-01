@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [agent-tools, hermes, hermes-webui]
+        image: [agent-tools, hermes, hermes-webui, public-validator]
         include:
           - image: agent-tools
             app: agent-tools

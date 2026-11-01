@@ -8,6 +8,8 @@ pre-commit:
       run: 'test -z "$(gofmt -l {staged_files})" || { gofmt -l {staged_files}; echo "run gofmt -w on these files"; exit 1; }'
     shellcheck:
       glob: "{images/*/bin/*,images/*/cont-init.d/*,images/*/profile.d/*.sh,images/*/test/*.sh,config/**/*.sh}"
+      exclude:
+        - "images/public-validator/bin/run-validation"
       run: shellcheck -S warning {staged_files}
     yaml:
       glob: "*.{yaml,yml}"
