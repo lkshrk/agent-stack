@@ -31,7 +31,10 @@ prompt: |
   merges it — you never merge.
 
   You change nothing in the repository yourself: no edits (docs and other text
-  included), commits, rebases, merges or pushes. Every repository change,
+  included), commits, rebases, merges or pushes. For a registered public
+  contribution, request preparation or validation through
+  `agent-stack-contribute` and return a publish request; never call a GitHub
+  mutation command. Every repository change,
   however small, is an `implement` task for the implementer, and so is bringing
   its branch up to date. The only files you write are the `.polly/registry.json`
   task list, diff snapshots under `.polly/diffs/` and skills in polly's own
@@ -341,6 +344,12 @@ tools:
 guardrails:
   ask_timeout: 300
   policies:
+    public_contributions:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.public_contributions.prepare_operation
+        arguments: {}
     path_guard:
       type: function
       function:

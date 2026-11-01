@@ -9,6 +9,15 @@ from urllib.parse import urlparse
 
 import yaml
 
+from ._event import Decision, Event, allow, deny, tool_call
+from .paths import SHELL_TOOLS
+
+
+RUNTIME_REGISTRY = Path("/opt/agent-stack/public-contributions.yaml")
+HELPER_PATH = "/opt/agent/bin/agent-stack-contribute"
+CONTRIBUTION_WORKSPACE = Path("/home/omnigent/work")
+_CONTROLLER_GIT = frozenset({"clone", "fetch", "worktree", "branch", "add", "commit", "remote"})
+
 
 class RegistryError(ValueError):
     pass
@@ -239,6 +248,75 @@ def _argv(value: Any, context: str) -> tuple[str, ...]:
     if any(re.search(r"[;&|`$<>\n\r()\[\]*?\\\\]", item) for item in value):
         raise RegistryError(f"{context} contains shell syntax")
     return tuple(value)
+
+
+def _registered_tree(arguments: dict, registry: Registry) -> bool:
+    cwd = arguments.get("cwd", arguments.get("workdir", arguments.get("working_directory")))
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    try:
+        path = Path(cwd).resolve(strict=False)
+    except OSError:
+        return False
+    return any(path == root or root in path.parents for root in (CONTRIBUTION_WORKSPACE / repository.checkout for repository in registry.repositories))
+
+
+def _matches_validation(argv: list[str], registry: Registry) -> bool:
+    return any(
+        tuple(argv[:2]) == repository.validation.install.argv[:2]
+        or any(tuple(argv[: len(command.argv)]) == command.argv for command in repository.validation.commands)
+        for repository in registry.repositories
+    )
+
+
+def _mentions_helper(argv: object) -> bool:
+    return isinstance(argv, list) and any(
+        isinstance(item, str) and "agent-stack-contribute" in item for item in argv
+    )
+
+
+def _exact_helper(argv: object, registry: Registry) -> bool:
+    if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+        return False
+    if len(argv) == 3 and argv[0] == HELPER_PATH and argv[1] in {"prepare", "preflight"}:
+        try:
+            registry.repository(argv[2])
+        except RegistryError:
+            return False
+        return True
+    if len(argv) == 4 and argv[0] == HELPER_PATH and argv[1] == "validate":
+        try:
+            registry.repository(argv[2]).validation_profile(argv[3])
+        except RegistryError:
+            return False
+        return True
+    return False
+
+
+def prepare_operation(event: Event) -> Decision | None:
+    arguments = tool_call(event, SHELL_TOOLS)
+    if arguments is None:
+        return None
+    if arguments.get("_unparseable"):
+        return deny("unparseable tool arguments")
+    try:
+        registry = Registry.load(RUNTIME_REGISTRY)
+    except RegistryError:
+        return deny("public contribution registry is unavailable")
+    argv = arguments.get("command")
+    if _exact_helper(argv, registry):
+        return allow()
+    if _mentions_helper(argv):
+        return deny("public contribution operations require the fixed helper path and exact argv")
+    if _registered_tree(arguments, registry):
+        if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+            return deny("registered contribution operations require exact helper argv")
+        if argv[:1] == ["git"] and len(argv) > 1 and argv[1] in _CONTROLLER_GIT:
+            return deny("direct Git controller operation in a registered contribution tree is not allowed; request preparation instead")
+        if _matches_validation(argv, registry):
+            return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
+        return None
+    return None
 
 
 def _contribution(repository: str, entry: Any) -> ContributionRequirements:
