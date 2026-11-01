@@ -79,6 +79,18 @@ class TestPrepareOperation(unittest.TestCase):
             with self.subTest(argv=argv):
                 self.assertDenied(argv, cwd=TREE)
 
+    def test_denies_registered_git_targets_without_a_registered_cwd(self):
+        for argv in (
+            ["git", "clone", "https://github.com/omnigent-ai/omnigent.git", TREE],
+            ["git", "worktree", "add", TREE],
+            ["git", "-C", TREE, "fetch", "origin"],
+            ["git", "--work-tree", f"{TREE}/web", "status"],
+        ):
+            with self.subTest(argv=argv):
+                self.assertDenied(argv)
+        self.assertIsNone(self.evaluate(["git", "-C", "/home/omnigent/work/other", "fetch", "origin"]))
+        self.assertIsNone(self.evaluate(["git", "clone", "https://github.com/omnigent-ai/omnigent.git", "/tmp/omnigent"]))
+
     def test_rejects_registered_tree_symlink_path(self):
         with tempfile.TemporaryDirectory() as directory:
             link = Path(directory) / "link"

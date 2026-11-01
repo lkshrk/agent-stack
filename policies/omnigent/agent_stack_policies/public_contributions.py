@@ -250,15 +250,66 @@ def _argv(value: Any, context: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _registered_tree(arguments: dict, registry: Registry) -> bool:
-    cwd = arguments.get("cwd", arguments.get("workdir", arguments.get("working_directory")))
-    if not isinstance(cwd, str) or not cwd:
+def _registered_path(value: object, registry: Registry) -> bool:
+    if not isinstance(value, str) or not value:
         return False
     try:
-        path = Path(cwd).resolve(strict=False)
+        path = Path(value).resolve(strict=False)
     except OSError:
         return False
     return any(path == root or root in path.parents for root in (CONTRIBUTION_WORKSPACE / repository.checkout for repository in registry.repositories))
+
+
+def _registered_tree(arguments: dict, registry: Registry) -> bool:
+    return _registered_path(arguments.get("cwd", arguments.get("workdir", arguments.get("working_directory"))), registry)
+
+
+def _git_targets(argv: list[str]) -> tuple[str, ...]:
+    if argv[:1] != ["git"]:
+        return ()
+    paths: list[str] = []
+    index = 1
+    while index < len(argv):
+        token = argv[index]
+        if token in {"-C", "--work-tree", "--git-dir"}:
+            if index + 1 < len(argv):
+                paths.append(argv[index + 1])
+            index += 2
+            continue
+        if token.startswith("-C") and len(token) > 2:
+            paths.append(token[2:])
+            index += 1
+            continue
+        if token.startswith("--work-tree=") or token.startswith("--git-dir="):
+            paths.append(token.split("=", 1)[1])
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    if index == len(argv):
+        return tuple(paths)
+    subcommand, args = argv[index], argv[index + 1 :]
+    if subcommand == "clone" and args:
+        paths.append(args[-1])
+    elif subcommand == "worktree" and args[:1] == ["add"]:
+        index = 1
+        while index < len(args):
+            token = args[index]
+            if token in {"-b", "-B", "--orphan", "--track", "--reason"}:
+                index += 2
+                continue
+            if token.startswith("-"):
+                index += 1
+                continue
+            paths.append(token)
+            break
+    return tuple(paths)
+
+
+def _registered_git_target(argv: list[str], registry: Registry) -> bool:
+    return any(_registered_path(path, registry) for path in _git_targets(argv))
 
 
 def _matches_validation(argv: list[str], registry: Registry) -> bool:
@@ -308,11 +359,17 @@ def prepare_operation(event: Event) -> Decision | None:
         return allow()
     if _mentions_helper(argv):
         return deny("public contribution operations require the fixed helper path and exact argv")
-    if _registered_tree(arguments, registry):
-        if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+    if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+        if _registered_tree(arguments, registry):
             return deny("registered contribution operations require exact helper argv")
-        if argv[:1] == ["git"] and len(argv) > 1 and argv[1] in _CONTROLLER_GIT:
-            return deny("direct Git controller operation in a registered contribution tree is not allowed; request preparation instead")
+        return None
+    registered_tree = _registered_tree(arguments, registry)
+    registered_git_target = _registered_git_target(argv, registry)
+    if registered_git_target:
+        return deny("direct Git operation targeting a registered contribution tree is not allowed; request preparation instead")
+    if registered_tree and argv[:1] == ["git"] and any(item in _CONTROLLER_GIT for item in argv[1:]):
+        return deny("direct Git controller operation in a registered contribution tree is not allowed; request preparation instead")
+    if registered_tree:
         if _matches_validation(argv, registry):
             return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
         return None
