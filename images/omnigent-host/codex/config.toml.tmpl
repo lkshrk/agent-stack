@@ -1,5 +1,8 @@
 model = "openai-auto"
 model_provider = "litellm"
+# Agents never prompt; bubblewrap can't run in the runner pods anyway.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
 
 # write_stdin into a running exec session skips PreToolUse.
 [features]

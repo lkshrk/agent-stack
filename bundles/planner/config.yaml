@@ -138,6 +138,13 @@ guardrails:
           exact_commands:
             - "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"
             - "git -C ~/knowledge pull --ff-only"
+    no_process_secrets:
+      type: function
+      on: [tool_call]
+      function:
+        # Pattern-based and best effort: harnesses run without their own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
     blast_radius:
       type: function
       function:

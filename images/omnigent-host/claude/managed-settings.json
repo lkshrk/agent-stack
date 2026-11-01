@@ -8,6 +8,7 @@
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "additionalDirectories": ["/home/omnigent/workspace"],
     "allow": ["EnterWorktree", "ExitWorktree"],
     "deny": [

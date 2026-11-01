@@ -56,6 +56,13 @@ guardrails:
         path: agent_stack_policies.readonly.read_only_shell
         arguments:
           extra_commands: [gh]
+    no_process_secrets:
+      type: function
+      on: [tool_call]
+      function:
+        # Pattern-based and best effort: harnesses run without their own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
     blast_radius:
       type: function
       on: [tool_call]
