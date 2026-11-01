@@ -15,7 +15,7 @@ PY
 )
 
 # Codex rebuilds the tool environment; only the profile's own variables are guaranteed to reach it.
-for cmd in "gitleaks version" "uv --version" "uvx --version" "pnpm --version" "rg --version" "git --version" "gh --version"; do
+for cmd in "gitleaks version" "uv --version" "uvx --version" "pnpm --version" "rg --version" "go version" "git --version" "gh --version"; do
   read -ra argv <<<"$cmd"
   if out=$(cd "$home" && env -i PATH="$PATH" HOME="$home" "${vars[@]}" "${argv[@]}" 2>&1); then
     echo "ok   $cmd runs under the security-review profile environment"
