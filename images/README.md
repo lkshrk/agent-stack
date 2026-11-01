@@ -16,6 +16,10 @@ Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/op
 
 The bundles resolve `agent_stack_policies` handlers inside the runner, so a server image must never point at a runner older than its bundles. `images.yml` builds `omnigent-server` with `AGENT_STACK_VERSION` set to the release version (the leading `v` removed), and the Dockerfile rewrites `sandbox.kubernetes.image` in the baked config to `ghcr.io/lkshrk/agent-stack/omnigent-host:<version>`, the runner built in the same release run. The rewrite is a tag pin without a digest. PR and local builds leave the argument empty and keep the pin checked in to `config/omnigent/config.yaml`. CI builds the server once more with the argument set and checks the rewritten line.
 
+## Server image deviations from upstream
+
+- The web UI's sidebar owner check is patched (`omnigent-server/patch-web-ui.sh`) to also honour `permission_level >= 4`, so admins get Stop, Archive and Delete on sessions they don't own by name. The build fails unless exactly one file and one occurrence match, and the `test` stage asserts the result. The same helper drives the shared/mine split, so admins see every session as their own in the UI (no Shared section, owner shown as "You"). Assets are served with a one-year immutable cache under an unchanged file name, so browsers need their site data cleared once after the deploy.
+
 ## Runner sandbox tooling
 
 The runner image carries generic tooling so a project can run its own checks inside the sandbox pod, which runs as uid `1000660000` (`sandbox`, home `/sandbox`):
