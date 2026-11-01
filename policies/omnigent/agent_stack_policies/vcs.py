@@ -6,6 +6,7 @@ from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
 from ._shell import OpaqueCommand, DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
+from .tools import gh_api_mutates
 
 _VCS = frozenset({"git", "gh"})
 _GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "fetch", "merge-base"})
@@ -125,19 +126,7 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
 
 
 def _check_gh_api(args: list[str]) -> str | None:
-    for i, arg in enumerate(args):
-        if arg.startswith(_GH_API_WRITE_FLAGS):
-            return GH_FORM
-        method = None
-        if arg in ("-X", "--method"):
-            method = args[i + 1] if i + 1 < len(args) else ""
-        elif arg.startswith("--method="):
-            method = arg.split("=", 1)[1]
-        elif arg.startswith("-X"):
-            method = arg[2:]
-        if method is not None and method.upper() != "GET":
-            return GH_FORM
-    return None
+    return GH_FORM if gh_api_mutates(args) else None
 
 
 def _check_gh(rest: list[str]) -> str | None:

@@ -1193,6 +1193,38 @@ class PublicContributionEngineTest(unittest.TestCase):
             )
         self.assertEqual(out["public_contributions"].action.name, "ALLOW")
 
+    def test_native_bundles_deny_direct_public_writes_in_registered_context(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from unittest.mock import patch
+
+        from agent_stack_policies import public_contributions
+
+        root = "/home/omnigent/work/omnigent"
+        commands = (
+            ["git", "push", "origin", "HEAD:contribution/fix"],
+            ["git", "remote", "add", "fork", "https://github.com/example/fork.git"],
+            ["git", "remote", "set-url", "origin", "https://github.com/example/fork.git"],
+            ["git", "tag", "v1.2.3"],
+            ["git", "push", "origin", "v1.2.3"],
+            ["gh", "issue", "create", "--title", "fix"],
+            ["gh", "pr", "create", "--title", "fix"],
+            ["gh", "pr", "comment", "1", "--body", "note"],
+            ["gh", "api", "-X", "POST", "repos/example/project/issues"],
+        )
+        with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
+            for agent in ("polly/agents/claude_code", "polly/agents/codex"):
+                for command in commands:
+                    with self.subTest(agent=agent, command=command):
+                        out = results(
+                            BUNDLES / agent,
+                            Case(agent, "tool_call", "Bash", {"command": command, "cwd": root}, ""),
+                        )
+                        self.assertEqual(
+                            max(decision.action.name for decision in out.values()),
+                            "DENY",
+                        )
+
 
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
 class BundleVerdictTest(unittest.TestCase):
@@ -1409,6 +1441,7 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertIn("agent_stack_policies.readonly.read_only_shell", paths)
         self.assertNotIn("agent_stack_policies.result.result_contract", paths)
         planner_only = {
+            "agent_stack_policies.public_contributions.prepare_operation",
             "agent_stack_policies.result.result_contract",
             "agent_stack_policies.spawn.max_dispatches_per_session",
             "omnigent.policies.builtins.orchestration.spawn_bounds",

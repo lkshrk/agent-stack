@@ -23,6 +23,13 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.public_contributions.prepare_operation",
+        "kind": "factory",
+        "name": "public_contributions",
+        "description": "Allow only structured contribution preparation in registered public contribution checkouts.",
+        "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "handler": "agent_stack_policies.paths.path_guard",
         "kind": "factory",
         "name": "path_guard",

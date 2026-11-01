@@ -2,6 +2,7 @@ import hashlib
 import json
 import posixpath
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import yaml
 
 from ._event import Decision, Event, allow, deny, tool_call
 from .paths import SHELL_TOOLS
+from .tools import direct_public_write
 
 
 RUNTIME_REGISTRY = Path("/opt/agent-stack/public-contributions.yaml")
@@ -364,7 +366,9 @@ def _exact_helper(argv: object, registry: Registry) -> bool:
     return False
 
 
-def prepare_operation(event: Event) -> Decision | None:
+def prepare_operation(event: Event | None = None) -> Callable[[Event], Decision | None] | Decision | None:
+    if event is None:
+        return prepare_operation
     arguments = tool_call(event, SHELL_TOOLS)
     if arguments is None:
         return None
@@ -389,6 +393,8 @@ def prepare_operation(event: Event) -> Decision | None:
         return None
     registered_tree = _registered_tree(arguments, registry)
     registered_git_target = _registered_git_target(argv, registry)
+    if registered_tree and direct_public_write(argv):
+        return deny("direct public publishing in a registered contribution tree is not allowed; request the trusted gateway instead")
     if registered_git_target:
         return deny("direct Git operation targeting a registered contribution tree is not allowed; request preparation instead")
     if registered_tree and argv[:1] == ["git"] and any(item in _CONTROLLER_GIT for item in argv[1:]):

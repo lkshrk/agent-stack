@@ -15,6 +15,11 @@ from . import tool_call_event
 REGISTRY = Path(__file__).resolve().parents[3] / "config" / "public-contributions.yaml"
 HELPER = "/opt/agent/bin/agent-stack-contribute"
 TREE = "/home/omnigent/work/omnigent"
+EVENTS = [
+    tool_call_event("Bash", {"command": ["agent-stack-contribute", "preflight", "omnigent"]}),
+    tool_call_event("Bash", {"command": ["git", "push", "origin", "HEAD:contribution/fix"], "cwd": TREE}),
+    {"type": "other"},
+]
 
 
 class TestPrepareOperation(unittest.TestCase):
