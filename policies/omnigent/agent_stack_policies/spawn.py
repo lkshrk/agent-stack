@@ -36,6 +36,12 @@ def _launched(text: str) -> bool:
     return isinstance(handle, dict) and handle.get("status") == "launching"
 
 
+def _delivered_child_output(event: Event) -> bool:
+    """The runner re-posts each drained child result as a sys_session_send TOOL_RESULT, keyed `args` not `arguments`."""
+    request = event.get("request_data")
+    return isinstance(request, dict) and "arguments" not in request
+
+
 def _first_entry_is_reply(text: str, reply: re.Pattern) -> bool:
     """Only the first inbox entry counts: with one round outstanding it is the critic's, and output can't forge it."""
     return reply.match(text.lstrip()) is not None
@@ -90,7 +96,7 @@ def max_dispatches_per_session(
         dispatched, collected = state.get(DISPATCH_STATE_KEY, 0), state.get(COLLECT_STATE_KEY, 0)
         if not isinstance(dispatched, int) or not isinstance(collected, int) or dispatched <= collected:
             return None
-        if _launched(_result_text(event)):
+        if _delivered_child_output(event) or _launched(_result_text(event)):
             return None
         return allow(state_updates=[{"key": COLLECT_STATE_KEY, "action": "increment", "value": 1}])
 
