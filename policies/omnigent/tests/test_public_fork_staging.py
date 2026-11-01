@@ -215,10 +215,77 @@ class ForkStagingTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(self.evaluate(command), command)
 
+    def test_allows_one_literal_simple_command_string(self):
+        git(self.tree, "remote", "set-url", "origin", FORK_URL)
+        for command in (
+            'git commit -m "fix(web): x"',
+            "git commit -s -m 'fix(web): x' -m 'Body with * and [brackets] and $HOME, literally.'",
+            "git push origin HEAD:fix/x",
+            "git push -u origin HEAD:fix/x",
+            "git status",
+            'git add "web/a.ts"',
+            f'gh pr create --repo {FORK} --base main --head fix/x --title "fix(web): x" --body "What changed.\n\nTested with pnpm test."',
+            f"gh pr edit 7 --repo={FORK} --add-label upstream-ready",
+        ):
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
+    def test_literal_strings_go_through_the_structured_rules(self):
+        for command in (
+            "git push origin HEAD:fix/x",
+            "git push fork HEAD:main",
+            "git config core.hooksPath /tmp/hooks",
+            "git tag v1.0.0",
+            "git remote set-url fork https://github.com/omnigent-ai/omnigent.git",
+            "gh pr create --repo omnigent-ai/omnigent --head fix/x --title t",
+            "gh pr merge 7 --repo lkshrk/omnigent",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
+    def test_denies_strings_that_are_not_one_literal_simple_command(self):
+        for command in (
+            "git push fork HEAD:x && echo",
+            "git push fork HEAD:x; git push origin HEAD:main",
+            "git push fork HEAD:x || true",
+            "git status | cat",
+            "git status &",
+            "git push fork HEAD:x\ngit push origin HEAD:main",
+            'git commit -m "$(id)"',
+            "git commit -m $(id)",
+            "git commit -m `id`",
+            'git commit -m "`id`"',
+            'git commit -m "$HOME"',
+            "git commit -m $HOME",
+            'git commit -m "a\\"b"',
+            "git commit -m a\\ b",
+            "git -c core.hooksPath=/tmp push fork HEAD:x",
+            "env git push fork HEAD:x",
+            "GIT_DIR=/tmp/x git push fork HEAD:x",
+            "command git status",
+            "bash -c 'git status'",
+            "git log > /tmp/out",
+            "git log 2>/dev/null",
+            "git add *.ts",
+            "git add web/?.ts",
+            "git add web/{a,b}.ts",
+            "git add ~/x",
+            "git status # comment",
+            "cat <<EOF\nx\nEOF",
+            "git commit -F - <<EOF\nx\nEOF",
+            "(git status)",
+            "{ git status; }",
+            "git commit -m 'unterminated",
+            "/usr/bin/git status",
+            "ls",
+            "pnpm test",
+            "",
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
     def test_raw_and_wrapper_forms_of_fork_writes_fail_closed(self):
         for command in (
-            "git push fork HEAD:feat/x",
-            f"gh pr create --repo {FORK} --head feat/x --title t --body b",
             ["bash", "-lc", "git push fork HEAD:feat/x"],
             ["env", "git", "push", "fork", "HEAD:feat/x"],
             ["command", "gh", "pr", "create", "--repo", FORK, "--head", "feat/x", "--title", "t"],

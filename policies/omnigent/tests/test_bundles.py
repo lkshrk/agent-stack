@@ -1159,7 +1159,7 @@ class StatementAndWrapperTest(unittest.TestCase):
 
 
 class PublicContributionEngineTest(unittest.TestCase):
-    def test_raw_commands_are_denied_and_helper_is_structured_only(self):
+    def test_raw_commands_are_denied_unless_one_literal_helper_command(self):
         if not IN_IMAGE:
             self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
         from unittest.mock import patch
@@ -1174,13 +1174,17 @@ class PublicContributionEngineTest(unittest.TestCase):
                 f"git worktree add {root}",
                 f"git -C {root} fetch origin",
                 "git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
-                "/opt/agent/bin/agent-stack-contribute prepare omnigent",
-                "agent-stack-contribute validate omnigent web",
                 "/opt/agent/bin/agent-stack-contribute publish omnigent",
+                "bash -c '/opt/agent/bin/agent-stack-contribute prepare omnigent'",
+                "agent-stack-contribute validate omnigent web && echo done",
             ):
                 with self.subTest(command=command):
                     out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
                     self.assertEqual(out["public_contributions"].action.name, "DENY")
+            for command in ("/opt/agent/bin/agent-stack-contribute prepare omnigent", "agent-stack-contribute validate omnigent web"):
+                with self.subTest(command=command):
+                    out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "ALLOW")
             out = results(
                 agent,
                 Case(
@@ -1262,8 +1266,18 @@ class PublicContributionEngineTest(unittest.TestCase):
             ["git", "commit", "-m", "fix(web): a"],
             ["git", "switch", "-c", "feat/x"],
             ["git", "fetch", "origin"],
+            'git commit -m "fix(web): x"',
+            "git push fork HEAD:fix/x",
+            f'gh pr create --repo {FORK} --head fix/x --title "fix(web): x" --body "Tested."',
         )
         denied = (
+            "git push fork HEAD:x && echo",
+            'git commit -m "$(id)"',
+            "git commit -m `id`",
+            "git -c core.hooksPath=/tmp push fork HEAD:x",
+            "env git push fork HEAD:x",
+            "git log > /tmp/out",
+            "git add *.ts",
             ["git", "config", "core.hooksPath", "/tmp/hooks"],
             ["git", "remote", "set-url", "fork", "https://github.com/omnigent-ai/omnigent.git"],
             ["git", "tag", "v1.0.0"],
@@ -1279,7 +1293,6 @@ class PublicContributionEngineTest(unittest.TestCase):
             ["gh", "release", "create", "v1", "--repo", FORK],
             ["gh", "workflow", "run", "ci.yml", "--repo", FORK],
             ["gh", "api", "-X", "POST", f"repos/{FORK}/pulls"],
-            "git push fork HEAD:feat/x",
             ["bash", "-lc", "git push fork HEAD:feat/x"],
         )
         for agent in ("polly/agents/claude_code", "polly/agents/codex"):

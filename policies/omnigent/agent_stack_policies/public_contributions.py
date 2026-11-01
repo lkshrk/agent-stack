@@ -37,6 +37,8 @@ LOCAL_GIT_FORM = (
     "`switch -c`/`checkout -b <branch>` onto a non-default branch, config and remote reads, and the fork push"
 )
 _GIT_PAGER_OFF = frozenset({"--no-pager", "-P"})
+_VCS_NAMES = frozenset({"git", "gh"})
+_UNQUOTED_LITERAL = re.compile(r"[A-Za-z0-9_./:=@,+%^-]")
 _GIT_TIMEOUT = 10
 _WORKFLOWS = ".github/workflows/"
 _OWNER_LABEL = "approved-upstream"
@@ -340,8 +342,57 @@ def _registered_path(value: object, registry: Registry) -> bool:
     return _registered_repository(value, registry) is not None
 
 
-def _cwd(arguments: dict) -> object:
-    return arguments.get("cwd", arguments.get("workdir", arguments.get("working_directory")))
+def _cwd(arguments: dict) -> str | None:
+    value = arguments.get("cwd", arguments.get("workdir", arguments.get("working_directory")))
+    return value if isinstance(value, str) and value else None
+
+
+def _literal_words(command: str) -> list[str] | None:
+    """Words of a command built only from plain, single-quoted and expansion-free double-quoted text, or None."""
+    words: list[str] = []
+    word: str | None = None
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char in " \t":
+            if word is not None:
+                words.append(word)
+                word = None
+            index += 1
+            continue
+        if char in "'\"":
+            end = command.find(char, index + 1)
+            if end < 0:
+                return None
+            body = command[index + 1 : end]
+            if char == '"' and any(c in body for c in "$`\\"):
+                return None
+            word = (word or "") + body
+            index = end + 1
+            continue
+        if not _UNQUOTED_LITERAL.fullmatch(char):
+            return None
+        word = (word or "") + char
+        index += 1
+    if word is not None:
+        words.append(word)
+    return words
+
+
+def _simple_command(command: str) -> list[str] | None:
+    words = _literal_words(command)
+    if not words or (words[0] not in _VCS_NAMES and words[0] not in HELPER_NAMES):
+        return None
+    try:
+        statements = walk(command)
+    except (OpaqueCommand, ValueError):
+        return None
+    if statements != [words]:
+        return None
+    resolved = resolve(words)
+    if resolved.argv != words or resolved.wrappers or resolved.assignments or resolved.nested or resolved.stdin_exec:
+        return None
+    return words
 
 
 def _registered_tree(arguments: dict, registry: Registry) -> bool:
@@ -658,8 +709,8 @@ def _gh_options(command: tuple[str, str], args: list[str]) -> dict[str, list[str
 
 
 def _fork_gh(argv: list[str], repository: RegisteredRepository) -> Decision | None:
-    command = tuple(argv[1:3])
-    if command not in _GH_FORK_WRITES:
+    command = (argv[1], argv[2]) if len(argv) >= 3 else None
+    if command is None or command not in _GH_FORK_WRITES:
         return None if _gh_read(argv) else deny(FORK_GH_FORM)
     values = _gh_options(command, argv[3:])
     if values is None:
@@ -704,9 +755,12 @@ def _prepare_operation(event: Event) -> Decision | None:
         return deny("public contribution registry is unavailable")
     argv = arguments.get("command")
     if isinstance(argv, str):
-        if _raw_contribution_operation(argv, registry) or _registered_tree(arguments, registry):
-            return deny("public contribution operations require trusted structured argv")
-        return None
+        simple = _simple_command(argv)
+        if simple is None:
+            if _raw_contribution_operation(argv, registry) or _registered_tree(arguments, registry):
+                return deny("public contribution operations need structured argv or one literal git, gh or helper command")
+            return None
+        argv = simple
     if _exact_helper(argv, registry):
         return allow()
     if _mentions_helper(argv):
@@ -717,11 +771,12 @@ def _prepare_operation(event: Event) -> Decision | None:
         return None
     if _registered_git_target(argv, registry):
         return deny("direct Git operation targeting a registered contribution tree from elsewhere is not allowed")
-    repository = _registered_repository(_cwd(arguments), registry)
-    if repository is None:
+    cwd = _cwd(arguments)
+    repository = _registered_repository(cwd, registry)
+    if repository is None or cwd is None:
         return None
     if argv[:1] == ["git"]:
-        return _registered_git(argv, str(Path(_cwd(arguments)).resolve(strict=False)), repository)
+        return _registered_git(argv, str(Path(cwd).resolve(strict=False)), repository)
     if argv[:1] == ["gh"]:
         return _fork_gh(argv, repository)
     if _indirect_vcs(argv) or _contains_direct_public_write(argv):

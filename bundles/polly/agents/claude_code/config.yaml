@@ -47,8 +47,10 @@ prompt: |
     `gh pr edit <number> --repo <fork> --add-label upstream-ready` only once
     the fork's CI is green. The owner approves the upstream publish: never
     push to or open anything on the upstream, never apply
-    `approved-upstream`, and run `git` and `gh` directly, never through a
-    shell or wrapper. Otherwise, when green, push your task branch with an explicit destination,
+    `approved-upstream`. In the contribution checkout every shell call is
+    one literal `git`, `gh` or `agent-stack-contribute` command: no `&&`,
+    `;`, pipes, redirects, `$`, backticks, globs, `~` or `VAR=` prefixes, and
+    no wrapper; put message and body text in single quotes. Otherwise, when green, push your task branch with an explicit destination,
     `git push -u origin HEAD:<task-branch>` (a bare `git push` or
     `git push origin HEAD` is denied), and open a PR with `gh pr create` (clear
     title, what changed, how you verified). Never push to a protected branch

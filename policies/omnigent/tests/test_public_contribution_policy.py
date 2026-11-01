@@ -116,16 +116,22 @@ class TestPrepareOperation(unittest.TestCase):
             f"git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
             f"git worktree add /home/omnigent/work/omnigent/../omnigent",
             f"git -C {TREE} fetch origin",
-            f"{HELPER} prepare omnigent",
             f"{HELPER} publish omnigent",
+            f"{HELPER} prepare omnigent extra",
             f"bash -c '{HELPER} prepare omnigent'",
+            f"{HELPER} prepare omnigent && echo done",
+            f"{HELPER} prepare $(echo omnigent)",
+            f"X=1 {HELPER} prepare omnigent",
+            f"env {HELPER} prepare omnigent",
+            f"{HELPER} prepare omnigent > /tmp/out",
         ):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
-    def test_allows_helper_only_as_structured_argv(self):
+    def test_allows_helper_as_structured_argv_or_one_literal_command(self):
         self.assertAllowed([HELPER, "prepare", "omnigent"])
-        self.assertDenied(f"{HELPER} prepare omnigent")
+        self.assertAllowed(f"{HELPER} prepare omnigent")
+        self.assertAllowed("agent-stack-contribute validate 'omnigent' \"web\"")
 
     def test_rejects_registered_tree_symlink_path(self):
         with tempfile.TemporaryDirectory() as directory:
