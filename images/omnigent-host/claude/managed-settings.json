@@ -9,6 +9,7 @@
   },
   "permissions": {
     "additionalDirectories": ["/home/omnigent/workspace"],
+    "allow": ["EnterWorktree", "ExitWorktree"],
     "deny": [
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",

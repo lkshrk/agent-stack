@@ -28,6 +28,8 @@ expect "the managed settings keep the deny list" \
   "$(jq -r '.permissions.deny | length' /etc/claude-code/managed-settings.json)" 4
 expect "the sandbox workspace is a working directory, so file tools never prompt for sibling worktrees" \
   "$(jq -c '.permissions.additionalDirectories' /etc/claude-code/managed-settings.json)" '["/home/omnigent/workspace"]'
+expect "the managed settings pre-approve only switching between worktrees" \
+  "$(jq -c '.permissions.allow' /etc/claude-code/managed-settings.json)" '["EnterWorktree","ExitWorktree"]'
 expect "the managed settings leave Omnigent's hook settings in force" \
   "$(jq -r '[.allowManagedHooksOnly, .disableAllHooks, .permissions.defaultMode] | map(select(. != null)) | length' /etc/claude-code/managed-settings.json)" 0
 expect "a seeded HOME enables the runner plugins" \
@@ -49,6 +51,7 @@ for mode in default auto; do
     --mcp-config '{"mcpServers":{"omnigent":{"type":"stdio","command":"true"}}}' \
     --settings "$work/settings.json" 2>&1)
   expect "[$mode] Claude accepts a launcher MCP config" "$(grep -c 'enterprise MCP config' <<<"$out")" 0
+  expect "[$mode] Claude reports no invalid settings" "$(grep -ciE 'invalid (settings|permission)' <<<"$out")" 0
   expect "[$mode] the session starts in the requested permission mode" \
     "$(jq -Rr 'fromjson? | select(.type == "system" and .subtype == "init") | .permissionMode' <<<"$out" | head -1)" "$mode"
   expect "[$mode] the launcher's SessionStart hook runs" "$(test -e "$work/session-start" && echo ran || echo blocked)" ran
