@@ -6,7 +6,7 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, deny, tool_call
 from ._shell import OpaqueCommand, SHELLS, Command, shell_name, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
-from .contribution_vcs import option_set, parse_options
+from .contribution_vcs import option_set, parse_options, rejected_option
 from .vcs import _BRANCH_LIST_FLAGS, GIT_READ_OPTIONS, check_fetch_positional
 
 READ_COMMANDS = frozenset({
@@ -22,20 +22,23 @@ _GIT_GLOBAL_FLAGS = frozenset({"--no-pager", "-P"})
 _GIT_WORKTREE = frozenset({"add", "remove", "list", "prune"})
 _GIT_OPTIONS = {
     **GIT_READ_OPTIONS,
-    "ls-tree": option_set("-r -t -d -l --long --name-only --name-status -z --full-name --full-tree", "--abbrev"),
-    "cat-file": option_set("-p -t -s -e --batch --batch-check --allow-unknown-type"),
-    "blame": option_set("-l -w -s -e --show-email -f --show-name -n --show-number -p --porcelain --line-porcelain --incremental -b -M -C", "-L"),
+    "ls-tree": option_set("-r -t -d -l --long --name-only --name-status -z --full-name --full-tree", optional="--abbrev"),
+    "cat-file": option_set("-p -t -s -e --allow-unknown-type", optional="--batch --batch-check"),
+    "blame": option_set("-l -w -s -e --show-email -f --show-name -n --show-number -p --porcelain --line-porcelain --incremental -b", "-L", optional="-M -C --abbrev", plain_values=True),
     "grep": option_set(
         "-n -i -I -w -l -L -c -v -h -H -F -E -P -a -q --cached --no-index --untracked --count --files-with-matches "
         "--line-number --ignore-case --word-regexp --fixed-strings --extended-regexp --perl-regexp --invert-match",
         "-e -A -B -C --max-depth",
+        optional="--color",
     ),
-    "describe": option_set("--tags --always --long --all --contains --first-parent --exact-match", "--abbrev --match --exclude --candidates"),
-    "shortlog": option_set("-s -n -e --summary --numbered --email", "--since --until --after --before"),
+    "describe": option_set("--tags --always --long --all --contains --first-parent --exact-match", "--match --exclude --candidates", optional="--abbrev"),
+    "shortlog": option_set("-s -n -e --summary --numbered --email", "--since --until --after --before", plain_values=True),
     "rev-list": option_set(
         "--count --all --reverse --first-parent --no-merges --merges --abbrev-commit --left-right --parents --oneline",
         "--max-count -n --since --until --after --before --author --grep --skip",
         counts=True,
+        optional="--abbrev",
+        plain_values=True,
     ),
     "worktree": option_set("--detach -q --quiet -f --force --porcelain -n --dry-run -v --verbose --no-checkout", "-b -B"),
 }
@@ -82,7 +85,7 @@ def check_git(args: list[str], verbs: frozenset[str]) -> str | None:
         return f"git {sub} is not allowed here"
     parsed = parse_options(rest[1:] if sub == "worktree" and rest else rest, spec)
     if parsed is None:
-        return f"git {sub} with an option outside its allowlist is not allowed"
+        return f"git {sub} option {rejected_option(rest[1:] if sub == 'worktree' and rest else rest, spec)} is outside its allowlist"
     if sub == "fetch":
         return check_fetch_positional(parsed.positional)
     return None

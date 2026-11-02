@@ -53,6 +53,8 @@ class Options:
     flags: frozenset[str] = frozenset()
     values: frozenset[str] = frozenset()
     counts: bool = False
+    optional: frozenset[str] = frozenset()
+    plain_values: bool = False
 
 
 @dataclass
@@ -61,30 +63,35 @@ class Parsed:
     options: dict[str, list[str]] = field(default_factory=dict)
 
 
-def option_set(flags: str = "", values: str = "", counts: bool = False) -> Options:
-    return Options(frozenset(flags.split()), frozenset(values.split()), counts)
+def option_set(flags: str = "", values: str = "", counts: bool = False, optional: str = "", plain_values: bool = False) -> Options:
+    return Options(frozenset(flags.split()), frozenset(values.split()), counts, frozenset(optional.split()), plain_values)
 
 
 GIT_OPTIONS = {
-    "status": option_set("-s --short -b --branch --porcelain --porcelain=v1 --porcelain=v2 -z --untracked-files=no --untracked-files=normal --untracked-files=all"),
+    "status": option_set("-s --short -b --branch --porcelain --porcelain=v1 --porcelain=v2 -z", optional="--untracked-files -u"),
     "diff": option_set(
-        "--cached --staged --stat --shortstat --numstat --name-only --name-status -p --patch --no-color --check -w "
-        "--ignore-all-space --quiet --exit-code -z --no-ext-diff --no-textconv --word-diff --merge-base -R",
-        "--unified --diff-filter",
+        "--cached --staged --shortstat --numstat --name-only --name-status -p --patch --no-color --check -w "
+        "--ignore-all-space --quiet --exit-code -z --no-ext-diff --no-textconv --merge-base -R",
+        "--diff-filter",
+        optional="--stat --color --word-diff --unified -U --abbrev",
+        plain_values=True,
     ),
     "log": option_set(
-        "--oneline --graph --decorate --no-decorate --stat --shortstat --name-only --name-status -p --patch --no-color "
+        "--oneline --graph --no-decorate --shortstat --name-only --name-status -p --patch --no-color "
         "--all --reverse --first-parent --no-merges --merges -z --follow --abbrev-commit --no-ext-diff --no-textconv",
-        "--format --pretty -n --max-count --since --until --after --before --author --grep --date --skip",
+        "-n --max-count --since --until --after --before --author --grep --skip",
         counts=True,
+        optional="--stat --decorate --format --pretty --date --abbrev --color --word-diff",
+        plain_values=True,
     ),
     "show": option_set(
-        "--stat --shortstat --name-only --name-status --oneline -p --patch --no-patch -s --no-color --no-ext-diff --no-textconv --abbrev-commit",
-        "--format --pretty",
+        "--shortstat --name-only --name-status --oneline -p --patch --no-patch -s --no-color --no-ext-diff --no-textconv --abbrev-commit",
+        optional="--stat --format --pretty --abbrev --color --word-diff",
+        plain_values=True,
     ),
     "rev-parse": option_set(
-        "--abbrev-ref --short --show-toplevel --git-dir --verify --symbolic-full-name -q --quiet --is-inside-work-tree --show-prefix",
-        "--short",
+        "--show-toplevel --git-dir --verify --symbolic-full-name -q --quiet --is-inside-work-tree --show-prefix",
+        optional="--abbrev-ref --short",
     ),
     "ls-files": option_set("-m --modified -o --others --exclude-standard -s --stage -z -c --cached -d --deleted -u --unmerged"),
     "merge-base": option_set("--is-ancestor --all --fork-point"),
@@ -102,36 +109,66 @@ GIT_OPTIONS = {
 _PATHSPEC_COMMANDS = frozenset({"status", "diff", "log", "show", "ls-files", "restore", "add", "commit"})
 
 
-def parse_options(args: list[str], spec: Options) -> Parsed | None:
-    """Exact options only: no abbreviations, no bundled short flags, `--name=value` only for long value options."""
+def _scan(args: list[str], spec: Options) -> Parsed | str:
+    """Exact options only, as git reads them: no abbreviations; optional arguments bare or fused; short clusters expanded."""
     parsed = Parsed()
     index = 0
     after_separator = False
     while index < len(args):
         token = args[index]
+        index += 1
         if after_separator or token == "-" or not token.startswith("-"):
             parsed.positional.append(token)
-            index += 1
             continue
         if token == "--":
             after_separator = True
-            index += 1
             continue
         if token in spec.flags or (spec.counts and _LOG_COUNT.fullmatch(token)):
             parsed.options.setdefault(token, [])
-            index += 1
             continue
-        name, equals, value = token.partition("=") if token.startswith("--") else (token, "", "")
-        if name not in spec.values:
-            return None
-        if not equals:
-            if index + 1 >= len(args):
-                return None
-            index += 1
-            value = args[index]
-        parsed.options.setdefault(name, []).append(value)
-        index += 1
+        if token.startswith("--"):
+            name, equals, value = token.partition("=")
+            if name in spec.optional:
+                parsed.options.setdefault(name, []).append(value)
+                continue
+            if name not in spec.values:
+                return token
+            if not equals:
+                if index >= len(args) or (spec.plain_values and args[index].startswith("-")):
+                    return token
+                value = args[index]
+                index += 1
+            parsed.options.setdefault(name, []).append(value)
+            continue
+        for position in range(1, len(token)):
+            letter = f"-{token[position]}"
+            rest = token[position + 1 :]
+            if letter in spec.flags:
+                parsed.options.setdefault(letter, [])
+                continue
+            if letter in spec.optional:
+                parsed.options.setdefault(letter, []).append(rest)
+                break
+            if letter not in spec.values:
+                return token
+            if not rest:
+                if index >= len(args) or (spec.plain_values and args[index].startswith("-")):
+                    return token
+                rest = args[index]
+                index += 1
+            parsed.options.setdefault(letter, []).append(rest)
+            break
     return parsed
+
+
+def parse_options(args: list[str], spec: Options) -> Parsed | None:
+    result = _scan(args, spec)
+    return None if isinstance(result, str) else result
+
+
+def rejected_option(args: list[str], spec: Options) -> str:
+    result = _scan(args, spec)
+    return result if isinstance(result, str) else ""
 
 
 def into_git_dir(value: str) -> bool:
@@ -324,7 +361,7 @@ def registered_git(argv: list[str], cwd: str, repository: "RegisteredRepository"
         return deny(f"git {sub} is not allowed in a registered contribution; {LOCAL_GIT_FORM}")
     parsed = parse_options(args, spec)
     if parsed is None:
-        return deny(f"git {sub} with an option outside its allowlist is not allowed here; {LOCAL_GIT_FORM}")
+        return deny(f"git {sub} option {rejected_option(args, spec)} is outside its allowlist here; {LOCAL_GIT_FORM}")
     if sub in _PATHSPEC_COMMANDS and any(into_git_dir(p) for p in parsed.positional):
         return deny("paths inside .git/ are not allowed")
     if sub == "push":

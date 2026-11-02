@@ -5,7 +5,7 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
 from ._shell import OpaqueCommand, DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
-from .contribution_vcs import GIT_OPTIONS, option_set, parse_options
+from .contribution_vcs import GIT_OPTIONS, option_set, parse_options, rejected_option
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
 from .tools import gh_api_mutates
 
@@ -122,7 +122,7 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if sub in _GIT_READ:
         parsed = parse_options(args, GIT_READ_OPTIONS[sub])
         if parsed is None:
-            return f"git {sub} with an option outside its allowlist is not allowed; {GIT_FORM}"
+            return f"git {sub} option {rejected_option(args, GIT_READ_OPTIONS[sub])} is outside its allowlist; {GIT_FORM}"
         return check_fetch_positional(parsed.positional) if sub == "fetch" else None
     if sub == "branch":
         flags = [a for a in args if a.startswith("-")]

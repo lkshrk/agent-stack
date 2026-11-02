@@ -454,6 +454,27 @@ class ForkStagingTest(unittest.TestCase):
             self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
             self.assertGreater(kwargs["timeout"], 0)
 
+    def test_optional_argument_options_never_swallow_the_next_option(self):
+        for verb in ("diff", "log", "show", "rev-parse", "status"):
+            for first in ("--unified", "--pretty", "--format", "--stat", "--color", "--word-diff", "--abbrev", "--short", "--abbrev-ref", "--decorate", "-U", "-u", "--untracked-files"):
+                for danger in ("--output=/tmp/pwn", "--ext-diff", "--textconv", "--upload-pack=x"):
+                    self.assertDenied(["git", verb, first, danger])
+
+    def test_everyday_read_options_stay_allowed(self):
+        for command in (
+            ["git", "status", "-sb"],
+            ["git", "status", "--porcelain", "-uall"],
+            ["git", "log", "-n5"],
+            ["git", "log", "--stat=200"],
+            ["git", "diff", "-U3"],
+            ["git", "diff", "--color=never"],
+            ["git", "diff", "--word-diff=color"],
+            ["git", "diff", "--unified", "HEAD"],
+            ["git", "log", "--pretty", "--oneline"],
+            ["git", "commit", "-am", "x"],
+        ):
+            self.assertAllowed(command)
+
     def test_review_probes_fail_closed(self):
         for command in (
             ["git", "rebase", "--exe", "git push origin HEAD:main", "HEAD~1"],
@@ -520,12 +541,10 @@ class ForkStagingTest(unittest.TestCase):
             ["git", "credential", "fill"],
             ["git", "branch", "--list", "-D"],
             ["git", "commit", "-m", "x", "-F", "/etc/passwd"],
-            ["git", "commit", "-am", "x"],
             ["git", "commit"],
             ["git", "add", "-p"],
             ["git", "add", ".git/hooks/pre-commit"],
             ["git", "restore", "--source=HEAD", ".git/config"],
-            ["git", "status", "--porcelain", "-uall"],
             ["git"],
             "git rebase --exe 'git push origin HEAD:main' HEAD~1",
             "git push fork HEAD:feat/x\x00",

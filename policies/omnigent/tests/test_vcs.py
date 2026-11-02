@@ -118,6 +118,31 @@ class DocsVcsTest(unittest.TestCase):
             ):
                 self.assertDenied(f"git {verb} {option}")
 
+    def test_optional_argument_options_never_swallow_the_next_option(self):
+        for verb in ("diff", "log", "show", "rev-parse", "status"):
+            for first in ("--unified", "--pretty", "--format", "--stat", "--color", "--word-diff", "--abbrev", "--short", "--abbrev-ref", "--decorate", "-U", "-u", "--untracked-files"):
+                for danger in ("--output=/tmp/pwn", "--ext-diff", "--textconv", "--upload-pack=x"):
+                    self.assertDenied(f"git {verb} {first} {danger}")
+
+    def test_everyday_read_options_allowed(self):
+        for command in (
+            "git status -sb",
+            "git status --porcelain -uall",
+            "git log -n5",
+            "git log -n 5",
+            "git log --stat=200",
+            "git diff -U3",
+            "git diff --color=never",
+            "git diff --word-diff=color",
+            "git diff --unified HEAD",
+            "git log --pretty --oneline",
+            "git log --pretty=format:%h",
+        ):
+            self.assertAllowed(command)
+
+    def test_denial_names_the_rejected_option(self):
+        self.assertDenied("git log --oneline --no-such-thing", "--no-such-thing")
+
     def test_git_fetch_refspec_and_unsafe_remote_denied(self):
         for command in (
             "git fetch origin main:refs/heads/main",
