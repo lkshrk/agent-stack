@@ -187,7 +187,7 @@ jobs:
 
       - name: Recheck this spec with Claude Code
         id: claude
-        uses: anthropics/claude-code-action@6d5ae526d25ce88daa2200be073e1a373167f064 # v1.0.265
+        uses: anthropics/claude-code-action@d535f5172dec02b204866b393d6b20b9b2aaf98d # v1.0.266
         env:
           ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
           ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-haiku
