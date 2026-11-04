@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const codeDigits = 8
+const (
+	codeDigits   = 8
+	tombstoneTTL = 24 * time.Hour
+)
 
 var codeSpace = big.NewInt(100_000_000)
 
@@ -34,6 +37,7 @@ type codeStatus int
 const (
 	codeUnknown codeStatus = iota
 	codeExpired
+	codeExpiredStale
 	codeValid
 )
 
@@ -61,10 +65,10 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	s.dropLocked(k, func(p pending) bool { return now.Before(p.expires) })
-	// Expired codes stay one more TTL so a late reply is told a new code follows.
+	s.dropLive(k)
+	// Expired codes stay as tombstones so a late reply maps back to its pull request.
 	for code, p := range s.byCode {
-		if !now.Before(p.expires.Add(s.ttl)) {
+		if !now.Before(p.expires.Add(tombstoneTTL)) {
 			delete(s.byCode, code)
 		}
 	}
@@ -92,13 +96,18 @@ func (s *codeStore) take(code string) (pending, codeStatus) {
 		return pending{}, codeUnknown
 	}
 	delete(s.byCode, code)
+	now := s.now()
+	if !now.Before(p.expires.Add(tombstoneTTL)) {
+		return pending{}, codeUnknown
+	}
 	a, current := s.announced[p.pr]
 	current = current && a.sha == p.sha
-	if !s.now().Before(p.expires) {
-		if current {
-			a.expired = true
-			s.announced[p.pr] = a
+	if !now.Before(p.expires) {
+		if !current || a.consumed {
+			return p, codeExpiredStale
 		}
+		a.expired = true
+		s.announced[p.pr] = a
 		return p, codeExpired
 	}
 	if current {
@@ -111,14 +120,14 @@ func (s *codeStore) take(code string) (pending, codeStatus) {
 func (s *codeStore) markReviewed(k prKey, sha string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dropLocked(k, func(pending) bool { return true })
+	s.dropLive(k)
 	s.announced[k] = headState{sha: sha, consumed: true}
 }
 
 func (s *codeStore) forget(k prKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dropLocked(k, func(pending) bool { return true })
+	s.dropLive(k)
 	delete(s.announced, k)
 }
 
@@ -127,7 +136,7 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 	defer s.mu.Unlock()
 	for k := range s.announced {
 		if k.fork == fork && !ready[k] {
-			s.dropLocked(k, func(pending) bool { return true })
+			s.dropLive(k)
 			delete(s.announced, k)
 		}
 	}
@@ -145,9 +154,10 @@ func (s *codeStore) live() int {
 	return n
 }
 
-func (s *codeStore) dropLocked(k prKey, match func(pending) bool) {
+func (s *codeStore) dropLive(k prKey) {
+	now := s.now()
 	for code, p := range s.byCode {
-		if p.pr == k && match(p) {
+		if p.pr == k && now.Before(p.expires) {
 			delete(s.byCode, code)
 		}
 	}

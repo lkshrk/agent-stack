@@ -82,6 +82,11 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		d.tell(ctx, fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows within a minute if it is still ready.", p.pr.fork, p.pr.number))
 		http.Error(w, "expired code", http.StatusGone)
 		return
+	case codeExpiredStale:
+		log.Printf("contribution-approver: %s with an expired code for a changed head of %s#%d", req.Action, p.pr.fork, p.pr.number)
+		d.tell(ctx, fmt.Sprintf("That code expired and %s#%d has changed or been decided since. Nothing was submitted; the normal poll announces any new ready head.", p.pr.fork, p.pr.number))
+		http.Error(w, "expired code for a changed head", http.StatusGone)
+		return
 	}
 	if err := d.gh.review(ctx, p.pr.fork, p.pr.number, p.sha, review.event, review.body); err != nil {
 		d.codes.forget(p.pr)

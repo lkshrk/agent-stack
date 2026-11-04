@@ -203,3 +203,102 @@ func TestAConsumedCodeIsNeverAnnouncedAgainForTheSameHead(t *testing.T) {
 		}
 	}
 }
+
+func approveWith(h *harness, code string) *httptest.ResponseRecorder {
+	return decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`)
+}
+
+func announcements(h *harness) int {
+	n := 0
+	for _, m := range h.signal.messages() {
+		if strings.HasPrefix(m, "Contribution ready") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestATombstoneMapsAnExpiredCodeBackForADay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		age          time.Duration
+		status, want int
+	}{
+		"within a day": {23 * time.Hour, http.StatusGone, 2},
+		"after a day":  {codeTTL + tombstoneTTL + time.Second, http.StatusNotFound, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			code := announce(t, h, 7, shaA)
+			h.clock.advance(tc.age)
+			h.poller.poll(context.Background())
+
+			rec := approveWith(h, code)
+			h.poller.poll(context.Background())
+
+			if rec.Code != tc.status || announcements(h) != tc.want {
+				t.Fatalf("reply = %d, announcements = %d; want %d, %d", rec.Code, announcements(h), tc.status, tc.want)
+			}
+		})
+	}
+}
+
+func TestATombstoneReannouncesAtMostOnce(t *testing.T) {
+	h := newHarness(t)
+	code := announce(t, h, 7, shaA)
+	h.clock.advance(codeTTL + time.Second)
+
+	first, second := approveWith(h, code), approveWith(h, code)
+	h.poller.poll(context.Background())
+	h.poller.poll(context.Background())
+
+	if first.Code != http.StatusGone || second.Code != http.StatusNotFound || announcements(h) != 2 {
+		t.Fatalf("replies = %d, %d, announcements = %d; want 410, 404, 2", first.Code, second.Code, announcements(h))
+	}
+}
+
+func TestAnExpiredCodeForAChangedPullRequestReannouncesNothing(t *testing.T) {
+	for name, change := range map[string]func(h *harness){
+		"new head": func(h *harness) {
+			h.gh.update(func() { h.gh.prs[7].sha = shaB; h.gh.runs[shaB] = h.gh.runs[shaA] })
+		},
+		"no longer ready": func(h *harness) {
+			h.gh.update(func() { h.gh.prs[7].labels = nil })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			code := announce(t, h, 7, shaA)
+			h.clock.advance(codeTTL + time.Second)
+			change(h)
+			h.poller.poll(context.Background())
+			before := announcements(h)
+
+			rec := approveWith(h, code)
+			h.poller.poll(context.Background())
+
+			msgs := h.signal.messages()
+			if rec.Code != http.StatusGone || !strings.Contains(msgs[len(msgs)-1], "has changed or been decided") || announcements(h) != before {
+				t.Fatalf("reply = %d, announcements %d -> %d, messages = %q", rec.Code, before, announcements(h), msgs)
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v", r)
+			}
+		})
+	}
+}
+
+func TestUnknownAndConsumedCodesTriggerNoAnnouncement(t *testing.T) {
+	h := newHarness(t)
+	code := announce(t, h, 7, shaA)
+	if rec := approveWith(h, code); rec.Code != http.StatusOK {
+		t.Fatalf("approve = %d", rec.Code)
+	}
+	h.clock.advance(codeTTL + time.Second)
+
+	consumed, unknown := approveWith(h, code), approveWith(h, "00000000")
+	h.poller.poll(context.Background())
+
+	if consumed.Code != http.StatusNotFound || unknown.Code != http.StatusNotFound || announcements(h) != 1 {
+		t.Fatalf("replies = %d, %d, announcements = %d; want 404, 404, 1", consumed.Code, unknown.Code, announcements(h))
+	}
+}
