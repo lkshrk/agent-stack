@@ -125,7 +125,7 @@ func (s *shim) events(w http.ResponseWriter, r *http.Request) {
 		case data := <-msgs:
 			if s.approvals != nil {
 				if d, ok := s.approvals.match(data); ok {
-					go s.approvals.forward(d)
+					go s.forwardDecision(d)
 					continue
 				}
 			}

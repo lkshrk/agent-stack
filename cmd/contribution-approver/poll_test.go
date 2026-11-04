@@ -129,10 +129,10 @@ func TestANewHeadInvalidatesTheOlderCode(t *testing.T) {
 	if len(msgs) != 2 || !strings.Contains(msgs[1], shaB) {
 		t.Fatalf("announcements = %q, want a second one for the new head", msgs)
 	}
-	if _, ok := h.codes.take(first); ok {
+	if _, st := h.codes.take(first); st != codeUnknown {
 		t.Fatal("the code for the older head still works")
 	}
-	if _, ok := h.codes.take(codeIn(t, msgs[1])); !ok {
+	if _, st := h.codes.take(codeIn(t, msgs[1])); st != codeValid {
 		t.Fatal("the code for the new head does not work")
 	}
 }
@@ -146,7 +146,7 @@ func TestAPullRequestThatStopsBeingReadyLosesItsCode(t *testing.T) {
 	h.gh.update(func() { pr.labels = nil })
 	h.poller.poll(context.Background())
 
-	if _, ok := h.codes.take(code); ok {
+	if _, st := h.codes.take(code); st != codeUnknown {
 		t.Fatal("the code survived the label removal")
 	}
 }
@@ -189,8 +189,8 @@ func TestCodesExpire(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.advance(30*time.Minute + time.Second)
-	if _, ok := s.take(code); ok {
-		t.Fatal("an expired code was accepted")
+	if _, st := s.take(code); st != codeExpired {
+		t.Fatal("an expired code was not reported as expired")
 	}
 }
 
@@ -206,5 +206,33 @@ func TestCodesAreEightDigitsAndUnique(t *testing.T) {
 			t.Fatalf("code %q malformed or repeated", code)
 		}
 		seen[code] = true
+	}
+}
+
+func TestPollSkipsAHeadTheOwnerAlreadyReviewed(t *testing.T) {
+	for name, tc := range map[string]struct {
+		login, state, sha string
+		announce          bool
+	}{
+		"approved":            {"lkshrk", "APPROVED", shaA, false},
+		"changes requested":   {"lkshrk", "CHANGES_REQUESTED", shaA, false},
+		"approved older head": {"lkshrk", "APPROVED", shaB, true},
+		"commented":           {"lkshrk", "COMMENTED", shaA, true},
+		"someone else":        {"npa-bot", "APPROVED", shaA, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.gh.readyPR(7, shaA)
+			h.gh.update(func() {
+				h.gh.existing[7] = []map[string]any{{"user": map[string]any{"login": tc.login}, "state": tc.state, "commit_id": tc.sha}}
+			})
+
+			h.poller.poll(context.Background())
+			h.poller.poll(context.Background())
+
+			if got := len(h.signal.messages()); got != map[bool]int{true: 1, false: 0}[tc.announce] {
+				t.Fatalf("announcements = %d, want announce=%v", got, tc.announce)
+			}
+		})
 	}
 }

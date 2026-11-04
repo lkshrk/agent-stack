@@ -52,13 +52,14 @@ type fakeGitHub struct {
 	prs      map[int]*fakePR
 	runs     map[string][]fakeRun
 	reviews  []review
+	existing map[int][]map[string]any
 	failPost bool
 	requests []string
 	srv      *httptest.Server
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
-	g := &fakeGitHub{t: t, login: "lkshrk", config: contribConfig, prs: map[int]*fakePR{}, runs: map[string][]fakeRun{}}
+	g := &fakeGitHub{t: t, login: "lkshrk", config: contribConfig, prs: map[int]*fakePR{}, runs: map[string][]fakeRun{}, existing: map[int][]map[string]any{}}
 	g.srv = httptest.NewServer(http.HandlerFunc(g.serve))
 	t.Cleanup(g.srv.Close)
 	return g
@@ -132,6 +133,15 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		write(list)
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/pulls/") && strings.HasSuffix(path, "/reviews"):
+		n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(path, "/repos/"+testFork+"/pulls/"), "/reviews"))
+		list := []any{}
+		if r.URL.Query().Get("page") == "1" {
+			for _, rv := range g.existing[n] {
+				list = append(list, rv)
+			}
+		}
+		write(list)
 	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/pulls/"):
 		n, _ := strconv.Atoi(strings.TrimPrefix(path, "/repos/"+testFork+"/pulls/"))
 		pr, ok := g.prs[n]
@@ -156,6 +166,8 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unprocessable", http.StatusUnprocessableEntity)
 			return
 		}
+		state := map[any]string{"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}[body["event"]]
+		g.existing[n] = append(g.existing[n], map[string]any{"user": map[string]any{"login": g.login}, "state": state, "commit_id": body["commit_id"]})
 		write(map[string]any{"id": 1})
 	default:
 		g.t.Errorf("unexpected GitHub call %s %s", r.Method, r.URL)

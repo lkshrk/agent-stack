@@ -23,34 +23,48 @@ type pending struct {
 	expires time.Time
 }
 
+type headState struct {
+	sha      string
+	consumed bool
+	expired  bool
+}
+
+type codeStatus int
+
+const (
+	codeUnknown codeStatus = iota
+	codeExpired
+	codeValid
+)
+
 // codeStore holds single-use approval codes in memory; a restart drops them and the next poll announces again.
 type codeStore struct {
 	mu        sync.Mutex
 	ttl       time.Duration
 	now       func() time.Time
 	byCode    map[string]pending
-	announced map[prKey]string
+	announced map[prKey]headState
 }
 
 func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
-	return &codeStore{ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]string{}}
+	return &codeStore{ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{}}
 }
 
-func (s *codeStore) announcedSHA(k prKey) (string, bool) {
+func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sha, ok := s.announced[k]
-	return sha, ok
+	a, ok := s.announced[k]
+	return !ok || a.sha != sha || (a.expired && !a.consumed)
 }
 
-// issue replaces every code for the pull request with a new one bound to sha.
 func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dropLocked(k)
 	now := s.now()
+	s.dropLocked(k, func(p pending) bool { return now.Before(p.expires) })
+	// Expired codes stay one more TTL so a late reply is told a new code follows.
 	for code, p := range s.byCode {
-		if !now.Before(p.expires) {
+		if !now.Before(p.expires.Add(s.ttl)) {
 			delete(s.byCode, code)
 		}
 	}
@@ -64,41 +78,56 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 			continue
 		}
 		s.byCode[code] = pending{pr: k, sha: sha, expires: now.Add(s.ttl)}
-		s.announced[k] = sha
+		s.announced[k] = headState{sha: sha}
 		return code, nil
 	}
 	return "", fmt.Errorf("no free approval code")
 }
 
-// take consumes a live code; an expired code is removed and refused.
-func (s *codeStore) take(code string) (pending, bool) {
+func (s *codeStore) take(code string) (pending, codeStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.byCode[code]
 	if !ok {
-		return pending{}, false
+		return pending{}, codeUnknown
 	}
 	delete(s.byCode, code)
+	a, current := s.announced[p.pr]
+	current = current && a.sha == p.sha
 	if !s.now().Before(p.expires) {
-		return pending{}, false
+		if current {
+			a.expired = true
+			s.announced[p.pr] = a
+		}
+		return p, codeExpired
 	}
-	return p, true
+	if current {
+		a.consumed = true
+		s.announced[p.pr] = a
+	}
+	return p, codeValid
+}
+
+func (s *codeStore) markReviewed(k prKey, sha string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dropLocked(k, func(pending) bool { return true })
+	s.announced[k] = headState{sha: sha, consumed: true}
 }
 
 func (s *codeStore) forget(k prKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.dropLocked(k)
+	s.dropLocked(k, func(pending) bool { return true })
 	delete(s.announced, k)
 }
 
-// keepOnly forgets every pull request of fork that is not in ready.
 func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k := range s.announced {
 		if k.fork == fork && !ready[k] {
-			s.dropLocked(k)
+			s.dropLocked(k, func(pending) bool { return true })
 			delete(s.announced, k)
 		}
 	}
@@ -107,12 +136,18 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 func (s *codeStore) live() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return len(s.byCode)
+	n := 0
+	for _, p := range s.byCode {
+		if s.now().Before(p.expires) {
+			n++
+		}
+	}
+	return n
 }
 
-func (s *codeStore) dropLocked(k prKey) {
+func (s *codeStore) dropLocked(k prKey, match func(pending) bool) {
 	for code, p := range s.byCode {
-		if p.pr == k {
+		if p.pr == k && match(p) {
 			delete(s.byCode, code)
 		}
 	}

@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -87,7 +90,7 @@ func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 				}
 				return
 			}
-			if !ok || got != *tc.want {
+			if !ok || got.Action != tc.want.Action || got.Code != tc.want.Code {
 				t.Fatalf("match = %+v, %v; want %+v", got, ok, *tc.want)
 			}
 		})
@@ -254,23 +257,95 @@ func TestEventsWithoutApprovalsRelayDecisionsUnchanged(t *testing.T) {
 	}
 }
 
-func TestForwardFailureIsLoggedWithoutSecrets(t *testing.T) {
-	logs := captureLog(t)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "unknown code", http.StatusNotFound)
-	}))
-	defer srv.Close()
-	route := &approvalRoute{owner: testOwner, url: srv.URL, token: testToken, http: srv.Client()}
-
-	route.forward(decision{Action: "approve", Code: "12345678"})
-
-	out := logs()
-	if !strings.Contains(out, "404") {
-		t.Fatalf("log lacks the approver status: %q", out)
+func TestMatchRepliesWhereTheDecisionCameFrom(t *testing.T) {
+	route := &approvalRoute{owner: testOwner}
+	group, _ := route.match([]byte(envelope(testOwner, groupText("approve 12345678"), nil)))
+	direct, _ := route.match([]byte(envelope(testOwner, map[string]any{"timestamp": 1, "message": "approve 12345678"}, nil)))
+	if group.account != testAccount || group.recipient != "group."+base64.StdEncoding.EncodeToString([]byte(testGroupRaw)) {
+		t.Fatalf("group reply goes to %q from %q", group.recipient, group.account)
 	}
-	for _, secret := range []string{testOwner, testToken} {
-		if strings.Contains(out, secret) {
-			t.Fatalf("log contains a secret value: %q", out)
+	if direct.account != testAccount || direct.recipient != testOwner {
+		t.Fatalf("direct reply goes to %q from %q", direct.recipient, direct.account)
+	}
+}
+
+func TestApproverTimeoutCoversTheApproversDecisionBudget(t *testing.T) {
+	src, err := os.ReadFile("../contribution-approver/decide.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`reviewTimeout\s*=\s*([0-9]+) \* time\.Second`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("contribution-approver no longer declares reviewTimeout in seconds")
+	}
+	budget, _ := strconv.Atoi(string(m[1]))
+	if approverTimeout < time.Duration(budget)*time.Second+5*time.Second {
+		t.Fatalf("approverTimeout %v must exceed the approver's %ds decision budget with margin", approverTimeout, budget)
+	}
+}
+
+func signalSends(f *fakeREST) []recorded {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []recorded
+	for _, c := range f.calls {
+		if c.path == "/v2/send" {
+			out = append(out, c)
 		}
+	}
+	return out
+}
+
+func TestForwardFailureTellsTheOwnerWithoutLoggingSecrets(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status int
+		down   bool
+		note   bool
+	}{
+		"unreachable":   {down: true, note: true},
+		"unauthorized":  {status: http.StatusUnauthorized, note: true},
+		"server error":  {status: http.StatusInternalServerError, note: true},
+		"unknown code":  {status: http.StatusNotFound},
+		"expired code":  {status: http.StatusGone},
+		"review failed": {status: http.StatusBadGateway},
+		"approved":      {status: http.StatusOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			logs := captureLog(t)
+			f := newFakeREST(t)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			if tc.down {
+				srv.Close()
+			} else {
+				defer srv.Close()
+			}
+			s := &shim{upstream: f.srv.URL, http: f.srv.Client(), approvals: &approvalRoute{owner: testOwner, url: srv.URL, token: testToken, http: srv.Client()}}
+			d, _ := s.approvals.match([]byte(envelope(testOwner, groupText("approve 12345678"), nil)))
+
+			s.forwardDecision(d)
+
+			sends := signalSends(f)
+			if !tc.note {
+				if len(sends) != 0 {
+					t.Fatalf("shim sent %v although the approver answers the owner itself", sends)
+				}
+				return
+			}
+			if len(sends) != 1 {
+				t.Fatalf("Signal sends = %v, want one note", sends)
+			}
+			body := sends[0].body
+			if body["number"] != testAccount || body["recipients"].([]any)[0] != "group."+base64.StdEncoding.EncodeToString([]byte(testGroupRaw)) || !strings.Contains(body["message"].(string), "not") {
+				t.Fatalf("note = %v", body)
+			}
+			out := logs()
+			for _, secret := range []string{testOwner, testToken, testGroupRaw, testAccount} {
+				if strings.Contains(out, secret) {
+					t.Fatalf("log contains a secret value: %q", out)
+				}
+			}
+		})
 	}
 }

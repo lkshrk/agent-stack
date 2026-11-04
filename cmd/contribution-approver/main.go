@@ -1,5 +1,4 @@
-// Command contribution-approver announces ready contribution fork pull requests over Signal and turns the
-// owner's `approve <code>` or `reject <code>` reply, forwarded by signal-shim, into the owner's review.
+// Command contribution-approver turns the owner's Signal replies into reviews on contribution fork pull requests.
 package main
 
 import (

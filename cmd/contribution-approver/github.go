@@ -30,7 +30,6 @@ type githubClient struct {
 	http        *http.Client
 }
 
-// forkConfig is the publish/contribution.json the fork's publish gate reads.
 type forkConfig struct {
 	Upstream      string `json:"upstream"`
 	Fork          string `json:"fork"`
@@ -150,7 +149,6 @@ func (g *githubClient) login(ctx context.Context) (string, error) {
 	return user.Login, nil
 }
 
-// config reads publish/contribution.json from the fork's default branch and checks it like the publish gate does.
 func (g *githubClient) config(ctx context.Context, fork string) (forkConfig, error) {
 	var raw []byte
 	if err := g.do(ctx, http.MethodGet, "/repos/"+fork+"/contents/publish/contribution.json", nil, nil, "application/vnd.github.raw+json", &raw); err != nil {
@@ -204,7 +202,7 @@ func (g *githubClient) pull(ctx context.Context, fork string, number int) (pullR
 	return pr, err
 }
 
-// ciGreen applies the publish gate's rule: at least one run of the CI workflow on sha, all completed successfully.
+// ciGreen must stay in step with _require_green_ci in templates/contribution-fork/publish/gate.py.
 func (g *githubClient) ciGreen(ctx context.Context, cfg forkConfig, sha string) (bool, int, error) {
 	var res struct {
 		TotalCount int `json:"total_count"`
@@ -233,6 +231,31 @@ func (g *githubClient) ciGreen(ctx context.Context, cfg forkConfig, sha string) 
 		}
 	}
 	return runs > 0, runs, nil
+}
+
+func (g *githubClient) ownerReviewed(ctx context.Context, fork string, number int, owner, sha string) (bool, error) {
+	for page := 1; page <= maxPages; page++ {
+		var batch []struct {
+			State    string `json:"state"`
+			CommitID string `json:"commit_id"`
+			User     *struct {
+				Login string `json:"login"`
+			} `json:"user"`
+		}
+		q := url.Values{"per_page": {strconv.Itoa(pageSize)}, "page": {strconv.Itoa(page)}}
+		if err := g.get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/reviews", fork, number), q, &batch); err != nil {
+			return false, err
+		}
+		for _, r := range batch {
+			if r.User != nil && r.User.Login == owner && r.CommitID == sha && (r.State == "APPROVED" || r.State == "CHANGES_REQUESTED") {
+				return true, nil
+			}
+		}
+		if len(batch) < pageSize {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("%s#%d has more than %d reviews", fork, number, maxPages*pageSize)
 }
 
 func (g *githubClient) review(ctx context.Context, fork string, number int, sha, event, body string) error {

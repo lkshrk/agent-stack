@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,7 +14,10 @@ import (
 	"time"
 )
 
-const minApproverTokenLen = 32
+const (
+	minApproverTokenLen = 32
+	approverTimeout     = 30 * time.Second
+)
 
 var (
 	decisionText = regexp.MustCompile(`^(approve|reject) ([0-9]{8})$`)
@@ -27,11 +31,14 @@ var (
 )
 
 type decision struct {
-	Action string `json:"action"`
-	Code   string `json:"code"`
+	Action             string `json:"action"`
+	Code               string `json:"code"`
+	account, recipient string
 }
 
-// approvalRoute sends the owner's contribution decisions to the approver instead of Hermes.
+// The approver tells the owner the outcome itself for these answers.
+var approverAnswers = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusGone: true, http.StatusBadGateway: true}
+
 type approvalRoute struct {
 	owner, url, token string
 	http              *http.Client
@@ -50,10 +57,9 @@ func approvalRouteFromEnv(getenv func(string) string) (*approvalRoute, error) {
 	case !e164.MatchString(owner):
 		return nil, fmt.Errorf("OWNER_NUMBER must be one E.164 number")
 	}
-	return &approvalRoute{owner: owner, url: url, token: token, http: &http.Client{Timeout: 15 * time.Second}}, nil
+	return &approvalRoute{owner: owner, url: url, token: token, http: &http.Client{Timeout: approverTimeout}}, nil
 }
 
-// match accepts a plain new message from the owner whose whole text is `approve <code>` or `reject <code>`.
 func (a *approvalRoute) match(data []byte) (decision, bool) {
 	var msg map[string]any
 	if err := json.Unmarshal(data, &msg); err != nil {
@@ -87,7 +93,13 @@ func (a *approvalRoute) match(data []byte) (decision, bool) {
 	if m == nil {
 		return decision{}, false
 	}
-	return decision{Action: m[1], Code: m[2]}, true
+	d := decision{Action: m[1], Code: m[2], account: str(msg["account"]), recipient: a.owner}
+	if g, _ := dm["groupInfo"].(map[string]any); g != nil {
+		if id := str(g["groupId"]); id != "" {
+			d.recipient = "group." + base64.StdEncoding.EncodeToString([]byte(id))
+		}
+	}
+	return d, true
 }
 
 func onlyKnown(obj map[string]any, known map[string]bool) bool {
@@ -117,23 +129,41 @@ func empty(v any) bool {
 	return false
 }
 
-func (a *approvalRoute) forward(d decision) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+func (a *approvalRoute) post(ctx context.Context, d decision) (int, error) {
 	body, _ := json.Marshal(d)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.url+"/v1/decisions", bytes.NewReader(body))
 	if err != nil {
-		log.Printf("signal-shim: owner %s decision not forwarded: %v", d.Action, err)
-		return
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+a.token)
 	res, err := a.http.Do(req)
 	if err != nil {
-		log.Printf("signal-shim: owner %s decision not forwarded: approver unreachable", d.Action)
-		return
+		return 0, fmt.Errorf("approver unreachable")
 	}
 	defer func() { _ = res.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4096))
-	log.Printf("signal-shim: owner %s decision forwarded, approver answered HTTP %d", d.Action, res.StatusCode)
+	return res.StatusCode, nil
 }
+
+// forwardDecision never falls back to Hermes; when the approver can't answer, the owner gets a note instead.
+func (s *shim) forwardDecision(d decision) {
+	ctx, cancel := context.WithTimeout(context.Background(), approverTimeout+10*time.Second)
+	defer cancel()
+	status, err := s.approvals.post(ctx, d)
+	switch {
+	case err != nil:
+		log.Printf("signal-shim: owner %s decision not forwarded: %v", d.Action, err)
+	case approverAnswers[status]:
+		log.Printf("signal-shim: owner %s decision forwarded, approver answered HTTP %d", d.Action, status)
+		return
+	default:
+		log.Printf("signal-shim: owner %s decision refused by the approver with HTTP %d", d.Action, status)
+	}
+	note := map[string]any{"number": d.account, "recipients": []string{d.recipient}, "message": "Your " + d.action() + " was not delivered to the contribution approver. Nothing was submitted; try again or review on GitHub."}
+	if _, err := s.doJSON(ctx, http.MethodPost, "/v2/send", note); err != nil {
+		log.Printf("signal-shim: owner note about the undelivered decision failed")
+	}
+}
+
+func (d decision) action() string { return d.Action + " " + d.Code }

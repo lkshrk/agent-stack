@@ -52,7 +52,7 @@ func (p *poller) pollFork(ctx context.Context, fork string) error {
 		}
 		k := prKey{fork: fork, number: pr.Number}
 		ready[k] = true
-		if sha, ok := p.codes.announcedSHA(k); ok && sha == pr.Head.SHA {
+		if !p.codes.needsAnnouncement(k, pr.Head.SHA) {
 			continue
 		}
 		if err := p.announce(ctx, cfg, k, pr.Head.SHA); err != nil {
@@ -81,6 +81,14 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		return err
 	}
 	if pr.Head.SHA != sha || !isReady(cfg, pr) {
+		return nil
+	}
+	reviewed, err := p.gh.ownerReviewed(ctx, cfg.Fork, k.number, cfg.Owner, sha)
+	if err != nil {
+		return err
+	}
+	if reviewed {
+		p.codes.markReviewed(k, sha)
 		return nil
 	}
 	code, err := p.codes.issue(k, sha)

@@ -23,7 +23,6 @@ var reviewEvents = map[string]struct{ event, body, done string }{
 	"reject":  {"REQUEST_CHANGES", "Changes requested over Signal.", "Requested changes on %s#%d at %s."},
 }
 
-// decider turns the owner's Signal decision, forwarded by signal-shim, into the owner's review on the announced head.
 type decider struct {
 	token  string
 	codes  *codeStore
@@ -71,11 +70,17 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), reviewTimeout)
 	defer cancel()
-	p, ok := d.codes.take(req.Code)
-	if !ok {
-		log.Printf("contribution-approver: %s with an unknown, used or expired code", req.Action)
-		d.tell(ctx, "That code is unknown, already used or expired. Nothing was submitted.")
-		http.Error(w, "unknown, used or expired code", http.StatusNotFound)
+	p, status := d.codes.take(req.Code)
+	switch status {
+	case codeUnknown:
+		log.Printf("contribution-approver: %s with an unknown or used code", req.Action)
+		d.tell(ctx, "That code is unknown or already used. Nothing was submitted.")
+		http.Error(w, "unknown or used code", http.StatusNotFound)
+		return
+	case codeExpired:
+		log.Printf("contribution-approver: %s with an expired code for %s#%d", req.Action, p.pr.fork, p.pr.number)
+		d.tell(ctx, fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows within a minute if it is still ready.", p.pr.fork, p.pr.number))
+		http.Error(w, "expired code", http.StatusGone)
 		return
 	}
 	if err := d.gh.review(ctx, p.pr.fork, p.pr.number, p.sha, review.event, review.body); err != nil {

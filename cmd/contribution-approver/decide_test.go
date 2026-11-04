@@ -75,7 +75,7 @@ func TestApproveReviewsTheAnnouncedHeadOnce(t *testing.T) {
 		t.Fatalf("review = %+v, want APPROVE on %s", r, shaA)
 	}
 	msgs := h.signal.messages()
-	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[2], "unknown, already used or expired") {
+	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[2], "unknown or already used") {
 		t.Fatalf("confirmations = %q", msgs)
 	}
 }
@@ -101,8 +101,8 @@ func TestUnknownAndExpiredCodesMakeNoGitHubCall(t *testing.T) {
 	h.clock.advance(codeTTL + time.Second)
 	expired := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`)
 
-	if unknown.Code != http.StatusNotFound || expired.Code != http.StatusNotFound {
-		t.Fatalf("answers = %d, %d; want 404, 404", unknown.Code, expired.Code)
+	if unknown.Code != http.StatusNotFound || expired.Code != http.StatusGone {
+		t.Fatalf("answers = %d, %d; want 404, 410", unknown.Code, expired.Code)
 	}
 	if got := h.gh.reviewCalls(); len(got) != 0 {
 		t.Fatalf("reviews = %v, want none", got)
@@ -155,5 +155,51 @@ func TestHealthz(t *testing.T) {
 	h.api.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("healthz = %d", rec.Code)
+	}
+}
+
+func TestAnExpiredCodeIsAnnouncedAgainWithAFreshCode(t *testing.T) {
+	h := newHarness(t)
+	code := announce(t, h, 7, shaA)
+	h.clock.advance(codeTTL + time.Second)
+	h.poller.poll(context.Background())
+	if n := len(h.signal.messages()); n != 1 {
+		t.Fatalf("messages before the late reply = %d, want 1", n)
+	}
+
+	late := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`)
+	h.poller.poll(context.Background())
+
+	msgs := h.signal.messages()
+	if late.Code != http.StatusGone || len(msgs) != 3 || !strings.Contains(msgs[1], "new code") {
+		t.Fatalf("late reply = %d, messages = %q", late.Code, msgs)
+	}
+	fresh := codeIn(t, msgs[2])
+	if fresh == code || !strings.Contains(msgs[2], shaA) {
+		t.Fatalf("re-announcement = %q", msgs[2])
+	}
+	if rec := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+fresh+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("fresh code answered %d", rec.Code)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 1 || r[0].body["commit_id"] != shaA {
+		t.Fatalf("reviews = %v", r)
+	}
+}
+
+func TestAConsumedCodeIsNeverAnnouncedAgainForTheSameHead(t *testing.T) {
+	h := newHarness(t)
+	code := announce(t, h, 7, shaA)
+	if rec := decide(h, "Bearer "+testShared, `{"action":"reject","code":"`+code+`"}`); rec.Code != http.StatusOK {
+		t.Fatalf("reject answered %d", rec.Code)
+	}
+	h.clock.advance(2 * codeTTL)
+	h.poller.poll(context.Background())
+	h.codes.forget(prKey{testFork, 7})
+	h.poller.poll(context.Background())
+
+	for _, m := range h.signal.messages()[2:] {
+		if strings.Contains(m, "Contribution ready") {
+			t.Fatalf("re-announced a decided head: %q", m)
+		}
 	}
 }
