@@ -13,7 +13,10 @@ from typing import Any
 READY_LABEL = "upstream-ready"
 ISSUE_LABEL = "upstream-issue"
 APPROVED_LABEL = "approved-upstream"
+COMMENT_LABEL = "upstream-comment"
 ISSUE_MARKER = "<!-- contribution-fork:upstream-issue -->"
+COMMENT_MARKER = "<!-- contribution-fork:upstream-comment -->"
+COMMENT_TITLE = re.compile(r"Comment on #([1-9][0-9]*)")
 PUBLISH_BRANCH = "upstream/pr-{number}"
 PROTECTED_PREFIXES = (".github/", "publish/")
 MAX_COMPARE_FILES = 300
@@ -194,13 +197,16 @@ def publish_issue(api: GitHub, config: dict, event: dict) -> str:
     fork, owner = config["fork"], config["owner"]
     issue_event = event.get("issue") or {}
     number = issue_event.get("number")
-    _require(type(number) is int, "the event names no issue")
+    if not isinstance(number, int) or isinstance(number, bool):
+        raise Refused("the event names no issue")
     _require((event.get("label") or {}).get("name") == APPROVED_LABEL, f"only the {APPROVED_LABEL} label publishes an issue")
     _require(_login(event.get("sender")) == owner, f"only the owner {owner} approves an issue")
 
     issue = api.request("GET", f"/repos/{fork}/issues/{number}")
     _require("pull_request" not in issue and issue.get("state") == "open", "only an open issue is filed upstream")
-    _require({ISSUE_LABEL, APPROVED_LABEL} <= _labels(issue), f"the issue needs both {ISSUE_LABEL} and {APPROVED_LABEL}")
+    labels = _labels(issue)
+    kinds = labels & {ISSUE_LABEL, COMMENT_LABEL}
+    _require(APPROVED_LABEL in labels and len(kinds) == 1, f"the issue needs {APPROVED_LABEL} and exactly one of {ISSUE_LABEL} or {COMMENT_LABEL}")
     approvals = [
         e for e in api.pages(f"/repos/{fork}/issues/{number}/events")
         if e.get("event") in ("labeled", "unlabeled") and (e.get("label") or {}).get("name") == APPROVED_LABEL
@@ -208,23 +214,48 @@ def publish_issue(api: GitHub, config: dict, event: dict) -> str:
     _require(bool(approvals) and approvals[-1].get("event") == "labeled" and _login(approvals[-1].get("actor")) == owner, f"the {APPROVED_LABEL} label was not applied by the owner {owner}")
     title, body = issue.get("title"), issue.get("body") or ""
     _require(title == issue_event.get("title") and body == (issue_event.get("body") or ""), "the title or body changed after the approval")
+    if not isinstance(title, str):
+        raise Refused("the issue has no title")
+    target = None
+    if COMMENT_LABEL in kinds:
+        match = COMMENT_TITLE.fullmatch(title)
+        if not match:
+            raise Refused(f"a {COMMENT_LABEL} title must be exactly 'Comment on #<number>'")
+        _require(bool(body.strip()), "the comment body is empty")
+        target = int(match[1])
 
     for comment in api.pages(f"/repos/{fork}/issues/{number}/comments"):
         text = comment.get("body") or ""
-        if _login(comment.get("user")) == owner and text.startswith(ISSUE_MARKER):
-            return f"already filed upstream as {text.removeprefix(ISSUE_MARKER).strip()}"
+        marker = next((m for m in (ISSUE_MARKER, COMMENT_MARKER) if text.startswith(m)), None)
+        if _login(comment.get("user")) == owner and marker:
+            return f"already published upstream as {text.removeprefix(marker).strip()}"
 
-    upstream = config["upstream"]
+    if target is None:
+        return _file_issue(api, config, number, title, body)
+    return _post_comment(api, config, number, target, body)
+
+
+def _file_issue(api: GitHub, config: dict, number: int, title: str, body: str) -> str:
+    fork, owner, upstream = config["fork"], config["owner"], config["upstream"]
     for candidate in api.pages(f"/repos/{upstream}/issues", {"creator": owner, "state": "open"}):
         if "pull_request" not in candidate and _login(candidate.get("user")) == owner and candidate.get("title") == title and (candidate.get("body") or "") == body:
-            url = candidate.get("html_url")
-            api.request("POST", f"/repos/{fork}/issues/{number}/comments", {"body": f"{ISSUE_MARKER}\n{url}"})
-            return f"already filed upstream as {url}"
-
+            return _record(api, fork, number, ISSUE_MARKER, candidate.get("html_url"), "already filed upstream as")
     filed = api.request("POST", f"/repos/{upstream}/issues", {"title": title, "body": body})
-    url = filed.get("html_url")
-    api.request("POST", f"/repos/{fork}/issues/{number}/comments", {"body": f"{ISSUE_MARKER}\n{url}"})
-    return f"filed upstream as {url}"
+    return _record(api, fork, number, ISSUE_MARKER, filed.get("html_url"), "filed upstream as")
+
+
+def _post_comment(api: GitHub, config: dict, number: int, target: int, body: str) -> str:
+    fork, owner, upstream = config["fork"], config["owner"], config["upstream"]
+    for candidate in api.pages(f"/repos/{upstream}/issues/{target}/comments"):
+        if _login(candidate.get("user")) == owner and candidate.get("body") == body:
+            return _record(api, fork, number, COMMENT_MARKER, candidate.get("html_url"), "already commented upstream as")
+    posted = api.request("POST", f"/repos/{upstream}/issues/{target}/comments", {"body": body})
+    return _record(api, fork, number, COMMENT_MARKER, posted.get("html_url"), "commented upstream as")
+
+
+def _record(api: GitHub, fork: str, number: int, marker: str, url, message: str) -> str:
+    api.request("POST", f"/repos/{fork}/issues/{number}/comments", {"body": f"{marker}\n{url}"})
+    return f"{message} {url}"
 
 
 def main(environ: dict, config_path: Path | None = None) -> int:

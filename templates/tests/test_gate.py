@@ -11,6 +11,7 @@ from .fake_github import FakeGitHub
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "contribution-fork"
 _spec = importlib.util.spec_from_file_location("contribution_gate", TEMPLATE / "publish" / "gate.py")
+assert _spec and _spec.loader
 gate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gate)
 
@@ -61,6 +62,7 @@ class Fork:
         self.upstream_issues: list[dict] = []
         self.upstream_comments: dict[str, list[dict]] = {}
         self.failing: set[str] = set()
+        self.compared: str | None = None
         self._install(fake)
 
     @staticmethod
@@ -130,7 +132,7 @@ class Fork:
 
         def page_by_number(items_by_number):
             def handler(match, query, body):
-                return page(lambda: items_by_number.get(match["n"], []))(match, query, body)
+                return page(lambda: items_by_number().get(match["n"], []))(match, query, body)
             return handler
 
         def _login(item):
@@ -176,7 +178,7 @@ class Fork:
             ("POST", rf"/repos/{upstream}/issues", "create_upstream_issue", create_upstream_issue),
             ("GET", rf"/repos/{upstream}/issues", "list_upstream_issues", list_upstream_issues),
             ("POST", rf"/repos/{fork}/issues/(?P<n>\d+)/comments", "create_comment", create_comment),
-            ("GET", rf"/repos/{upstream}/issues/(?P<n>\d+)/comments", "upstream_comments", page_by_number(self.upstream_comments)),
+            ("GET", rf"/repos/{upstream}/issues/(?P<n>\d+)/comments", "upstream_comments", page_by_number(lambda: self.upstream_comments)),
             ("POST", rf"/repos/{upstream}/issues/(?P<n>\d+)/comments", "create_upstream_comment", create_upstream_comment),
         ):
             fake.route(method, pattern, guard(name, handler))
@@ -213,7 +215,7 @@ class GateTest(unittest.TestCase):
         self.config = self.directory / "contribution.json"
         self.config.write_text(json.dumps(CONFIG))
 
-    def gate(self, event_name, event, repository=FORK, token=TOKEN):
+    def gate(self, event_name, event, repository=FORK, token: str | None = TOKEN):
         path = self.directory / "event.json"
         path.write_text(json.dumps(event))
         environ = {
@@ -553,6 +555,127 @@ class PublishIssueTest(GateTest):
 
     def test_fails_closed_on_api_errors(self):
         for name in ("issue", "issue_events", "issue_comments", "list_upstream_issues"):
+            with self.subTest(failing=name):
+                self.fork.failing = {name}
+                self.assertRefused(self.label())
+
+
+class PublishCommentTest(GateTest):
+    BODY = "Reproduced on main as well.\n\nThe sidebar drops archived sessions after a reload."
+
+    def setUp(self):
+        super().setUp()
+        self.fork.issue.update(title="Comment on #42", body=self.BODY, labels=[{"name": "upstream-comment"}, {"name": "approved-upstream"}])
+
+    def label(self, **kwargs):
+        return self.gate("issues", self.fork.label_event(**kwargs))
+
+    def posted(self):
+        return [w for w in self.upstream_writes() if w[1] == f"/repos/{UPSTREAM}/issues/42/comments"]
+
+    def test_owner_label_posts_exactly_the_body_as_one_upstream_comment(self):
+        code, output = self.label()
+        self.assertEqual(code, 0, output)
+        url = f"https://github.com/{UPSTREAM}/issues/42#issuecomment-900"
+        self.assertEqual(
+            self.fake.writes(),
+            [
+                ("POST", f"/repos/{UPSTREAM}/issues/42/comments", {"body": self.BODY}),
+                ("POST", f"/repos/{FORK}/issues/9/comments", {"body": f"{gate.COMMENT_MARKER}\n{url}"}),
+            ],
+        )
+        self.assertIn(url, output)
+
+    def test_a_repeated_label_does_not_post_a_second_comment(self):
+        self.assertEqual(self.label()[0], 0)
+        self.fake.requests.clear()
+        code, output = self.label()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertIn("issuecomment-900", output)
+
+    def test_an_issue_already_filed_from_this_draft_is_not_posted_again(self):
+        self.fork.issue_comments.append({"user": {"login": OWNER}, "body": f"{gate.ISSUE_MARKER}\nhttps://github.com/{UPSTREAM}/issues/500"})
+        self.assertEqual(self.label()[0], 0)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_a_lost_marker_comment_does_not_post_a_second_comment(self):
+        self.fork.failing = {"create_comment"}
+        self.assertNotEqual(self.label()[0], 0)
+        self.assertEqual(len(self.fork.upstream_comments["42"]), 1)
+        self.fork.failing = set()
+        self.fake.requests.clear()
+        code, output = self.label()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.upstream_writes(), [])
+        url = f"https://github.com/{UPSTREAM}/issues/42#issuecomment-900"
+        self.assertEqual(self.fake.writes(), [("POST", f"/repos/{FORK}/issues/9/comments", {"body": f"{gate.COMMENT_MARKER}\n{url}"})])
+
+    def test_an_upstream_comment_found_beyond_the_first_page_is_recovered(self):
+        self.fork.upstream_comments["42"] = [{"user": {"login": "someone"}, "body": "noise", "html_url": "x"} for _ in range(150)]
+        self.fork.upstream_comments["42"].append({"user": {"login": OWNER}, "body": self.BODY, "html_url": "found"})
+        self.assertEqual(self.label()[0], 0)
+        self.assertEqual(self.upstream_writes(), [])
+        self.assertIn("found", self.fork.issue_comments[-1]["body"])
+
+    def test_only_an_identical_owner_comment_counts_as_already_posted(self):
+        for label, other in {
+            "other author": {"user": {"login": "someone"}, "body": self.BODY},
+            "other body": {"user": {"login": OWNER}, "body": "Reproduced on main as well."},
+        }.items():
+            with self.subTest(case=label):
+                self.fork.upstream_comments = {"42": [{**other, "html_url": "old"}]}
+                self.fork.issue_comments = []
+                self.fake.requests.clear()
+                self.assertEqual(self.label()[0], 0)
+                self.assertEqual(len(self.posted()), 1)
+
+    def test_refuses_malformed_titles(self):
+        for title in ("Comment on 42", "comment on #42", "Comment on #0", "Comment on #042", "Comment on #42 ", " Comment on #42",
+                      "Comment on #42 and #43", "Comment on #-1", "Comment on #4x", "Re: Comment on #42", "Comment on #"):
+            with self.subTest(title=title):
+                self.fork.issue["title"] = title
+                self.assertRefused(self.label(), "title")
+
+    def test_refuses_an_empty_body(self):
+        for body in ("", "  \n", None):
+            with self.subTest(body=body):
+                self.fork.issue["body"] = body
+                self.assertRefused(self.label(), "empty")
+
+    def test_refuses_a_draft_marked_both_issue_and_comment(self):
+        self.fork.issue["labels"].append({"name": "upstream-issue"})
+        self.assertRefused(self.label(), "exactly one")
+
+    def test_refuses_labels_applied_by_anyone_but_the_owner(self):
+        self.assertRefused(self.label(sender="npa-bot"), "owner")
+
+    def test_refuses_when_the_latest_approval_label_was_not_applied_by_the_owner(self):
+        self.fork.issue_events.append({"event": "labeled", "label": {"name": "approved-upstream"}, "actor": {"login": "npa-bot"}})
+        self.assertRefused(self.label(), "owner")
+
+    def test_refuses_drafts_whose_approval_label_was_removed(self):
+        event = self.fork.label_event()
+        self.fork.issue["labels"] = [{"name": "upstream-comment"}]
+        self.assertRefused(self.gate("issues", event))
+
+    def test_refuses_pull_requests_and_closed_issues(self):
+        self.fork.issue["pull_request"] = {"url": "x"}
+        self.assertRefused(self.label())
+        del self.fork.issue["pull_request"]
+        self.fork.issue["state"] = "closed"
+        self.assertRefused(self.label())
+
+    def test_refuses_a_title_or_body_edited_after_the_label(self):
+        for field, value in (("title", "Comment on #43"), ("body", "rewritten after approval")):
+            with self.subTest(field=field):
+                event = self.fork.label_event()
+                self.fork.issue[field] = value
+                self.assertRefused(self.gate("issues", event), "changed")
+                self.fork.issue[field] = event["issue"][field]
+
+    def test_fails_closed_on_api_errors(self):
+        for name in ("issue", "issue_events", "issue_comments", "upstream_comments"):
             with self.subTest(failing=name):
                 self.fork.failing = {name}
                 self.assertRefused(self.label())
