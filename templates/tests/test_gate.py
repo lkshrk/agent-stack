@@ -468,6 +468,45 @@ class PublishIssueTest(GateTest):
         self.assertEqual(self.fake.writes(), [])
         self.assertIn(f"https://github.com/{UPSTREAM}/issues/500", output)
 
+    def test_a_lost_marker_comment_does_not_file_a_second_issue(self):
+        self.fork.failing = {"create_comment"}
+        self.assertNotEqual(self.label()[0], 0)
+        self.assertEqual(len(self.fork.upstream_issues), 1)
+        self.fork.failing = set()
+        self.fake.requests.clear()
+        code, output = self.label()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.upstream_writes(), [])
+        self.assertEqual(self.fake.writes(), [("POST", f"/repos/{FORK}/issues/9/comments", {"body": f"{gate.ISSUE_MARKER}\nhttps://github.com/{UPSTREAM}/issues/500"})])
+        self.assertIn(f"https://github.com/{UPSTREAM}/issues/500", output)
+
+    def test_an_upstream_issue_found_beyond_the_first_page_is_recovered(self):
+        self.fork.upstream_issues.extend(
+            {"number": n, "state": "open", "user": {"login": OWNER}, "title": "noise", "body": "", "html_url": f"u/{n}"} for n in range(150)
+        )
+        self.fork.upstream_issues.append(
+            {"number": 777, "state": "open", "user": {"login": OWNER}, "title": self.fork.issue["title"], "body": self.fork.issue["body"], "html_url": "found"}
+        )
+        self.assertEqual(self.label()[0], 0)
+        self.assertEqual(self.upstream_writes(), [])
+        self.assertIn("found", self.fork.issue_comments[-1]["body"])
+
+    def test_only_an_identical_open_owner_issue_counts_as_already_filed(self):
+        same = {"state": "open", "user": {"login": OWNER}, "title": self.fork.issue["title"], "body": self.fork.issue["body"]}
+        for label, other in {
+            "other author": {**same, "user": {"login": "someone"}},
+            "other title": {**same, "title": "bug(web): different"},
+            "other body": {**same, "body": "Different steps."},
+            "closed": {**same, "state": "closed"},
+            "pull request": {**same, "pull_request": {"url": "x"}},
+        }.items():
+            with self.subTest(case=label):
+                self.fork.upstream_issues = [{"number": 1, "html_url": "old", **other}]
+                self.fork.issue_comments = []
+                self.fake.requests.clear()
+                self.assertEqual(self.label()[0], 0)
+                self.assertEqual(len(self.upstream_writes()), 1)
+
     def test_a_marker_comment_by_someone_else_does_not_count(self):
         self.fork.issue_comments.append({"user": {"login": OWNER}, "body": "Looks good, filing it."})
         self.fork.issue_comments.append({"user": {"login": "npa-bot"}, "body": f"{gate.ISSUE_MARKER}\nhttps://github.com/{UPSTREAM}/issues/1"})
@@ -513,7 +552,7 @@ class PublishIssueTest(GateTest):
         self.assertRefused(self.gate("issues", event), "changed")
 
     def test_fails_closed_on_api_errors(self):
-        for name in ("issue", "issue_events", "issue_comments"):
+        for name in ("issue", "issue_events", "issue_comments", "list_upstream_issues"):
             with self.subTest(failing=name):
                 self.fork.failing = {name}
                 self.assertRefused(self.label())

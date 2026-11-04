@@ -67,10 +67,10 @@ class GitHub:
         except (urllib.error.URLError, TimeoutError, ValueError) as error:
             raise Refused(f"GitHub API {method} {path} failed: {type(error).__name__}") from None
 
-    def pages(self, path: str):
+    def pages(self, path: str, query: dict | None = None):
         page = 1
         while True:
-            items = self.request_list(path, {"per_page": PAGE, "page": page})
+            items = self.request_list(path, {**(query or {}), "per_page": PAGE, "page": page})
             yield from items
             if len(items) < PAGE:
                 return
@@ -214,7 +214,14 @@ def publish_issue(api: GitHub, config: dict, event: dict) -> str:
         if _login(comment.get("user")) == owner and text.startswith(ISSUE_MARKER):
             return f"already filed upstream as {text.removeprefix(ISSUE_MARKER).strip()}"
 
-    filed = api.request("POST", f"/repos/{config['upstream']}/issues", {"title": title, "body": body})
+    upstream = config["upstream"]
+    for candidate in api.pages(f"/repos/{upstream}/issues", {"creator": owner, "state": "open"}):
+        if "pull_request" not in candidate and _login(candidate.get("user")) == owner and candidate.get("title") == title and (candidate.get("body") or "") == body:
+            url = candidate.get("html_url")
+            api.request("POST", f"/repos/{fork}/issues/{number}/comments", {"body": f"{ISSUE_MARKER}\n{url}"})
+            return f"already filed upstream as {url}"
+
+    filed = api.request("POST", f"/repos/{upstream}/issues", {"title": title, "body": body})
     url = filed.get("html_url")
     api.request("POST", f"/repos/{fork}/issues/{number}/comments", {"body": f"{ISSUE_MARKER}\n{url}"})
     return f"filed upstream as {url}"
