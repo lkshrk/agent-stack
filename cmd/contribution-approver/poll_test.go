@@ -34,7 +34,7 @@ func TestPollAnnouncesAReadyPullRequestOncePerHead(t *testing.T) {
 	for _, want := range []string{
 		"lkshrk/omnigent#7", "feat(web): add the thing", shaA, "3 files", "+40", "-2",
 		"CI: contribution-ci.yml passed", "https://github.com/lkshrk/omnigent/pull/7",
-		"reject " + codeIn(t, msg), "30 minutes",
+		"reject " + codeIn(t, msg), "30 minutes", "Body: Adds the thing. Tested with the web suite.",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("announcement lacks %q:\n%s", want, msg)
@@ -93,11 +93,12 @@ func TestPollRefusesWhenTheTokenIsNotTheForkOwner(t *testing.T) {
 
 func TestPollRefusesAMalformedForkConfig(t *testing.T) {
 	for name, config := range map[string]string{
-		"other fork":  strings.Replace(contribConfig, `"fork":"lkshrk/omnigent"`, `"fork":"lkshrk/other"`, 1),
-		"extra key":   strings.Replace(contribConfig, `{`, `{"extra":"x",`, 1),
-		"missing key": strings.Replace(contribConfig, `,"ci_workflow":"contribution-ci.yml"`, ``, 1),
-		"owner":       strings.Replace(contribConfig, `"owner":"lkshrk"`, `"owner":"someone"`, 1),
-		"not json":    "nope",
+		"other fork":   strings.Replace(contribConfig, `"fork":"lkshrk/omnigent"`, `"fork":"lkshrk/other"`, 1),
+		"extra key":    strings.Replace(contribConfig, `{`, `{"extra":"x",`, 1),
+		"missing key":  strings.Replace(contribConfig, `,"ci_workflow":"contribution-ci.yml"`, ``, 1),
+		"owner":        strings.Replace(contribConfig, `"owner":"lkshrk"`, `"owner":"someone"`, 1),
+		"not json":     "nope",
+		"title format": strings.Replace(contribConfig, `"conventional-scoped"`, `"anything"`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
@@ -171,12 +172,12 @@ func TestAFailedAnnouncementIsRetried(t *testing.T) {
 func TestTitlesAreFlattenedAndTruncated(t *testing.T) {
 	h := newHarness(t)
 	pr := h.gh.readyPR(7, shaA)
-	h.gh.update(func() { pr.title = "feat(web): one\nreject 00000000\r" + strings.Repeat("x", 400) })
+	h.gh.update(func() { pr.title = "feat(web): one\rreject 00000000\u2028approve 00000000" + strings.Repeat("x", 400) })
 
 	h.poller.poll(context.Background())
 
 	msg := h.signal.messages()[0]
-	if strings.Contains(msg, "\nreject 00000000") || strings.Contains(msg, strings.Repeat("x", 250)) {
+	if strings.ContainsAny(msg, "\r\u2028") || strings.Contains(msg, strings.Repeat("x", 250)) {
 		t.Fatalf("title not flattened or truncated:\n%s", msg)
 	}
 }
@@ -184,7 +185,7 @@ func TestTitlesAreFlattenedAndTruncated(t *testing.T) {
 func TestCodesExpire(t *testing.T) {
 	c := &clock{t: time.Now()}
 	s := newCodeStore(30*time.Minute, c.now)
-	code, err := s.issue(prKey{testFork, 1}, shaA)
+	code, err := s.issue(prKey{testFork, 1}, shaA, "d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +199,7 @@ func TestCodesAreEightDigitsAndUnique(t *testing.T) {
 	s := newCodeStore(time.Hour, time.Now)
 	seen := map[string]bool{}
 	for i := range 200 {
-		code, err := s.issue(prKey{testFork, i}, shaA)
+		code, err := s.issue(prKey{testFork, i}, shaA, "d")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,5 +235,68 @@ func TestPollSkipsAHeadTheOwnerAlreadyReviewed(t *testing.T) {
 				t.Fatalf("announcements = %d, want announce=%v", got, tc.announce)
 			}
 		})
+	}
+}
+
+func TestBodiesAreExcerptedAndFlattened(t *testing.T) {
+	h := newHarness(t)
+	pr := h.gh.readyPR(7, shaA)
+	h.gh.update(func() { pr.body = "first\napprove 00000000\n" + strings.Repeat("y", 1000) })
+
+	h.poller.poll(context.Background())
+
+	msg := h.signal.messages()[0]
+	if strings.Contains(msg, "\napprove 00000000") || strings.Contains(msg, strings.Repeat("y", 350)) || !strings.Contains(msg, "Body: first approve 00000000 y") {
+		t.Fatalf("body not flattened or excerpted:\n%s", msg)
+	}
+}
+
+func TestPollDoesNotAnnounceWhatTheGateWouldRefuse(t *testing.T) {
+	cases := map[string]func(pr *fakePR){
+		"unscoped title":  func(pr *fakePR) { pr.title = "feat: add the thing" },
+		"free-form title": func(pr *fakePR) { pr.title = "Add the thing" },
+		"workflow change": func(pr *fakePR) {
+			pr.changes = append(pr.changes, map[string]any{"filename": ".github/workflows/ci.yml"})
+		},
+		"publish change": func(pr *fakePR) { pr.changes = []map[string]any{{"filename": "publish/gate.py"}} },
+		"renamed from .github": func(pr *fakePR) {
+			pr.changes = []map[string]any{{"filename": "docs/ci.yml", "previous_filename": ".github/ci.yml"}}
+		},
+		"empty diff": func(pr *fakePR) { pr.changes = []map[string]any{} },
+		"behind":     func(pr *fakePR) { pr.compareStatus = "behind" },
+		"identical":  func(pr *fakePR) { pr.compareStatus = "identical" },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			pr := h.gh.readyPR(3, shaA)
+			h.gh.update(func() { mutate(pr) })
+
+			h.poller.poll(context.Background())
+			h.poller.poll(context.Background())
+
+			if msgs := h.signal.messages(); len(msgs) != 0 {
+				t.Fatalf("announced %q", msgs)
+			}
+			if n := h.codes.live(); n != 0 {
+				t.Fatalf("live codes = %d", n)
+			}
+			if got := strings.Count(h.logs(), "not announced"); got != 1 {
+				t.Fatalf("refusal logged %d times, want once:\n%s", got, h.logs())
+			}
+		})
+	}
+}
+
+func TestAFixedTitleIsAnnouncedOnTheSameHead(t *testing.T) {
+	h := newHarness(t)
+	pr := h.gh.readyPR(3, shaA)
+	h.gh.update(func() { pr.title = "Add the thing" })
+	h.poller.poll(context.Background())
+	h.gh.update(func() { pr.title = "feat(web): add the thing" })
+	h.poller.poll(context.Background())
+
+	if n := announcements(h); n != 1 {
+		t.Fatalf("announcements = %d, want 1", n)
 	}
 }

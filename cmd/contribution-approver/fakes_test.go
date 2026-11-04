@@ -30,11 +30,14 @@ const (
 type fakePR struct {
 	number          int
 	title, headRef  string
+	body            string
 	headRepo, base  string
 	sha             string
 	labels          []string
 	additions, dels int
 	files           int
+	changes         []map[string]any
+	compareStatus   string
 }
 
 type fakeRun struct{ status, conclusion, path string }
@@ -68,7 +71,11 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 func (g *fakeGitHub) readyPR(number int, sha string) *fakePR {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	pr := &fakePR{number: number, title: "feat(web): add the thing", headRef: "feature-" + strconv.Itoa(number), headRepo: testFork, base: "main", sha: sha, labels: []string{"upstream-ready"}, additions: 40, dels: 2, files: 3}
+	pr := &fakePR{
+		number: number, title: "feat(web): add the thing", body: "Adds the thing.\n\nTested with the web suite.", headRef: "feature-" + strconv.Itoa(number),
+		headRepo: testFork, base: "main", sha: sha, labels: []string{"upstream-ready"}, additions: 40, dels: 2, files: 3,
+		changes: []map[string]any{{"filename": "web/src/thing.ts"}}, compareStatus: "ahead",
+	}
 	g.prs[number] = pr
 	g.runs[sha] = []fakeRun{{"completed", "success", ".github/workflows/contribution-ci.yml"}}
 	return pr
@@ -92,7 +99,7 @@ func (g *fakeGitHub) prJSON(pr *fakePR) map[string]any {
 		labels = append(labels, map[string]any{"name": l})
 	}
 	return map[string]any{
-		"number": pr.number, "state": "open", "title": pr.title, "labels": labels,
+		"number": pr.number, "state": "open", "title": pr.title, "body": pr.body, "labels": labels,
 		"html_url":  fmt.Sprintf("https://github.com/%s/pull/%d", testFork, pr.number),
 		"head":      map[string]any{"ref": pr.headRef, "sha": pr.sha, "repo": map[string]any{"full_name": pr.headRepo}},
 		"base":      map[string]any{"ref": pr.base, "repo": map[string]any{"full_name": testFork}},
@@ -150,6 +157,15 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		write(g.prJSON(pr))
+	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/compare/omnigent-ai:main..."):
+		sha := strings.TrimPrefix(path, "/repos/"+testFork+"/compare/omnigent-ai:main...")
+		for _, pr := range g.prs {
+			if pr.sha == sha {
+				write(map[string]any{"status": pr.compareStatus, "ahead_by": 1, "files": pr.changes})
+				return
+			}
+		}
+		http.NotFound(w, r)
 	case r.Method == http.MethodGet && path == "/repos/"+testFork+"/actions/workflows/contribution-ci.yml/runs":
 		sha := r.URL.Query().Get("head_sha")
 		runs := []any{}

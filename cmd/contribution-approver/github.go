@@ -14,15 +14,22 @@ import (
 )
 
 const (
-	readyLabel   = "upstream-ready"
-	pageSize     = 100
-	maxPages     = 10
-	maxRespBytes = 4 << 20
+	readyLabel      = "upstream-ready"
+	maxCompareFiles = 300
+	pageSize        = 100
+	maxPages        = 10
+	maxRespBytes    = 4 << 20
 )
 
 var (
-	fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
-	slug    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	protectedPrefixes = []string{".github/", "publish/"}
+	titleFormats      = map[string]*regexp.Regexp{"conventional-scoped": regexp.MustCompile(`^[a-z]+\([^()\s]+\)!?: \S.*$`)}
+)
+
+var (
+	fullSHA    = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	slug       = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	branchName = regexp.MustCompile(`^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$`)
 )
 
 type githubClient struct {
@@ -58,6 +65,7 @@ type pullRequest struct {
 	Number       int    `json:"number"`
 	State        string `json:"state"`
 	Title        string `json:"title"`
+	Body         string `json:"body"`
 	HTMLURL      string `json:"html_url"`
 	Head         gitRef `json:"head"`
 	Base         gitRef `json:"base"`
@@ -176,6 +184,8 @@ func (g *githubClient) config(ctx context.Context, fork string) (forkConfig, err
 		return forkConfig{}, fmt.Errorf("%s contribution.json names the fork %s", fork, cfg.Fork)
 	case !slug.MatchString(cfg.Upstream) || strings.SplitN(fork, "/", 2)[0] != cfg.Owner:
 		return forkConfig{}, fmt.Errorf("%s contribution.json upstream or owner is invalid", fork)
+	case titleFormats[cfg.TitleFormat] == nil || !branchName.MatchString(cfg.DefaultBranch):
+		return forkConfig{}, fmt.Errorf("%s contribution.json title_format or default_branch is invalid", fork)
 	}
 	return cfg, nil
 }
@@ -261,4 +271,38 @@ func (g *githubClient) ownerReviewed(ctx context.Context, fork string, number in
 func (g *githubClient) review(ctx context.Context, fork string, number int, sha, event, body string) error {
 	payload := map[string]any{"commit_id": sha, "event": event, "body": body}
 	return g.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/pulls/%d/reviews", fork, number), nil, payload, "application/vnd.github+json", nil)
+}
+
+type compareFile struct {
+	Filename         string `json:"filename"`
+	PreviousFilename string `json:"previous_filename"`
+}
+
+// compare must stay in step with _require_clean_diff in templates/contribution-fork/publish/gate.py.
+func (g *githubClient) compare(ctx context.Context, cfg forkConfig, sha string) (string, error) {
+	var res struct {
+		Status  string         `json:"status"`
+		AheadBy int            `json:"ahead_by"`
+		Files   *[]compareFile `json:"files"`
+	}
+	upstreamOwner := strings.SplitN(cfg.Upstream, "/", 2)[0]
+	if err := g.get(ctx, "/repos/"+cfg.Fork+"/compare/"+upstreamOwner+":"+cfg.DefaultBranch+"..."+sha, nil, &res); err != nil {
+		return "", err
+	}
+	if (res.Status != "ahead" && res.Status != "diverged") || res.AheadBy <= 0 {
+		return fmt.Sprintf("it is not ahead of the upstream %s", cfg.DefaultBranch), nil
+	}
+	if res.Files == nil || len(*res.Files) == 0 || len(*res.Files) >= maxCompareFiles {
+		return "the upstream diff is empty or too large to inspect", nil
+	}
+	for _, f := range *res.Files {
+		for _, name := range []string{f.Filename, f.PreviousFilename} {
+			for _, prefix := range protectedPrefixes {
+				if strings.HasPrefix(name, prefix) {
+					return "the upstream diff changes " + name + "; .github/ and publish/ never go upstream", nil
+				}
+			}
+		}
+	}
+	return "", nil
 }

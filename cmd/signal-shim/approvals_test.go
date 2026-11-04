@@ -111,13 +111,33 @@ func TestApprovalRouteFromEnv(t *testing.T) {
 		{"APPROVER_URL": "http://approver:8080"},
 		{"APPROVER_URL": "http://approver:8080", "APPROVER_TOKEN": testToken},
 		{"APPROVER_URL": "http://approver:8080", "APPROVER_TOKEN": "short", "OWNER_NUMBER": testOwner},
-		{"APPROVER_URL": "http://approver:8080", "APPROVER_TOKEN": testToken, "OWNER_NUMBER": "+491,+492"},
-		{"APPROVER_URL": "http://approver:8080", "APPROVER_TOKEN": testToken, "OWNER_NUMBER": "4915550001"},
 		{"APPROVER_TOKEN": testToken, "OWNER_NUMBER": testOwner},
 	} {
 		if r, err := approvalRouteFromEnv(env(bad)); err == nil {
 			t.Fatalf("%v accepted as %+v", bad, r)
 		}
+	}
+}
+
+func TestAnInvalidOwnerNumberDisablesApprovalsWithoutStoppingTheShim(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	for _, owner := range []string{"+4915550001,+4915550002", "+4915550001 +4915550002", "4915550001", "+49 1555 0001", "owner"} {
+		t.Run(owner, func(t *testing.T) {
+			logs := captureLog(t)
+			r, err := approvalRouteFromEnv(env(map[string]string{"APPROVER_URL": "http://approver:8080", "APPROVER_TOKEN": testToken, "OWNER_NUMBER": owner}))
+			if err != nil || r != nil {
+				t.Fatalf("OWNER_NUMBER %q = %+v, %v; want approvals disabled without an error", owner, r, err)
+			}
+			out := logs()
+			if !strings.Contains(out, "OWNER_NUMBER is not exactly one E.164 number") || !strings.Contains(out, "approvals disabled") {
+				t.Fatalf("log = %q", out)
+			}
+			for _, part := range strings.FieldsFunc(owner, func(r rune) bool { return r == ',' || r == ' ' }) {
+				if strings.Contains(out, part) {
+					t.Fatalf("log leaks the owner number: %q", out)
+				}
+			}
+		})
 	}
 }
 
@@ -308,6 +328,7 @@ func TestForwardFailureTellsTheOwnerWithoutLoggingSecrets(t *testing.T) {
 		"unknown code":  {status: http.StatusNotFound},
 		"expired code":  {status: http.StatusGone},
 		"review failed": {status: http.StatusBadGateway},
+		"pr changed":    {status: http.StatusConflict},
 		"approved":      {status: http.StatusOK},
 	} {
 		t.Run(name, func(t *testing.T) {

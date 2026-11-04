@@ -58,7 +58,6 @@ func TestTokenMatchesComparesWholeValues(t *testing.T) {
 func TestApproveReviewsTheAnnouncedHeadOnce(t *testing.T) {
 	h := newHarness(t)
 	code := announce(t, h, 7, shaA)
-	h.gh.update(func() { h.gh.prs[7].sha = shaB })
 
 	first := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`)
 	second := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`)
@@ -75,7 +74,7 @@ func TestApproveReviewsTheAnnouncedHeadOnce(t *testing.T) {
 		t.Fatalf("review = %+v, want APPROVE on %s", r, shaA)
 	}
 	msgs := h.signal.messages()
-	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[2], "unknown or already used") {
+	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[1], "https://github.com/lkshrk/omnigent/actions/workflows/publish-upstream.yml") || !strings.Contains(msgs[2], "unknown or already used") {
 		t.Fatalf("confirmations = %q", msgs)
 	}
 }
@@ -300,5 +299,51 @@ func TestUnknownAndConsumedCodesTriggerNoAnnouncement(t *testing.T) {
 
 	if consumed.Code != http.StatusNotFound || unknown.Code != http.StatusNotFound || announcements(h) != 1 {
 		t.Fatalf("replies = %d, %d, announcements = %d; want 404, 404, 1", consumed.Code, unknown.Code, announcements(h))
+	}
+}
+
+func TestADecisionIsRefusedWhenThePullRequestChangedSinceTheAnnouncement(t *testing.T) {
+	for name, tc := range map[string]struct {
+		change     func(g *fakeGitHub, pr *fakePR)
+		reannounce bool
+	}{
+		"head moved": {func(g *fakeGitHub, pr *fakePR) { pr.sha = shaB; g.runs[shaB] = g.runs[shaA] }, true},
+		"title":      {func(_ *fakeGitHub, pr *fakePR) { pr.title = "feat(web): add another thing" }, true},
+		"body":       {func(_ *fakeGitHub, pr *fakePR) { pr.body = "Something else entirely." }, true},
+		"label":      {func(_ *fakeGitHub, pr *fakePR) { pr.labels = nil }, false},
+	} {
+		for _, action := range []string{"approve", "reject"} {
+			t.Run(name+"/"+action, func(t *testing.T) {
+				h := newHarness(t)
+				code := announce(t, h, 7, shaA)
+				h.gh.update(func() { tc.change(h.gh, h.gh.prs[7]) })
+
+				rec := decide(h, "Bearer "+testShared, `{"action":"`+action+`","code":"`+code+`"}`)
+				h.poller.poll(context.Background())
+
+				if rec.Code != http.StatusConflict {
+					t.Fatalf("answer = %d %s, want 409", rec.Code, rec.Body)
+				}
+				if r := h.gh.reviewCalls(); len(r) != 0 {
+					t.Fatalf("reviews = %v, want none", r)
+				}
+				msgs := h.signal.messages()
+				if len(msgs) < 2 || !strings.Contains(msgs[1], "changed since the announcement") || !strings.Contains(msgs[1], "Nothing was submitted") {
+					t.Fatalf("messages = %q", msgs)
+				}
+				if got, want := announcements(h), map[bool]int{true: 2, false: 1}[tc.reannounce]; got != want {
+					t.Fatalf("announcements = %d, want %d: %q", got, want, msgs)
+				}
+				if tc.reannounce {
+					fresh := codeIn(t, msgs[len(msgs)-1])
+					if fresh == code {
+						t.Fatal("re-announced with the refused code")
+					}
+					if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+						t.Fatalf("fresh code answered %d", rec.Code)
+					}
+				}
+			})
+		}
 	}
 }

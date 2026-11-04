@@ -37,7 +37,7 @@ type decision struct {
 }
 
 // The approver tells the owner the outcome itself for these answers.
-var approverAnswers = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusGone: true, http.StatusBadGateway: true}
+var approverAnswers = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusGone: true, http.StatusConflict: true, http.StatusBadGateway: true}
 
 type approvalRoute struct {
 	owner, url, token string
@@ -55,7 +55,8 @@ func approvalRouteFromEnv(getenv func(string) string) (*approvalRoute, error) {
 	case len(token) < minApproverTokenLen:
 		return nil, fmt.Errorf("APPROVER_TOKEN must be at least %d characters", minApproverTokenLen)
 	case !e164.MatchString(owner):
-		return nil, fmt.Errorf("OWNER_NUMBER must be one E.164 number")
+		log.Printf("signal-shim: OWNER_NUMBER is not exactly one E.164 number; contribution approvals disabled, messages still reach Hermes")
+		return nil, nil
 	}
 	return &approvalRoute{owner: owner, url: url, token: token, http: &http.Client{Timeout: approverTimeout}}, nil
 }

@@ -23,6 +23,7 @@ type prKey struct {
 type pending struct {
 	pr      prKey
 	sha     string
+	digest  string
 	expires time.Time
 }
 
@@ -61,7 +62,7 @@ func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	return !ok || a.sha != sha || (a.expired && !a.consumed)
 }
 
-func (s *codeStore) issue(k prKey, sha string) (string, error) {
+func (s *codeStore) issue(k prKey, sha, digest string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
@@ -81,7 +82,7 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 		if _, taken := s.byCode[code]; taken {
 			continue
 		}
-		s.byCode[code] = pending{pr: k, sha: sha, expires: now.Add(s.ttl)}
+		s.byCode[code] = pending{pr: k, sha: sha, digest: digest, expires: now.Add(s.ttl)}
 		s.announced[k] = headState{sha: sha}
 		return code, nil
 	}

@@ -19,7 +19,7 @@ const reviewTimeout = 20 * time.Second
 var codeFormat = regexp.MustCompile(`^[0-9]{8}$`)
 
 var reviewEvents = map[string]struct{ event, body, done string }{
-	"approve": {"APPROVE", "Approved over Signal.", "Approved %s#%d at %s; the fork's publish workflow takes it from here."},
+	"approve": {"APPROVE", "Approved over Signal.", "Approved %s#%d at %s. Watch the publish-upstream run for the result: https://github.com/%[1]s/actions/workflows/publish-upstream.yml"},
 	"reject":  {"REQUEST_CHANGES", "Changes requested over Signal.", "Requested changes on %s#%d at %s."},
 }
 
@@ -88,6 +88,19 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "expired code for a changed head", http.StatusGone)
 		return
 	}
+	if changed, err := d.changedSinceAnnouncement(ctx, p); err != nil || changed {
+		d.codes.forget(p.pr)
+		if err != nil {
+			log.Printf("contribution-approver: %s %s#%d: re-reading the pull request failed: %v", req.Action, p.pr.fork, p.pr.number, err)
+			d.tell(ctx, fmt.Sprintf("Could not re-check %s#%d on GitHub. Nothing was submitted; it will be announced again with a new code.", p.pr.fork, p.pr.number))
+			http.Error(w, "pull request check failed", http.StatusBadGateway)
+			return
+		}
+		log.Printf("contribution-approver: %s %s#%d refused: the pull request changed since the announcement", req.Action, p.pr.fork, p.pr.number)
+		d.tell(ctx, fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label). Nothing was submitted; if it is still ready, a new code follows within a minute.", p.pr.fork, p.pr.number, readyLabel))
+		http.Error(w, "pull request changed", http.StatusConflict)
+		return
+	}
 	if err := d.gh.review(ctx, p.pr.fork, p.pr.number, p.sha, review.event, review.body); err != nil {
 		d.codes.forget(p.pr)
 		log.Printf("contribution-approver: %s %s#%d at %s failed: %v", req.Action, p.pr.fork, p.pr.number, p.sha, err)
@@ -105,4 +118,12 @@ func (d *decider) tell(ctx context.Context, text string) {
 	if err := d.notify.Notify(ctx, text); err != nil {
 		log.Printf("contribution-approver: confirmation not sent: %v", err)
 	}
+}
+
+func (d *decider) changedSinceAnnouncement(ctx context.Context, p pending) (bool, error) {
+	pr, err := d.gh.pull(ctx, p.pr.fork, p.pr.number)
+	if err != nil {
+		return false, err
+	}
+	return pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != p.digest, nil
 }
