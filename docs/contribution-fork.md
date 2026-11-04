@@ -8,7 +8,7 @@ Third-party contributions are staged in the owner's fork of a registered upstrea
 - Agent branches start from the upstream default commit, not from the fork's default branch, so the upstream diff never carries the template. The gate refuses any reviewed commit whose diff against upstream touches `.github/` or `publish/`.
 - An approved PR `#N` is published from the fork branch `upstream/pr-N`; a later approval force-updates that branch and edits the open upstream PR instead of opening another.
 - Approve a PR only once its `contribution-ci` run is green: an approval while CI is still running is refused, so approve again after it passes.
-- Issue and comment drafts are published once. A marker comment on the fork issue records the upstream URL; if that marker is lost, the gate finds the upstream issue or comment by the owner with the same text instead of publishing it again.
+- Issue and comment drafts are published once. A marker comment on the fork issue records the upstream URL; if that marker is lost, the gate finds the upstream issue (open or closed) or comment by the owner with the same text instead of publishing it again. The draft type, title and body must be unchanged since the owner's label.
 
 ## Install (owner, once per fork)
 
@@ -28,7 +28,7 @@ The NPA bot can't push workflow files, so the owner does this with their own acc
    for label in upstream-ready upstream-issue upstream-comment approved-upstream; do gh label create "$label" --repo lkshrk/omnigent; done
    ```
 
-4. Create a classic PAT with only the `public_repo` scope and store it as the Actions secret `UPSTREAM_PUBLISH_TOKEN` in the fork. Never give it the `workflow` scope.
+4. As the owner account named in `publish/contribution.json`, create a classic PAT with only the `public_repo` scope and store it as the Actions secret `UPSTREAM_PUBLISH_TOKEN` in the fork. Never give it the `workflow` scope. The gate refuses a token whose `GET /user` login isn't the owner, because its duplicate and marker checks trust the owner's authorship.
 5. Add a branch ruleset on the fork targeting `upstream/**` that restricts creations, updates and deletions, with the Repository admin role as the only bypass, so only the publisher moves the published branches.
 6. Before go-live, prove that a push by the NPA bot touching `.github/workflows/` is rejected by GitHub.
 

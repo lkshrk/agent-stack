@@ -207,6 +207,7 @@ def publish_issue(api: GitHub, config: dict, event: dict) -> str:
     labels = _labels(issue)
     kinds = labels & {ISSUE_LABEL, COMMENT_LABEL}
     _require(APPROVED_LABEL in labels and len(kinds) == 1, f"the issue needs {APPROVED_LABEL} and exactly one of {ISSUE_LABEL} or {COMMENT_LABEL}")
+    _require(_labels(issue_event) & {ISSUE_LABEL, COMMENT_LABEL} == kinds, "the draft type changed after the approval")
     approvals = [
         e for e in api.pages(f"/repos/{fork}/issues/{number}/events")
         if e.get("event") in ("labeled", "unlabeled") and (e.get("label") or {}).get("name") == APPROVED_LABEL
@@ -237,7 +238,7 @@ def publish_issue(api: GitHub, config: dict, event: dict) -> str:
 
 def _file_issue(api: GitHub, config: dict, number: int, title: str, body: str) -> str:
     fork, owner, upstream = config["fork"], config["owner"], config["upstream"]
-    for candidate in api.pages(f"/repos/{upstream}/issues", {"creator": owner, "state": "open"}):
+    for candidate in api.pages(f"/repos/{upstream}/issues", {"creator": owner, "state": "all"}):
         if "pull_request" not in candidate and _login(candidate.get("user")) == owner and candidate.get("title") == title and (candidate.get("body") or "") == body:
             return _record(api, fork, number, ISSUE_MARKER, candidate.get("html_url"), "already filed upstream as")
     filed = api.request("POST", f"/repos/{upstream}/issues", {"title": title, "body": body})
@@ -269,6 +270,7 @@ def main(environ: dict, config_path: Path | None = None) -> int:
         except (OSError, ValueError):
             raise Refused("cannot read the event payload") from None
         api = GitHub(environ.get("GITHUB_API_URL") or "https://api.github.com", token)
+        _require(_login(api.request("GET", "/user")) == config["owner"], f"UPSTREAM_PUBLISH_TOKEN does not belong to the owner {config['owner']}")
         name = environ.get("GITHUB_EVENT_NAME")
         if name == "pull_request_review":
             message = publish_pull_request(api, config, event)

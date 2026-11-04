@@ -31,7 +31,7 @@ pre-commit:
       run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent
     template-tests:
       glob: "{templates/**,config/public-contributions.yaml}"
-      run: python3 -m unittest discover -s templates/tests -t templates
+      run: python3 -m unittest discover -s templates/tests -t .
     hermes-tests:
       glob: "hermes/**"
       run: python3 -m unittest discover -s hermes/tests -t hermes

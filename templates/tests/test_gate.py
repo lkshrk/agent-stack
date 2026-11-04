@@ -1,4 +1,5 @@
 import contextlib
+import copy
 import importlib.util
 import io
 import json
@@ -63,6 +64,7 @@ class Fork:
         self.upstream_comments: dict[str, list[dict]] = {}
         self.failing: set[str] = set()
         self.compared: str | None = None
+        self.token_login = OWNER
         self._install(fake)
 
     @staticmethod
@@ -160,8 +162,12 @@ class Fork:
             comments.append({"user": {"login": OWNER}, "body": body["body"], "html_url": url})
             return 201, comments[-1]
 
+        def user(match, query, body):
+            return 200, {"login": self.token_login}
+
         fork, upstream = re.escape(FORK), re.escape(UPSTREAM)
         for method, pattern, name, handler in (
+            ("GET", r"/user", "user", user),
             ("GET", rf"/repos/{fork}/pulls/(?P<pr>\d+)/reviews/(?P<id>\d+)", "review", review),
             ("GET", rf"/repos/{fork}/pulls/(?P<pr>\d+)", "pull", pull),
             ("GET", rf"/repos/{fork}/actions/workflows/contribution-ci\.yml/runs", "runs", runs),
@@ -197,7 +203,7 @@ class Fork:
         return {
             "action": "labeled",
             "label": {"name": label},
-            "issue": dict(self.issue),
+            "issue": copy.deepcopy(self.issue),
             "repository": {"full_name": FORK, "default_branch": "main"},
             "sender": {"login": sender},
         }
@@ -425,12 +431,19 @@ class PublishPullRequestTest(GateTest):
     def test_refuses_when_running_outside_the_registered_fork(self):
         self.assertRefused(self.gate("pull_request_review", self.fork.review_event(), repository="someone/omnigent"))
 
+    def test_refuses_a_token_that_does_not_belong_to_the_owner(self):
+        for login in ("npa-bot", "LKSHRK", ""):
+            with self.subTest(login=login):
+                self.fork.token_login = login
+                self.assertRefused(self.review(), "owner")
+                self.assertRefused(self.gate("issues", self.fork.label_event()), "owner")
+
     def test_refuses_without_a_token_before_any_request(self):
         self.assertRefused(self.gate("pull_request_review", self.fork.review_event(), token=None))
         self.assertEqual(self.fake.requests, [])
 
     def test_fails_closed_on_api_errors_before_any_upstream_write(self):
-        for name in ("review", "pull", "runs", "compare", "list_upstream_pulls", "get_ref"):
+        for name in ("user", "review", "pull", "runs", "compare", "list_upstream_pulls", "get_ref"):
             with self.subTest(failing=name):
                 self.fork.failing = {name}
                 self.assertRefused(self.review())
@@ -499,7 +512,6 @@ class PublishIssueTest(GateTest):
             "other author": {**same, "user": {"login": "someone"}},
             "other title": {**same, "title": "bug(web): different"},
             "other body": {**same, "body": "Different steps."},
-            "closed": {**same, "state": "closed"},
             "pull request": {**same, "pull_request": {"url": "x"}},
         }.items():
             with self.subTest(case=label):
@@ -508,6 +520,21 @@ class PublishIssueTest(GateTest):
                 self.fake.requests.clear()
                 self.assertEqual(self.label()[0], 0)
                 self.assertEqual(len(self.upstream_writes()), 1)
+
+    def test_an_identical_issue_closed_upstream_counts_as_already_filed(self):
+        self.fork.upstream_issues.append(
+            {"number": 600, "state": "closed", "user": {"login": OWNER}, "title": self.fork.issue["title"], "body": self.fork.issue["body"], "html_url": "closed-one"}
+        )
+        code, output = self.label()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.upstream_writes(), [])
+        self.assertIn("closed-one", self.fork.issue_comments[-1]["body"])
+
+    def test_refuses_a_draft_type_changed_after_the_label(self):
+        event = self.fork.label_event()
+        self.fork.issue["labels"] = [{"name": "upstream-comment"}, {"name": "approved-upstream"}]
+        self.fork.issue["title"] = event["issue"]["title"]
+        self.assertRefused(self.gate("issues", event), "draft type")
 
     def test_a_marker_comment_by_someone_else_does_not_count(self):
         self.fork.issue_comments.append({"user": {"login": OWNER}, "body": "Looks good, filing it."})
@@ -642,6 +669,11 @@ class PublishCommentTest(GateTest):
             with self.subTest(body=body):
                 self.fork.issue["body"] = body
                 self.assertRefused(self.label(), "empty")
+
+    def test_refuses_a_draft_type_changed_after_the_label(self):
+        event = self.fork.label_event()
+        self.fork.issue["labels"] = [{"name": "upstream-issue"}, {"name": "approved-upstream"}]
+        self.assertRefused(self.gate("issues", event), "draft type")
 
     def test_refuses_a_draft_marked_both_issue_and_comment(self):
         self.fork.issue["labels"].append({"name": "upstream-issue"})
