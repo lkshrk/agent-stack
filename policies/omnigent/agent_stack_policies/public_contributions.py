@@ -707,6 +707,8 @@ def _indirect_vcs(argv: list[str]) -> bool:
 def _exact_helper(argv: object, registry: Registry) -> bool:
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
         return False
+    if len(argv) == 2 and argv[0] in HELPER_NAMES and argv[1] == "list":
+        return True
     if len(argv) != 3 or argv[0] not in HELPER_NAMES or argv[1] != "prepare":
         return False
     try:

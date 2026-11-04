@@ -44,6 +44,7 @@ class TestPrepareOperation(unittest.TestCase):
         for helper in (HELPER, "agent-stack-contribute"):
             with self.subTest(helper=helper):
                 self.assertAllowed([helper, "prepare", "omnigent"])
+                self.assertAllowed([helper, "list"])
 
     def test_rejects_unregistered_or_altered_helper_arguments(self):
         for argv in (
@@ -55,9 +56,10 @@ class TestPrepareOperation(unittest.TestCase):
             [HELPER, "validate", "omnigent", "unknown"],
             [HELPER, "validate", "omnigent", "web", "--base", "other"],
             [HELPER, "publish", "omnigent"],
-            [HELPER, "list"],
+            [HELPER, "list", "omnigent"],
+            [HELPER, "list", "--all"],
             ["agent-stack-contribute", "publish", "omnigent"],
-            ["agent-stack-contribute", "list"],
+            ["agent-stack-contribute", "list", ""],
         ):
             with self.subTest(argv=argv):
                 self.assertDenied(argv)
@@ -140,6 +142,7 @@ class TestPrepareOperation(unittest.TestCase):
     def test_allows_helper_as_structured_argv_or_one_literal_command(self):
         self.assertAllowed([HELPER, "prepare", "omnigent"])
         self.assertAllowed(f"{HELPER} prepare omnigent")
+        self.assertAllowed("agent-stack-contribute list")
         self.assertAllowed("agent-stack-contribute prepare 'omnigent'")
 
     def test_rejects_registered_tree_symlink_path(self):
