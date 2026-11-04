@@ -707,19 +707,13 @@ def _indirect_vcs(argv: list[str]) -> bool:
 def _exact_helper(argv: object, registry: Registry) -> bool:
     if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
         return False
-    if len(argv) == 3 and argv[0] in HELPER_NAMES and argv[1] in {"prepare", "preflight"}:
-        try:
-            registry.repository(argv[2])
-        except RegistryError:
-            return False
-        return True
-    if len(argv) == 4 and argv[0] in HELPER_NAMES and argv[1] == "validate":
-        try:
-            registry.repository(argv[2]).validation_profile(argv[3])
-        except RegistryError:
-            return False
-        return True
-    return False
+    if len(argv) != 3 or argv[0] not in HELPER_NAMES or argv[1] != "prepare":
+        return False
+    try:
+        registry.repository(argv[2])
+    except RegistryError:
+        return False
+    return True
 
 
 def _prepare_operation(event: Event) -> Decision | None:
@@ -773,7 +767,10 @@ def _prepare_operation(event: Event) -> Decision | None:
     if _indirect_vcs(argv) or _contains_direct_public_write(argv):
         return deny("in a registered contribution run git and gh directly by bare name, with no wrapper or environment assignment")
     if _matches_validation(argv, registry):
-        return deny("direct validation in a registered contribution tree is not allowed; request validation instead")
+        return deny(
+            "validation does not run in a registered contribution checkout; it runs in the fork's contribution-ci: "
+            "push the branch to the fork and wait for that run to go green"
+        )
     return None
 
 

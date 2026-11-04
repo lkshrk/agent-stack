@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec /opt/venv/bin/python3 - "$@" <<'PY'
+exec /opt/venv/bin/python3 -I - "$@" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-from agent_stack_policies.public_contributions import Registry, RegistryError
+from agent_stack_policies.contribution_checkout import CheckoutError, prepare_checkout
+from agent_stack_policies.public_contributions import CONTRIBUTION_WORKSPACE, Registry, RegistryError
 
 REGISTRY_PATH = Path("/opt/agent-stack/public-contributions.yaml")
 
@@ -14,13 +15,6 @@ REGISTRY_PATH = Path("/opt/agent-stack/public-contributions.yaml")
 def emit(value: dict | list[str], status: int = 0) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
     raise SystemExit(status)
-
-
-def repository(registry: Registry, name: str):
-    try:
-        return registry.repository(name)
-    except RegistryError as error:
-        emit({"error": str(error)}, 2)
 
 
 def main(argv: list[str]) -> None:
@@ -32,26 +26,18 @@ def main(argv: list[str]) -> None:
     if argv == ["list"]:
         emit([item.name for item in registry.repositories])
 
-    if len(argv) == 2 and argv[0] in {"prepare", "preflight"}:
-        item = repository(registry, argv[1])
-        emit({"operation": argv[0], "registry_hash": registry.revision, "repo": item.name})
-
-    if len(argv) == 3 and argv[0] == "validate":
-        item = repository(registry, argv[1])
+    if len(argv) == 2 and argv[0] == "prepare":
         try:
-            profile = item.validation_profile(argv[2])
+            item = registry.repository(argv[1])
         except RegistryError as error:
             emit({"error": str(error)}, 2)
-        emit(
-            {
-                "operation": "validate",
-                "profile": profile.name,
-                "registry_hash": registry.revision,
-                "repo": item.name,
-            }
-        )
+        try:
+            result = prepare_checkout(item, CONTRIBUTION_WORKSPACE)
+        except CheckoutError as error:
+            emit({"error": str(error)}, 1)
+        emit({"operation": "prepare", "registry_hash": registry.revision, "repo": item.name, **result})
 
-    emit({"error": "usage: agent-stack-contribute list|prepare <repo>|preflight <repo>|validate <repo> <profile>"}, 2)
+    emit({"error": "usage: agent-stack-contribute list|prepare <repo>"}, 2)
 
 
 if __name__ == "__main__":

@@ -24,5 +24,30 @@ agent-stack-contribute publish >/dev/null 2>&1
 expect "unknown command fails" "$?" 2
 agent-stack-contribute prepare unknown >/dev/null 2>&1
 expect "unknown repository fails" "$?" 2
+for removed in "preflight omnigent" "validate omnigent web"; do
+  # shellcheck disable=SC2086
+  agent-stack-contribute $removed >/dev/null 2>&1
+  expect "$removed is no longer a subcommand" "$?" 2
+done
+
+tree=/home/omnigent/work/omnigent
+if [[ -e $tree ]]; then
+  echo "FAIL $tree already exists"
+  exit 1
+fi
+mkdir -p "$tree"
+: >"$tree/notes.txt"
+agent-stack-contribute prepare omnigent >/dev/null 2>&1
+expect "prepare refuses a path that is not a checkout" "$?" 1
+rm -rf "$tree"
+git init -q -b main "$tree"
+git -C "$tree" remote add origin https://github.com/omnigent-ai/omnigent.git
+out=$(agent-stack-contribute prepare omnigent)
+expect "prepare reuses a checkout of the upstream" "$(jq -r .state <<<"$out")" existing
+expect "prepare adds the fork remote" "$(git -C "$tree" remote get-url fork)" https://github.com/lkshrk/omnigent.git
+git -C "$tree" remote set-url fork https://github.com/someone/omnigent.git
+agent-stack-contribute prepare omnigent >/dev/null 2>&1
+expect "prepare refuses a foreign fork remote" "$?" 1
+rm -rf "$tree"
 
 exit "$fail"

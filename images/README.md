@@ -12,7 +12,7 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 
 Both Omnigent images install `policies/omnigent/agent_stack_policies` under `/opt/agent-stack/policies` and add it to the venv with a `.pth` file. CI runs the policy tests inside both images with `AGENT_STACK_IN_IMAGE=1`, in each Dockerfile's `test` stage (`docker buildx build --target test`); the default target is the published image without it.
 
-The host image installs the root-owned `/opt/agent-stack/public-contributions.yaml` registry and `agent-stack-contribute` helper. The helper resolves only that fixed registry path and emits JSON for `list`, `prepare <repo>`, `preflight <repo>`, and `validate <repo> <profile>`; it provides no publishing operation and never runs upstream lifecycle scripts.
+The host image installs the root-owned `/opt/agent-stack/public-contributions.yaml` registry and `agent-stack-contribute` helper. The helper resolves only that fixed registry path and has two subcommands, both emitting JSON: `list`, and `prepare <repo>`, which clones the upstream's default branch into the registered checkout (`/home/omnigent/work/<checkout>`, remote `origin`) with hooks, filters and non-https protocols off, and adds the owner's fork as remote `fork` (fetch and push URL `https://github.com/<fork>.git`). Run again, it reuses a checkout whose remotes match and refuses one whose remotes differ. It provides no publishing or validation operation and never runs upstream lifecycle scripts; validation runs in the fork's `contribution-ci`.
 
 ## Runner pin in the server image
 

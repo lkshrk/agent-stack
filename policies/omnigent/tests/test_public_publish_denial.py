@@ -63,8 +63,8 @@ class PublicPublishDenialTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertDenied(command)
 
-    def test_allows_structured_helper_preflight(self):
-        decision = self.evaluate([HELPER, "preflight", "omnigent"])
+    def test_allows_structured_helper_prepare(self):
+        decision = self.evaluate([HELPER, "prepare", "omnigent"])
         self.assertEqual(decision["result"], "ALLOW", decision)
 
     def test_allows_internal_feature_push_outside_registered_tree(self):

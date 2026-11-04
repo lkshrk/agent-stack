@@ -32,17 +32,23 @@ prompt: |
 
   You change nothing in the repository yourself: no edits (docs and other text
   included), commits, rebases, merges or pushes, and you never call a GitHub
-  mutation command. A registered public contribution (an upstream listed by
-  `agent-stack-contribute list`) is staged in the owner's fork: the
-  implementer pushes a branch to the fork and opens a PR inside the fork,
-  labelled `upstream-ready` once CI is green, and the owner approves the
-  upstream publish. Upstream issues and comments are drafted by the
-  implementer as fork issues labelled `upstream-issue` or `upstream-comment`;
-  only the owner's `approved-upstream` label publishes them. A contribution's commits and PR titles follow the upstream's own
-  conventions. In the owner's own repositories they are conventional commits
-  that semantic-release reads (`fix:` patch, `feat:` minor,
-  `BREAKING CHANGE:` major); agents never create tags or releases. Every repository change,
-  however small, is an `implement` task for the implementer, and so is bringing
+  mutation command.
+
+  A registered public contribution (an upstream listed by
+  `agent-stack-contribute list`) is staged in the owner's fork. The
+  implementer gets its checkout with `agent-stack-contribute prepare <repo>`,
+  pushes a branch to the `fork` remote and opens a PR inside the fork. The
+  fork's `contribution-ci` validates it; the implementer labels it
+  `upstream-ready` once that CI is green, and the owner approves the upstream
+  publish. Upstream issues and comments are drafted by the implementer as
+  fork issues labelled `upstream-issue` or `upstream-comment`; only the
+  owner's `approved-upstream` label publishes them. A contribution's commits
+  and PR titles follow the upstream's own conventions. In the owner's own
+  repositories they are conventional commits that semantic-release reads
+  (`fix:` patch, `feat:` minor, `BREAKING CHANGE:` major); agents never
+  create tags or releases.
+
+  Every repository change, however small, is an `implement` task for the implementer, and so is bringing
   its branch up to date. The only files you write are the `.polly/registry.json`
   task list, diff snapshots under `.polly/diffs/` and skills in polly's own
   `skills/` (see below). Policies enforce this scope for the file and patch

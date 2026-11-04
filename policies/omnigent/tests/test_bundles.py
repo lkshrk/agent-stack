@@ -1181,12 +1181,14 @@ class PublicContributionEngineTest(unittest.TestCase):
                 "git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
                 "/opt/agent/bin/agent-stack-contribute publish omnigent",
                 "bash -c '/opt/agent/bin/agent-stack-contribute prepare omnigent'",
-                "agent-stack-contribute validate omnigent web && echo done",
+                "agent-stack-contribute prepare omnigent && echo done",
+                "agent-stack-contribute validate omnigent web",
+                "agent-stack-contribute preflight omnigent",
             ):
                 with self.subTest(command=command):
                     out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
                     self.assertEqual(out["public_contributions"].action.name, "DENY")
-            for command in ("/opt/agent/bin/agent-stack-contribute prepare omnigent", "agent-stack-contribute validate omnigent web"):
+            for command in ("/opt/agent/bin/agent-stack-contribute prepare omnigent", "agent-stack-contribute prepare omnigent"):
                 with self.subTest(command=command):
                     out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
                     self.assertEqual(out["public_contributions"].action.name, "ALLOW")
@@ -1196,7 +1198,7 @@ class PublicContributionEngineTest(unittest.TestCase):
                     "polly/agents/claude_code",
                     "tool_call",
                     "Bash",
-                    {"command": ["agent-stack-contribute", "validate", "omnigent", "web"]},
+                    {"command": ["agent-stack-contribute", "prepare", "omnigent"]},
                     "",
                 ),
             )
@@ -1325,7 +1327,12 @@ class ContributionPromptTest(unittest.TestCase):
     def test_writer_prompts_stage_contributions_in_the_fork(self):
         implementer = self.prompt("polly/agents/claude_code")
         for phrase in (
-            "git push -u <fork-remote> HEAD:<branch>",
+            "agent-stack-contribute prepare <repo>",
+            "remote `fork`",
+            "git fetch fork <default branch>",
+            "git push -u fork HEAD:<branch>",
+            "fork's `contribution-ci` workflow",
+            "wait for that run to go green",
             "gh pr create --repo <fork> --base <default branch> --head <branch>",
             "upstream-ready",
             "only once the fork's CI is green",
@@ -1341,6 +1348,7 @@ class ContributionPromptTest(unittest.TestCase):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, implementer)
         self.assertIn("`upstream-comment`", self.prompt("polly"))
+        self.assertIn("agent-stack-contribute prepare <repo>", self.prompt("polly"))
         for bundle in ("polly", "polly/agents/claude_code", "documenter", "planner"):
             with self.subTest(bundle=bundle):
                 self.assertNotIn("publish request", self.prompt(bundle))

@@ -16,7 +16,7 @@ REGISTRY = Path(__file__).resolve().parents[3] / "config" / "public-contribution
 HELPER = "/opt/agent/bin/agent-stack-contribute"
 TREE = "/home/omnigent/work/omnigent"
 EVENTS = [
-    tool_call_event("Bash", {"command": ["agent-stack-contribute", "preflight", "omnigent"]}),
+    tool_call_event("Bash", {"command": ["agent-stack-contribute", "prepare", "omnigent"]}),
     tool_call_event("Bash", {"command": ["git", "push", "origin", "HEAD:contribution/fix"], "cwd": TREE}),
     {"type": "other"},
 ]
@@ -44,14 +44,14 @@ class TestPrepareOperation(unittest.TestCase):
         for helper in (HELPER, "agent-stack-contribute"):
             with self.subTest(helper=helper):
                 self.assertAllowed([helper, "prepare", "omnigent"])
-                self.assertAllowed([helper, "preflight", "omnigent"])
-                self.assertAllowed([helper, "validate", "omnigent", "web"])
 
     def test_rejects_unregistered_or_altered_helper_arguments(self):
         for argv in (
             [HELPER, "prepare", "unknown"],
             [HELPER, "prepare", "omnigent", "https://github.com/evil/evil.git"],
             [HELPER, "prepare", "omnigent", "main"],
+            [HELPER, "preflight", "omnigent"],
+            [HELPER, "validate", "omnigent", "web"],
             [HELPER, "validate", "omnigent", "unknown"],
             [HELPER, "validate", "omnigent", "web", "--base", "other"],
             [HELPER, "publish", "omnigent"],
@@ -85,6 +85,15 @@ class TestPrepareOperation(unittest.TestCase):
         ):
             with self.subTest(argv=argv):
                 self.assertDenied(argv, cwd=TREE)
+
+    def test_validation_in_the_registered_tree_points_at_the_fork_ci(self):
+        for argv in (["pnpm", "install", "--ignore-scripts"], ["pnpm", "run", "lint"], ["pnpm", "test"]):
+            with self.subTest(argv=argv):
+                decision = self.evaluate(argv, cwd=TREE)
+                self.assertEqual(decision["result"], "DENY", decision)
+                self.assertIn("contribution-ci", decision["reason"])
+                self.assertIn("push the branch to the fork and wait", decision["reason"])
+                self.assertNotIn("request validation", decision["reason"])
 
     def test_denies_registered_git_targets_without_a_registered_cwd(self):
         for argv in (
@@ -131,7 +140,7 @@ class TestPrepareOperation(unittest.TestCase):
     def test_allows_helper_as_structured_argv_or_one_literal_command(self):
         self.assertAllowed([HELPER, "prepare", "omnigent"])
         self.assertAllowed(f"{HELPER} prepare omnigent")
-        self.assertAllowed("agent-stack-contribute validate 'omnigent' \"web\"")
+        self.assertAllowed("agent-stack-contribute prepare 'omnigent'")
 
     def test_rejects_registered_tree_symlink_path(self):
         with tempfile.TemporaryDirectory() as directory:
