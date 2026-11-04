@@ -1333,9 +1333,14 @@ class ContributionPromptTest(unittest.TestCase):
             "upstream's own conventions",
             "`title_format`",
             "`'it'\"'\"'s'`",
+            "--label upstream-issue",
+            "--label upstream-comment",
+            "titled exactly `Comment on #<N>`",
+            "Only the owner's `approved-upstream` label publishes a draft",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, implementer)
+        self.assertIn("`upstream-comment`", self.prompt("polly"))
         for bundle in ("polly", "polly/agents/claude_code", "documenter", "planner"):
             with self.subTest(bundle=bundle):
                 self.assertNotIn("publish request", self.prompt(bundle))

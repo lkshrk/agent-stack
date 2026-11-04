@@ -162,6 +162,7 @@ class ForkStagingTest(unittest.TestCase):
             ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-ready"],
             ["gh", "pr", "edit", "7", "--repo", FORK, "--title", "fix(web): a", "--body", "-starts with a dash"],
             ["gh", "issue", "create", "--repo", FORK, "--title", "bug", "--body", "b", "--label", "upstream-issue"],
+            ["gh", "issue", "create", "--repo", FORK, "--title", "Comment on #42", "--body", "b", "--label", "upstream-comment"],
             ["gh", "issue", "edit", "4", "-R", FORK, "--body", "b"],
         ):
             with self.subTest(command=command):
@@ -198,6 +199,13 @@ class ForkStagingTest(unittest.TestCase):
             ["gh", "issue", "edit", "4", "--repo", FORK, "--add-label", "bug,approved-upstream"],
             ["gh", "issue", "create", "--repo", FORK, "--title", "b", "--label=approved-upstream"],
             ["gh", "issue", "create", "--repo", FORK, "--title", "b", "-l", "approved-upstream"],
+            ["gh", "issue", "edit", "4", "--repo", FORK, "--add-label", "Approved-Upstream"],
+            ["gh", "issue", "edit", "4", "--repo", FORK, "--add-label", "upstream-comment, approved-upstream"],
+            ["gh", "issue", "edit", "4", "--repo", FORK, "--add-label", "upstream-comment", "--add-label", "approved-upstream"],
+            ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "approved-upstream"],
+            ["gh", "pr", "create", "--repo", FORK, "--head", "feat/x", "--title", "t", "--label", "approved-upstream"],
+            ["gh", "api", "-X", "POST", f"repos/{FORK}/issues/4/labels", "-f", "labels[]=approved-upstream"],
+            ["gh", "api", f"repos/{FORK}/issues/4/labels", "-f", "labels[]=approved-upstream"],
         ):
             with self.subTest(command=command):
                 self.assertDenied(command)

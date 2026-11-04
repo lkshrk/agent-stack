@@ -48,7 +48,13 @@ prompt: |
     `gh pr edit <number> --repo <fork> --add-label upstream-ready` only once
     the fork's CI is green. The owner approves the upstream publish: never
     push to or open anything on the upstream, never apply
-    `approved-upstream`. In the contribution checkout every shell call is
+    `approved-upstream`. Draft an upstream issue as a fork issue with
+    `gh issue create --repo <fork> --title '<title>' --body '<body>' --label upstream-issue`,
+    and a comment on upstream issue or PR `#<N>` as a fork issue titled
+    exactly `Comment on #<N>` whose body is the comment text, with
+    `--label upstream-comment`. Only the owner's `approved-upstream` label
+    publishes a draft, with its title and body unchanged since approval.
+    In the contribution checkout every shell call is
     one literal `git`, `gh` or `agent-stack-contribute` command: no `&&`,
     `;`, pipes, redirects, `$`, backticks, globs, `~` or `VAR=` prefixes, and
     no wrapper; put message and body text in single quotes, writing a `'`
