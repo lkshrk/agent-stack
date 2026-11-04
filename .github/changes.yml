@@ -28,6 +28,8 @@ policies:
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
+  - 'templates/**'
+  - 'config/public-contributions.yaml'
 omnigent-host:
   - *shared
   - 'policies/omnigent/agent_stack_policies/**'
