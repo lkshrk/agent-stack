@@ -10,10 +10,13 @@ Serves the subset of signal-cli's HTTP daemon API that the Hermes Signal adapter
 
 Polls: `sendPollCreate` (`question`, `options`, a `groupId` or one `recipient`) and `sendPollTerminate` (`pollTimestamp`) map to `/v1/polls`. Without an `account`, the shim uses the only registered account. The adapter reads only a message's text, so the shim gives a vote on the event stream a text of its own: `🗳️ Poll "<question>": <options> (poll <timestamp>)`. It remembers the last 256 polls it created to name the options; after a restart it falls back to option numbers. Hermes sends polls with `signal-poll` (`images/hermes/bin/signal-poll`).
 
+Contribution approvals: when `APPROVER_URL` is set, a plain new message from `OWNER_NUMBER` whose whole text is `approve <code>` or `reject <code>` (8 digits, lowercase, single space, nothing else) goes to `contribution-approver` as `POST /v1/decisions` with the shared token, and Hermes never sees it. Anything else, including edits, quotes, reactions, sync messages, attachments, mentions and other senders, reaches Hermes as before. The shim only receives while Hermes holds the event stream open.
+
 | Variable | Meaning |
 | --- | --- |
 | `SIGNAL_REST_URL` | signal-cli-rest-api base URL (required) |
 | `LISTEN_ADDR` | Listen address, default `127.0.0.1:8090` |
+| `APPROVER_URL`, `APPROVER_TOKEN`, `OWNER_NUMBER` | contribution-approver base URL, shared token (at least 32 characters) and the owner's E.164 number; set all three or none |
 
 ## token-minter
 
@@ -47,3 +50,20 @@ Receives signed Linear webhooks at `POST /webhooks/linear` (`GET /healthz` for p
 | `LISTEN_ADDR` | Listen address, default `:8080` |
 
 All except `LISTEN_ADDR` are required.
+
+## contribution-approver
+
+Signal remote control for the contribution fork's publish gate (`docs/contribution-fork.md`). Every 60 s it reads `publish/contribution.json` from each fork's default branch, checks the token belongs to the fork owner, and lists open pull requests on the default branch. A pull request labelled `upstream-ready`, with its head in the fork and green CI on the head (the gate's rule), is announced once per head SHA to the Signal group: title, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes. A new head SHA replaces the code; a pull request that stops being ready loses it. Codes live in memory, so a restart announces again with new codes.
+
+`POST /v1/decisions` (`{"action":"approve"|"reject","code":"<8 digits>"}`, `Authorization: Bearer <APPROVER_TOKEN>`, compared in constant time) consumes the code and submits the owner's review pinned to the announced SHA: `APPROVE` for approve, which triggers the fork's `publish-upstream`, `REQUEST_CHANGES` for reject. Unknown, used or expired codes make no GitHub call. If GitHub refuses the review, the pull request is announced again with a new code. The result goes back to the Signal group. `GET /healthz` for probes. Logs never contain the token, the owner number or the group.
+
+| Variable | Meaning |
+| --- | --- |
+| `GITHUB_TOKEN` | The owner's classic PAT with only `public_repo`; reviews are submitted as its owner |
+| `CONTRIBUTION_FORKS` | Comma-separated forks, e.g. `lkshrk/omnigent` |
+| `APPROVER_TOKEN` | Shared token signal-shim sends, at least 32 characters |
+| `SIGNAL_REST_URL`, `SIGNAL_NUMBER`, `SIGNAL_RECIPIENT` | signal-cli-rest-api, the sender and the group (`group.<id>`) |
+| `GITHUB_API_URL` | Default `https://api.github.com` |
+| `LISTEN_ADDR` | Listen address, default `:8080` |
+
+All except `GITHUB_API_URL` and `LISTEN_ADDR` are required.
