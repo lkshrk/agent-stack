@@ -129,6 +129,25 @@ class ForkStagingTest(unittest.TestCase):
         commit(self.tree, "web/b.ts", "export const b = 1\n", "feat(web): add b")
         self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])
 
+    def test_allows_upstream_based_branch_when_fork_main_carries_the_template(self):
+        upstream_head = git(self.tree, "rev-parse", "HEAD~1").strip()
+        git(self.tree, "switch", "-q", "-c", "fork-main", upstream_head)
+        commit(self.tree, ".github/workflows/publish-upstream.yml", "on: pull_request_review\n", "ci: add publish")
+        commit(self.tree, "publish/gate.py", "print()\n", "ci: add gate")
+        fork_main = git(self.tree, "rev-parse", "HEAD").strip()
+        git(self.tree, "switch", "-q", "-")
+        with patch.object(contribution_vcs, "fork_default_head", lambda repository: fork_main):
+            self.assertAllowed(["git", "push", "fork", "HEAD:fix/web-a"])
+
+    def test_denies_pushes_to_the_upstream_publish_branches(self):
+        for command in (
+            ["git", "push", "fork", "HEAD:upstream/pr-1"],
+            ["git", "push", "fork", "HEAD:refs/heads/upstream/pr-1"],
+            ["git", "push", "fork", "HEAD:Upstream/pr-1"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+
     def test_denies_push_when_the_fork_head_is_unknown_or_not_fetched(self):
         with patch.object(contribution_vcs, "fork_default_head", lambda repository: None):
             self.assertDenied(["git", "push", "fork", "HEAD:feat/x"])

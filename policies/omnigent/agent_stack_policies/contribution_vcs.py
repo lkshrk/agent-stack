@@ -26,6 +26,7 @@ _GIT_ENV_KEEP = ("PATH", "HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CO
 _FILTER_DRIVER = re.compile(r"[A-Za-z0-9_.-]+")
 _WORKFLOWS = ".github/workflows/"
 _OWNER_LABEL = "approved-upstream"
+_PUBLISH_BRANCHES = "upstream/"
 _REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _BRANCH_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
 _REVISION = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./~^@{}:-]*")
@@ -269,6 +270,7 @@ def _feature_branch(destination: str, repository: "RegisteredRepository") -> boo
         and not branch.startswith("refs/")
         and push_branch(destination) == branch
         and branch.casefold() not in protected
+        and not branch.casefold().startswith(_PUBLISH_BRANCHES)
     )
 
 
