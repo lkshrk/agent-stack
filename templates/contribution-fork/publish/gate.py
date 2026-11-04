@@ -141,23 +141,27 @@ def publish_pull_request(api: GitHub, config: dict, event: dict) -> str:
     _require_clean_diff(api, config, sha)
 
     branch = PUBLISH_BRANCH.format(number=number)
-    if not api.exists(f"/repos/{fork}/git/ref/heads/{branch}"):
-        api.request("POST", f"/repos/{fork}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
-    else:
-        api.request("PATCH", f"/repos/{fork}/git/refs/heads/{branch}", {"sha": sha, "force": True})
-
     upstream, head_label = config["upstream"], f"{owner}:{branch}"
     existing = api.request_list(f"/repos/{upstream}/pulls", {"head": head_label, "state": "open", "per_page": PAGE})
     _require(len(existing) <= 1, f"more than one open upstream pull request uses {head_label}")
     if existing:
         published = api.request("PATCH", f"/repos/{upstream}/pulls/{existing[0]['number']}", {"title": title, "body": body})
+        _point_branch(api, fork, branch, sha)
     else:
+        _point_branch(api, fork, branch, sha)
         published = api.request(
             "POST",
             f"/repos/{upstream}/pulls",
             {"title": title, "body": body, "head": head_label, "base": config["default_branch"], "maintainer_can_modify": False},
         )
     return f"published {sha} as {published.get('html_url')}"
+
+
+def _point_branch(api: GitHub, fork: str, branch: str, sha: str) -> None:
+    if api.exists(f"/repos/{fork}/git/ref/heads/{branch}"):
+        api.request("PATCH", f"/repos/{fork}/git/refs/heads/{branch}", {"sha": sha, "force": True})
+    else:
+        api.request("POST", f"/repos/{fork}/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
 
 
 def _require_green_ci(api: GitHub, config: dict, sha: str) -> None:

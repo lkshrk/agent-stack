@@ -58,6 +58,8 @@ class Fork:
         }
         self.issue_events = [{"event": "labeled", "label": {"name": "approved-upstream"}, "actor": {"login": OWNER}}]
         self.issue_comments: list[dict] = []
+        self.upstream_issues: list[dict] = []
+        self.upstream_comments: dict[str, list[dict]] = {}
         self.failing: set[str] = set()
         self._install(fake)
 
@@ -126,12 +128,35 @@ class Fork:
                 return 200, items()[(number - 1) * size : number * size]
             return handler
 
+        def page_by_number(items_by_number):
+            def handler(match, query, body):
+                return page(lambda: items_by_number.get(match["n"], []))(match, query, body)
+            return handler
+
+        def _login(item):
+            return (item.get("user") or {}).get("login")
+
         def create_upstream_issue(match, query, body):
-            return 201, {"number": 500, "html_url": f"https://github.com/{UPSTREAM}/issues/500"}
+            number = 500 + len(self.upstream_issues)
+            self.upstream_issues.append(
+                {"number": number, "state": "open", "user": {"login": OWNER}, **body, "html_url": f"https://github.com/{UPSTREAM}/issues/{number}"}
+            )
+            return 201, self.upstream_issues[-1]
+
+        def list_upstream_issues(match, query, body):
+            creator, state = query.get("creator", [None])[0], query.get("state", ["open"])[0]
+            selected = [i for i in self.upstream_issues if (creator is None or _login(i) == creator) and (state == "all" or i["state"] == state)]
+            return page(lambda: selected)(match, query, body)
 
         def create_comment(match, query, body):
             self.issue_comments.append({"user": {"login": OWNER}, "body": body["body"]})
             return 201, {"id": 1}
+
+        def create_upstream_comment(match, query, body):
+            comments = self.upstream_comments.setdefault(match["n"], [])
+            url = f"https://github.com/{UPSTREAM}/issues/{match['n']}#issuecomment-{900 + len(comments)}"
+            comments.append({"user": {"login": OWNER}, "body": body["body"], "html_url": url})
+            return 201, comments[-1]
 
         fork, upstream = re.escape(FORK), re.escape(UPSTREAM)
         for method, pattern, name, handler in (
@@ -149,7 +174,10 @@ class Fork:
             ("GET", rf"/repos/{fork}/issues/(?P<n>\d+)/events", "issue_events", page(lambda: self.issue_events)),
             ("GET", rf"/repos/{fork}/issues/(?P<n>\d+)/comments", "issue_comments", page(lambda: self.issue_comments)),
             ("POST", rf"/repos/{upstream}/issues", "create_upstream_issue", create_upstream_issue),
+            ("GET", rf"/repos/{upstream}/issues", "list_upstream_issues", list_upstream_issues),
             ("POST", rf"/repos/{fork}/issues/(?P<n>\d+)/comments", "create_comment", create_comment),
+            ("GET", rf"/repos/{upstream}/issues/(?P<n>\d+)/comments", "upstream_comments", page_by_number(self.upstream_comments)),
+            ("POST", rf"/repos/{upstream}/issues/(?P<n>\d+)/comments", "create_upstream_comment", create_upstream_comment),
         ):
             fake.route(method, pattern, guard(name, handler))
 
@@ -258,11 +286,23 @@ class PublishPullRequestTest(GateTest):
         self.assertEqual(
             self.fake.writes(),
             [
-                ("PATCH", f"/repos/{FORK}/git/refs/heads/upstream/pr-7", {"sha": LATER, "force": True}),
                 ("PATCH", f"/repos/{UPSTREAM}/pulls/100", {"title": "fix(web): change a properly", "body": self.fork.pull["body"]}),
+                ("PATCH", f"/repos/{FORK}/git/refs/heads/upstream/pr-7", {"sha": LATER, "force": True}),
             ],
         )
         self.assertEqual(len(self.fork.upstream_pulls), 1)
+
+    def test_a_failed_upstream_edit_leaves_the_published_branch_unmoved(self):
+        self.assertEqual(self.review()[0], 0)
+        self.fake.requests.clear()
+        self.fork.pull["head"]["sha"] = LATER
+        self.fork.review = {**self.fork.review, "id": 12, "commit_id": LATER}
+        self.fork.runs.append(Fork.run(LATER, "success"))
+        self.fork.failing = {"update_upstream_pull"}
+        code, output = self.review(id=12, commit_id=LATER)
+        self.assertNotEqual(code, 0, output)
+        self.assertEqual(self.fork.refs, {"upstream/pr-7": REVIEWED})
+        self.assertEqual([w for w in self.fake.writes() if "/git/refs" in w[1]], [])
 
     def test_a_head_that_moved_after_review_publishes_the_reviewed_commit(self):
         self.fork.pull["head"]["sha"] = LATER
@@ -376,9 +416,9 @@ class PublishPullRequestTest(GateTest):
     def test_refuses_more_than_one_open_upstream_pull_for_the_branch(self):
         for number in (100, 101):
             self.fork.upstream_pulls.append({"number": number, "state": "open", "head_label": "lkshrk:upstream/pr-7"})
-        code, output = self.review()
-        self.assertNotEqual(code, 0, output)
-        self.assertEqual(self.upstream_writes(), [])
+        self.fork.refs["upstream/pr-7"] = OTHER
+        self.assertRefused(self.review(), "more than one")
+        self.assertEqual(self.fork.refs, {"upstream/pr-7": OTHER})
 
     def test_refuses_when_running_outside_the_registered_fork(self):
         self.assertRefused(self.gate("pull_request_review", self.fork.review_event(), repository="someone/omnigent"))
@@ -388,11 +428,11 @@ class PublishPullRequestTest(GateTest):
         self.assertEqual(self.fake.requests, [])
 
     def test_fails_closed_on_api_errors_before_any_upstream_write(self):
-        for name in ("review", "pull", "runs", "compare", "get_ref"):
+        for name in ("review", "pull", "runs", "compare", "list_upstream_pulls", "get_ref"):
             with self.subTest(failing=name):
                 self.fork.failing = {name}
                 self.assertRefused(self.review())
-        for name in ("create_ref", "list_upstream_pulls", "create_upstream_pull"):
+        for name in ("create_ref", "create_upstream_pull"):
             with self.subTest(failing=name):
                 self.fork.failing = {name}
                 self.fork.refs.clear()
