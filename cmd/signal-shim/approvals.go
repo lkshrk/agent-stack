@@ -160,7 +160,12 @@ func (s *shim) forwardDecision(d decision) {
 	default:
 		log.Printf("signal-shim: owner %s decision refused by the approver with HTTP %d", d.Action, status)
 	}
-	note := map[string]any{"number": d.account, "recipients": []string{d.recipient}, "message": "Your " + d.action() + " was not delivered to the contribution approver. Nothing was submitted; try again or review on GitHub."}
+	account, err := s.accountFor(ctx, map[string]any{"account": d.account})
+	if err != nil {
+		log.Printf("signal-shim: owner note about the undelivered decision has no sending account")
+		return
+	}
+	note := map[string]any{"number": account, "recipients": []string{d.recipient}, "message": "Your " + d.action() + " was not delivered to the contribution approver. Nothing was submitted; try again or review on GitHub."}
 	if _, err := s.doJSON(ctx, http.MethodPost, "/v2/send", note); err != nil {
 		log.Printf("signal-shim: owner note about the undelivered decision failed")
 	}

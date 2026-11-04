@@ -349,3 +349,23 @@ func TestForwardFailureTellsTheOwnerWithoutLoggingSecrets(t *testing.T) {
 		})
 	}
 }
+
+func TestUndeliveredNoteWithoutAnEventAccountUsesTheRegisteredAccount(t *testing.T) {
+	captureLog(t)
+	f := newFakeREST(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	srv.Close()
+	s := &shim{upstream: f.srv.URL, http: f.srv.Client(), approvals: &approvalRoute{owner: testOwner, url: srv.URL, token: testToken, http: srv.Client()}}
+	raw, _ := json.Marshal(map[string]any{"envelope": map[string]any{"sourceNumber": testOwner, "dataMessage": groupText("approve 12345678")}})
+	d, ok := s.approvals.match(raw)
+	if !ok {
+		t.Fatal("decision without an account field did not match")
+	}
+
+	s.forwardDecision(d)
+
+	sends := signalSends(f)
+	if len(sends) != 1 || sends[0].body["number"] != testAccount {
+		t.Fatalf("note sent as %v, want from the registered account %s", sends, testAccount)
+	}
+}
