@@ -1,4 +1,4 @@
-"""Render the contribution fork template for one registry entry into a checkout of the fork's default branch."""
+"""Render the contribution fork template for one registry entry into a checkout of the fork's default branch, then print a `gh workflow disable` command for every other workflow there."""
 
 import argparse
 import json
@@ -107,6 +107,18 @@ def render(registry_path: Path, name: str, out: Path) -> None:
             shutil.copyfile(TEMPLATE / relative, out / relative)
 
 
+def workflows_to_disable(out: Path) -> list[str]:
+    ours = {CI_WORKFLOW, Path(STATIC[0]).name}
+    directory = out / ".github" / "workflows"
+    if not directory.is_dir():
+        return []
+    return sorted(p.name for p in directory.iterdir() if p.is_file() and p.suffix in (".yml", ".yaml") and p.name not in ours)
+
+
+def disable_commands(fork: str, workflows: list[str]) -> list[str]:
+    return [shlex.join(["gh", "workflow", "disable", name, "--repo", fork]) for name in workflows]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repository", help="registry key, e.g. omnigent")
@@ -115,9 +127,12 @@ def main() -> int:
     args = parser.parse_args()
     try:
         render(args.registry, args.repository, args.out)
+        fork = Registry.load(args.registry).repository(args.repository).fork
     except RegistryError as error:
         print(f"render-contribution-fork: {error}", file=sys.stderr)
         return 1
+    for command in disable_commands(fork, workflows_to_disable(args.out)):
+        print(command)
     return 0
 
 
