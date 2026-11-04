@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = ROOT / "templates" / "contribution-fork"
 REGISTRY = ROOT / "config" / "public-contributions.yaml"
 _spec = importlib.util.spec_from_file_location("render_contribution_fork", ROOT / "templates" / "render_contribution_fork.py")
+assert _spec and _spec.loader
 render = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(render)
 sys.path.insert(0, str(ROOT / "policies" / "omnigent"))

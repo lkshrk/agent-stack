@@ -1,6 +1,7 @@
 import json
 import re
 import threading
+from typing import Any, Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -11,11 +12,11 @@ class FakeGitHub:
     def __init__(self, token: str):
         self.token = token
         self.requests: list[dict] = []
-        self.routes: list[tuple[str, re.Pattern, object]] = []
+        self.routes: list[tuple[str, re.Pattern, Callable[..., tuple[int, Any]]]] = []
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args):
+            def log_message(self, format, *args):
                 pass
 
             def _serve(self):
@@ -47,7 +48,7 @@ class FakeGitHub:
         self.server.shutdown()
         self.server.server_close()
 
-    def route(self, method: str, pattern: str, handler) -> None:
+    def route(self, method: str, pattern: str, handler: Callable[..., tuple[int, Any]]) -> None:
         self.routes.insert(0, (method, re.compile(pattern), handler))
 
     def dispatch(self, method, path, query, body, auth):
@@ -59,5 +60,5 @@ class FakeGitHub:
                 return handler(match, query, body)
         return 404, {"message": "Not Found"}
 
-    def writes(self) -> list[tuple[str, str, object]]:
+    def writes(self) -> list[tuple[str, str, Any]]:
         return [(r["method"], r["path"], r["body"]) for r in self.requests if r["method"] != "GET"]
