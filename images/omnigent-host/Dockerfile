@@ -144,7 +144,7 @@ COPY --from=upstream-env /upstream.env /src/upstream.env
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 RUN install -d -m 0777 /home/omnigent
-RUN fail=0; for t in removed-clis mise-cache; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
+RUN fail=0; for t in removed-clis mise-cache credentials; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
 USER 1000660000
 RUN \
     --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bashrc \

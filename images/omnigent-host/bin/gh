@@ -3,6 +3,15 @@
 set -euo pipefail
 
 file=${GH_TOKEN_FILE:-/agent-secrets/github/code}
+repo="" prev=""
+for arg in "$@"; do
+  case "$prev" in -R | --repo) repo=$arg ;; esac
+  case "$arg" in --repo=*) repo=${arg#--repo=} ;; esac
+  prev=$arg
+done
+case "$repo" in
+  lkshrk/omnigent | https://github.com/lkshrk/omnigent | https://github.com/lkshrk/omnigent.git) file=${OMNIGENT_TOKEN_FILE:-/agent-secrets/github/omnigent} ;;
+esac
 if [ -z "${GH_TOKEN:-}" ] && [ -r "$file" ]; then
   GH_TOKEN=$(cat "$file")
   export GH_TOKEN
