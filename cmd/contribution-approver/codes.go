@@ -23,8 +23,12 @@ type prKey struct {
 type pending struct {
 	pr      prKey
 	sha     string
-	digest  string
 	expires time.Time
+}
+
+type sentAnnouncement struct {
+	at     time.Time
+	digest string
 }
 
 type headState struct {
@@ -49,20 +53,55 @@ type codeStore struct {
 	now       func() time.Time
 	byCode    map[string]pending
 	announced map[prKey]headState
+	sent      map[prKey]map[string]sentAnnouncement
+	resend    map[prKey]bool
 }
 
 func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
-	return &codeStore{ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{}}
+	return &codeStore{
+		ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{},
+		sent: map[prKey]map[string]sentAnnouncement{}, resend: map[prKey]bool{},
+	}
+}
+
+// recordAnnouncement runs only after the owner was sent the text, so a review can be bound to what they saw.
+func (s *codeStore) recordAnnouncement(k prKey, sha, digest string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sent[k] == nil {
+		s.sent[k] = map[string]sentAnnouncement{}
+	}
+	s.sent[k][sha] = sentAnnouncement{at: s.now(), digest: digest}
+	delete(s.resend, k)
+}
+
+func (s *codeStore) announcementOf(k prKey, sha string) (sentAnnouncement, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.sent[k][sha]
+	return a, ok
+}
+
+func (s *codeStore) requestReannouncement(k prKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resend[k] = true
+}
+
+func (s *codeStore) reannouncing(k prKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resend[k]
 }
 
 func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a, ok := s.announced[k]
-	return !ok || a.sha != sha || (a.expired && !a.consumed)
+	return s.resend[k] || !ok || a.sha != sha || (a.expired && !a.consumed)
 }
 
-func (s *codeStore) issue(k prKey, sha, digest string) (string, error) {
+func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
@@ -82,7 +121,7 @@ func (s *codeStore) issue(k prKey, sha, digest string) (string, error) {
 		if _, taken := s.byCode[code]; taken {
 			continue
 		}
-		s.byCode[code] = pending{pr: k, sha: sha, digest: digest, expires: now.Add(s.ttl)}
+		s.byCode[code] = pending{pr: k, sha: sha, expires: now.Add(s.ttl)}
 		s.announced[k] = headState{sha: sha}
 		return code, nil
 	}
@@ -139,6 +178,12 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 		if k.fork == fork && !ready[k] {
 			s.dropLive(k)
 			delete(s.announced, k)
+		}
+	}
+	for k := range s.sent {
+		if k.fork == fork && !ready[k] {
+			delete(s.sent, k)
+			delete(s.resend, k)
 		}
 	}
 }

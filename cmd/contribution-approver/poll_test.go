@@ -199,7 +199,7 @@ func TestTitlesAreFlattenedAndTruncated(t *testing.T) {
 func TestCodesExpire(t *testing.T) {
 	c := &clock{t: time.Now()}
 	s := newCodeStore(30*time.Minute, c.now)
-	code, err := s.issue(prKey{testFork, 1}, shaA, "d")
+	code, err := s.issue(prKey{testFork, 1}, shaA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestCodesAreEightDigitsAndUnique(t *testing.T) {
 	s := newCodeStore(time.Hour, time.Now)
 	seen := map[string]bool{}
 	for i := range 200 {
-		code, err := s.issue(prKey{testFork, i}, shaA, "d")
+		code, err := s.issue(prKey{testFork, i}, shaA)
 		if err != nil {
 			t.Fatal(err)
 		}

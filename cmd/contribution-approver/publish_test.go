@@ -61,7 +61,14 @@ func setBothCompares(h *harness, sha, status string, ahead int, files ...map[str
 	h.gh.setCompare(testFork, fkCompare+sha, status, ahead, 0, files...)
 }
 
+func announceText(h *harness, sha string) {
+	pr := h.gh.pullOf(testFork, prNumber)
+	h.codes.recordAnnouncement(prKey{fork: testFork, number: prNumber}, sha, contentDigest(pr.title, pr.body))
+}
+
+// approve is an owner approval given after seeing the current text announced at sha.
 func approve(h *harness, sha string) fakeReview {
+	announceText(h, sha)
 	return h.gh.addReview(prNumber, testOwner, "APPROVED", sha)
 }
 
@@ -70,7 +77,7 @@ const testOwner = "lkshrk"
 func decidePR(t *testing.T, h *harness) publishDecision {
 	t.Helper()
 	before := len(h.gh.writes())
-	d := h.poller.gh.decidePublish(context.Background(), h.poller.forks[0], prNumber)
+	d := h.poller.decidePublish(context.Background(), h.poller.forks[0], prNumber)
 	if w := h.gh.writes(); len(w) != before {
 		t.Errorf("the publish decision wrote to GitHub: %+v", w[before:])
 	}
@@ -630,5 +637,174 @@ func TestPublishDecisionFailsClosedOnAPIErrors(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+var prK = prKey{fork: testFork, number: prNumber}
+
+func wantReannounce(t *testing.T, h *harness, d publishDecision, want bool) {
+	t.Helper()
+	if d.reannounce != want || h.codes.reannouncing(prK) != want {
+		t.Fatalf("reannounce = %v, store = %v, want %v", d.reannounce, h.codes.reannouncing(prK), want)
+	}
+}
+
+func readyMessages(h *harness) int {
+	n := 0
+	for _, m := range h.signal.messages() {
+		if strings.HasPrefix(m, "Contribution ready for upstream: "+testFork+"#7") {
+			n++
+		}
+	}
+	return n
+}
+
+func TestPublishDecisionRefusesADroppedSinglePostReviewEdit(t *testing.T) {
+	for _, index := range []int{0, 1} {
+		t.Run(fmt.Sprint(index), func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			approve(h, shaA)
+			h.clock.advance(time.Minute)
+			h.gh.editBody(testFork, prNumber, "after", testAgent)
+			h.clock.advance(time.Minute)
+			h.gh.deleteRevision(testFork, prNumber, index, testAgent, fakeEditDropped)
+			d := decidePR(t, h)
+			wantVerdict(t, d, verdictTransient, "changed since")
+			wantReannounce(t, h, d, true)
+		})
+	}
+}
+
+func TestPublishDecisionNeedsAnAnnouncementBeforeTheApproval(t *testing.T) {
+	t.Run("never announced", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		d := decidePR(t, h)
+		wantVerdict(t, d, verdictTransient, "no announcement")
+		wantReannounce(t, h, d, true)
+	})
+	t.Run("announced after the approval", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		h.clock.advance(time.Second)
+		announceText(h, shaA)
+		d := decidePR(t, h)
+		wantVerdict(t, d, verdictTransient, "predates")
+		wantReannounce(t, h, d, false)
+	})
+	t.Run("another commit announced", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announceText(h, shaB)
+		h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		wantVerdict(t, decidePR(t, h), verdictTransient, "no announcement")
+	})
+	t.Run("text changed between announcement and approval", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announceText(h, shaA)
+		h.clock.advance(time.Minute)
+		h.gh.rename(testFork, prNumber, "feat(web): add another thing", testAgent)
+		h.clock.advance(time.Minute)
+		h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		d := decidePR(t, h)
+		wantVerdict(t, d, verdictTransient, "changed since")
+		wantReannounce(t, h, d, true)
+	})
+	t.Run("a publish asks for nothing", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		approve(h, shaA)
+		d := decidePR(t, h)
+		wantVerdict(t, d, verdictPublish, "")
+		wantReannounce(t, h, d, false)
+	})
+}
+
+func TestPublishDecisionAfterARestartReannouncesOnce(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	approve(h, shaA)
+	h.codes = newCodeStore(codeTTL, h.clock.now)
+	h.poller.codes = h.codes
+	d := decidePR(t, h)
+	wantVerdict(t, d, verdictTransient, "no announcement")
+	wantReannounce(t, h, d, true)
+
+	h.clock.advance(time.Minute)
+	h.poller.poll(context.Background())
+	h.poller.poll(context.Background())
+	if n := readyMessages(h); n != 1 {
+		t.Fatalf("announcements after the restart = %d, want 1: %q", n, h.signal.messages())
+	}
+	d = decidePR(t, h)
+	wantVerdict(t, d, verdictTransient, "predates")
+	wantReannounce(t, h, d, false)
+
+	h.clock.advance(time.Minute)
+	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	wantVerdict(t, decidePR(t, h), verdictPublish, "")
+}
+
+func TestPublishDecisionPublishesANewApprovalOfReannouncedText(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	approve(h, shaA)
+	h.clock.advance(time.Minute)
+	h.gh.editBody(testFork, prNumber, "Adds the thing, reworded.", testAgent)
+	d := decidePR(t, h)
+	wantVerdict(t, d, verdictHard, "body")
+	wantReannounce(t, h, d, true)
+
+	h.poller.poll(context.Background())
+	if n := readyMessages(h); n != 1 {
+		t.Fatalf("announcements = %d, want 1: %q", n, h.signal.messages())
+	}
+	h.clock.advance(time.Minute)
+	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	d = decidePR(t, h)
+	wantVerdict(t, d, verdictPublish, "")
+	if d.body != "Adds the thing, reworded." {
+		t.Fatalf("body = %q, want the re-announced text", d.body)
+	}
+}
+
+func TestASignalApprovalIsBoundToTheRecordedAnnouncement(t *testing.T) {
+	t.Run("publishes", func(t *testing.T) {
+		h := newHarness(t)
+		code := announce(t, h, prNumber, shaA)
+		h.gh.addCheckRun(testFork, shaA, ciCheck("test", "completed", "success"))
+		h.clock.advance(time.Minute)
+		if rec := approveWith(h, code); rec.Code != http.StatusOK {
+			t.Fatalf("approve answered %d %s", rec.Code, rec.Body)
+		}
+		wantVerdict(t, decidePR(t, h), verdictPublish, "")
+	})
+	t.Run("refuses a code whose recorded text differs", func(t *testing.T) {
+		h := newHarness(t)
+		code := announce(t, h, prNumber, shaA)
+		h.codes.recordAnnouncement(prK, shaA, contentDigest("feat(web): other", "other"))
+		if rec := approveWith(h, code); rec.Code != http.StatusConflict {
+			t.Fatalf("approve answered %d %s, want 409", rec.Code, rec.Body)
+		}
+		if r := h.gh.reviewCalls(); len(r) != 0 {
+			t.Fatalf("reviews = %v, want none", r)
+		}
+	})
+}
+
+func TestAnAnnouncedHeadWhoseTextChangedIsAnnouncedAgainOnce(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.poller.poll(context.Background())
+	h.clock.advance(time.Minute)
+	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	h.poller.poll(context.Background())
+	h.clock.advance(time.Minute)
+	h.gh.editBody(testFork, prNumber, "Adds the thing, reworded.", testAgent)
+	wantVerdict(t, decidePR(t, h), verdictHard, "body")
+
+	h.clock.advance(time.Minute)
+	h.poller.poll(context.Background())
+	h.poller.poll(context.Background())
+	if n := readyMessages(h); n != 2 {
+		t.Fatalf("announcements = %d, want 2: %q", n, h.signal.messages())
+	}
+	if a, ok := h.codes.announcementOf(prK, shaA); !ok || a.digest != contentDigest(prTitle, "Adds the thing, reworded.") {
+		t.Fatalf("announcement = %+v, %v; want the reworded text", a, ok)
 	}
 }

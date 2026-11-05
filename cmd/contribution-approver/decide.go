@@ -133,7 +133,8 @@ func (d *decider) changedSinceAnnouncement(ctx context.Context, p pending) (bool
 	if err != nil {
 		return false, err
 	}
-	return pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != p.digest, nil
+	a, ok := d.codes.announcementOf(p.pr, p.sha)
+	return !ok || pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != a.digest, nil
 }
 
 func (d *decider) verifyFork(ctx context.Context, fork string) error {

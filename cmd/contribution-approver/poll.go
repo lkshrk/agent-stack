@@ -100,7 +100,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 	if err != nil {
 		return err
 	}
-	if reviewed {
+	if reviewed && !p.codes.reannouncing(k) {
 		p.codes.markReviewed(k, sha)
 		return nil
 	}
@@ -119,7 +119,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		return nil
 	}
 	delete(p.refused, k)
-	code, err := p.codes.issue(k, sha, contentDigest(pr.Title, pr.Body))
+	code, err := p.codes.issue(k, sha)
 	if err != nil {
 		return err
 	}
@@ -127,6 +127,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		p.codes.forget(k)
 		return err
 	}
+	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body))
 	log.Printf("contribution-approver: announced %s#%d at %s", cfg.Fork, k.number, sha)
 	return nil
 }

@@ -40,6 +40,11 @@ type publishDecision struct {
 	sha          string
 	title, body  string
 	lastEditedAt *time.Time
+	reannounce   bool
+}
+
+type announcementLog interface {
+	announcementOf(k prKey, sha string) (sentAnnouncement, bool)
 }
 
 type refusal struct {
@@ -81,7 +86,15 @@ type ownerReview struct {
 	} `json:"user"`
 }
 
-func (g *githubClient) decidePublish(ctx context.Context, cfg forkConfig, number int) publishDecision {
+func (p *poller) decidePublish(ctx context.Context, cfg forkConfig, number int) publishDecision {
+	d := p.gh.decidePublish(ctx, cfg, number, p.codes)
+	if d.reannounce && (d.verdict == verdictHard || d.verdict == verdictTransient) {
+		p.codes.requestReannouncement(prKey{fork: cfg.Fork, number: number})
+	}
+	return d
+}
+
+func (g *githubClient) decidePublish(ctx context.Context, cfg forkConfig, number int, sent announcementLog) publishDecision {
 	d := publishDecision{number: number}
 	if err := g.verifyFork(ctx, cfg); err != nil {
 		return d.refuse(err)
@@ -110,10 +123,17 @@ func (g *githubClient) decidePublish(ctx context.Context, cfg forkConfig, number
 		return d.refuse(err)
 	}
 	d.title, d.body = pr.Title, pr.Body
+	k, digest := prKey{fork: cfg.Fork, number: number}, contentDigest(pr.Title, pr.Body)
+	if head, ok := sent.announcementOf(k, pr.Head.SHA); !ok || head.digest != digest {
+		d.reannounce = true
+	}
 	if d.lastEditedAt, err = g.checkEdits(ctx, cfg, number, pr, d.reviewedAt); err != nil {
 		return d.refuse(err)
 	}
 	if err := g.checkTimeline(ctx, cfg, number, d.reviewedAt); err != nil {
+		return d.refuse(err)
+	}
+	if err := checkAnnounced(sent, k, d.sha, digest, d.reviewedAt); err != nil {
 		return d.refuse(err)
 	}
 	if err := g.checkCI(ctx, cfg, d.sha); err != nil {
@@ -151,6 +171,19 @@ func (g *githubClient) decidingReview(ctx context.Context, cfg forkConfig, numbe
 			return latest, nil
 		}
 	}
+}
+
+func checkAnnounced(sent announcementLog, k prKey, sha, digest string, reviewed time.Time) error {
+	a, ok := sent.announcementOf(k, sha)
+	switch {
+	case !ok:
+		return &refusal{verdictTransient, fmt.Sprintf("no announcement of %s is known, so the owner must approve it again", sha)}
+	case a.digest != digest:
+		return &refusal{verdictTransient, fmt.Sprintf("the title or body changed since %s was announced", sha)}
+	case a.at.Truncate(time.Second).After(reviewed):
+		return &refusal{verdictTransient, fmt.Sprintf("the approval predates the announcement of %s", sha)}
+	}
+	return nil
 }
 
 func checkPull(cfg forkConfig, pr pullRequest) error {
