@@ -70,13 +70,13 @@ func (p *poller) maybePublish(ctx context.Context, cfg forkConfig, k prKey) {
 	res := p.publish(ctx, cfg, k.number)
 	probed := false
 	switch {
-	case res.alreadyUpstream:
+	case res.alreadyUpstream, res.upstreamUnknown:
 		p.codes.cancelReannouncement(k)
-	case res.outcome == outcomeRetry && res.decision.unannounced:
-		if r, ok := p.gh.settledUpstream(ctx, cfg, res.decision); ok {
+	case res.outcome == outcomeRetry && res.decision.unbound:
+		if r, ok, err := p.gh.settledUpstream(ctx, cfg, res.decision); err == nil && ok {
 			if r.carried() {
 				p.codes.cancelReannouncement(k)
-				probed = true
+				probed = res.decision.reviewedAt.Before(p.started)
 			}
 			res = r
 		}
@@ -110,7 +110,7 @@ func (p *poller) report(ctx context.Context, cfg forkConfig, k prKey, res publis
 	switch {
 	case res.alreadyUpstream:
 		p.links.set(k, link)
-		p.tellOnce(ctx, k, fmt.Sprintf("after\x00%d", d.reviewID), name+at+" is already upstream"+linkPart(link)+"; later changes to the title or body are not published.")
+		p.tellOnce(ctx, k, fmt.Sprintf("after\x00%d", d.reviewID), name+at+" is already upstream"+linkPart(link)+"; later changes to the pull request are not published.")
 	case res.outcome == outcomePublished:
 		p.links.set(k, link)
 		p.tellOnce(ctx, k, upstreamKey, withLink("Published "+name+at+" upstream", link))
@@ -184,14 +184,16 @@ func (p *poller) tellOnce(ctx context.Context, k prKey, key, text string) {
 			return
 		}
 	}
-	if !p.deliver(ctx, k, notice{key, text}) {
+	if !p.deliver(ctx, k, notice{key, text}, false) {
 		p.unsent[k] = append(p.unsent[k], notice{key, text})
 	}
 }
 
-func (p *poller) deliver(ctx context.Context, k prKey, n notice) bool {
+func (p *poller) deliver(ctx context.Context, k prKey, n notice, retry bool) bool {
 	if err := p.notify.Notify(ctx, n.text); err != nil {
-		log.Printf("contribution-approver: owner notice not sent, retried on the next poll: %v", err)
+		if !retry {
+			log.Printf("contribution-approver: owner notice not sent, retried on the next poll: %v", err)
+		}
 		return false
 	}
 	p.mark(k, n.key)
@@ -205,7 +207,7 @@ func (p *poller) flush(ctx context.Context, fork string) {
 		}
 		var left []notice
 		for _, n := range pending {
-			if !p.deliver(ctx, k, n) {
+			if !p.deliver(ctx, k, n, true) {
 				left = append(left, n)
 			}
 		}

@@ -732,7 +732,7 @@ func TestOwnerNoticesWaitForSignal(t *testing.T) {
 }
 
 func TestAChangeAfterPublishingNeverDismissesOrRefuses(t *testing.T) {
-	const later = "; later changes to the title or body are not published."
+	const later = "; later changes to the pull request are not published."
 	const unchanged = "; the title and body were not changed."
 	for name, tc := range map[string]struct {
 		change           func(h *harness)
@@ -898,8 +898,8 @@ func TestRepliesPromiseANewCodeTruthfully(t *testing.T) {
 		pollTimes(h, 2)
 		h.clock.advance(codeTTL)
 		pollTimes(h, 1)
-		if readyMessages(h) != 3 || !h.codes.held(prK) {
-			t.Fatalf("announcements = %d, held = %v; want 3 and a hold", readyMessages(h), h.codes.held(prK))
+		if readyMessages(h) != 3 || !h.codes.held(prK, shaA) {
+			t.Fatalf("announcements = %d, held = %v; want 3 and a hold", readyMessages(h), h.codes.held(prK, shaA))
 		}
 		h.clock.advance(codeTTL)
 		approveWith(h, lastCode(t, h))
@@ -939,4 +939,103 @@ func TestRepliesPromiseANewCodeTruthfully(t *testing.T) {
 			t.Fatalf("reply = %q, want the minute promise", done)
 		}
 	})
+}
+
+func TestARefusalWaitsWhenUpstreamCannotBeRead(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	rv := announcedAndApproved(t, h)
+	pollTimes(h, 1)
+	up := onlyUpstream(t, h)
+	h.gh.editBody(testFork, prNumber, "Adds the thing, edited later.", testAgent)
+	h.clock.advance(time.Minute)
+	h.gh.failWith(http.MethodGet, upPulls, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	before, writes := len(h.signal.messages()), len(h.gh.writes())
+
+	pollTimes(h, 1)
+
+	wantNoWritesSince(t, h, writes)
+	if msgs := messagesSince(h, before); len(msgs) != 0 {
+		t.Fatalf("messages = %q, want none while upstream is unreadable", msgs)
+	}
+	if h.gh.reviewsOf(prNumber)[0].state != "APPROVED" || h.gh.reviewsOf(prNumber)[0].id != rv.id {
+		t.Fatal("the approval was dismissed")
+	}
+	pollTimes(h, 2)
+	wantNoWritesSince(t, h, writes)
+	want := testFork + "#7 at " + shaA + " is already upstream: https://github.com/omnigent-ai/omnigent/pull/" + itoa(up.number) + "; later changes to the pull request are not published."
+	if msgs := messagesSince(h, before); len(msgs) != 1 || msgs[0] != want {
+		t.Fatalf("messages = %q, want only %q", msgs, want)
+	}
+}
+
+func TestAChangedReplyPromisesTheHeldWordingOnlyForTheHeldHead(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	failBindListing(h)
+	pollTimes(h, 2)
+	code := lastCode(t, h)
+	moveHead(h, shaB)
+
+	approveWith(h, code)
+
+	msgs := h.signal.messages()
+	if done := msgs[len(msgs)-1]; !strings.Contains(done, "changed since the announcement") || strings.Contains(done, heldPromise) || !strings.Contains(done, "within a minute") {
+		t.Fatalf("reply = %q, want the minute promise for a new head", done)
+	}
+}
+
+func TestAGitHubReapprovalAfterTheProcessStartedIsTold(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	announcedAndApproved(t, h)
+	pollTimes(h, 1)
+	up := onlyUpstream(t, h)
+	h.gh.editBody(testFork, prNumber, "Adds the thing, edited later.", testAgent)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 1)
+	before := len(h.signal.messages())
+	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	h.clock.advance(time.Minute)
+
+	pollTimes(h, 3)
+
+	want := testFork + "#7 at " + shaA + " is already upstream: https://github.com/omnigent-ai/omnigent/pull/" + itoa(up.number) + "; the title and body were not changed."
+	if msgs := messagesSince(h, before); len(msgs) != 1 || msgs[0] != want {
+		t.Fatalf("messages = %q, want only %q", msgs, want)
+	}
+}
+
+func TestAnUndeliveredNoticeIsLoggedOnceAndSentDespiteAFailingFork(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	announcedAndApproved(t, h)
+	h.gh.rename(testFork, prNumber, "feat(web): renamed after the approval", testAgent)
+	h.clock.advance(time.Minute)
+	before := len(h.signal.messages())
+	setSignalDown(h, true)
+	pollTimes(h, 3)
+	if n := strings.Count(h.logs(), "owner notice not sent"); n != 1 {
+		t.Fatalf("undelivered notice logged %d times, want once:\n%s", n, h.logs())
+	}
+	h.gh.update(func() { h.gh.fork.parent = "someone/omnigent" })
+	setSignalDown(h, false)
+
+	pollTimes(h, 1)
+
+	if n := countContaining(messagesSince(h, before), "The approval was dismissed"); n != 1 {
+		t.Fatalf("messages = %q, want the queued refusal delivered", messagesSince(h, before))
+	}
+}
+
+func TestAHardRefusalWithTwoOpenUpstreamPullRequestsStillDismisses(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	announcedAndApproved(t, h)
+	pollTimes(h, 1)
+	h.gh.setRef(testUpstream, "next", shaUpMain)
+	h.gh.addPull(testUpstream, fakePR{fakeIssue: &fakeIssue{title: "feat(web): second", user: testOwner}, headRepo: testFork, headRef: publishRef, base: "next", sha: shaA})
+	h.gh.editBody(testFork, prNumber, "Adds the thing, edited later.", testAgent)
+	h.clock.advance(time.Minute)
+
+	pollTimes(h, 2)
+
+	if h.gh.reviewsOf(prNumber)[0].state != "DISMISSED" {
+		t.Fatal("a hard refusal that is not upstream did not dismiss")
+	}
 }

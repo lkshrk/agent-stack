@@ -37,7 +37,11 @@ type publishResult struct {
 	upstreamURL string
 	// alreadyUpstream: a hard refusal came after the approved SHA was already upstream, so nothing was dismissed.
 	alreadyUpstream bool
+	// upstreamUnknown: a hard refusal waits because the upstream pull requests could not be read.
+	upstreamUnknown bool
 }
+
+const upstreamUnknownReason = "the upstream pull requests could not be read, so the refusal waits"
 
 const carriedReason = "a closed or merged upstream pull request already carried "
 
@@ -88,7 +92,12 @@ func (p *poller) publish(ctx context.Context, cfg forkConfig, number int) publis
 		return res
 	case verdictHard:
 		if fullSHA.MatchString(d.sha) && d.reviewID != 0 {
-			if r, ok := p.gh.settledUpstream(ctx, cfg, d); ok && r.carried() {
+			r, ok, err := p.gh.settledUpstream(ctx, cfg, d)
+			switch {
+			case err != nil:
+				res.outcome, res.reason, res.upstreamUnknown = outcomeRetry, upstreamUnknownReason, true
+				return res
+			case ok && r.carried():
 				r.alreadyUpstream = true
 				return r
 			}
@@ -127,12 +136,17 @@ func (g *githubClient) spend(ctx context.Context, cfg forkConfig, res publishRes
 }
 
 // settledUpstream reports, without writing, whether d's approval is already Current or blocked by a closed upstream pull request.
-func (g *githubClient) settledUpstream(ctx context.Context, cfg forkConfig, d publishDecision) (publishResult, bool) {
+// A hard refusal from the lookup (several open pull requests) means "not upstream"; any other error is returned.
+func (g *githubClient) settledUpstream(ctx context.Context, cfg forkConfig, d publishDecision) (publishResult, bool, error) {
 	res := publishResult{decision: d, outcome: outcomeNothing}
 	if err := g.publishUpstream(ctx, cfg, d, &res, false); err != nil {
-		return res, false
+		var r *refusal
+		if errors.As(err, &r) {
+			return res, false, nil
+		}
+		return res, false, err
 	}
-	return res, res.outcome == outcomeCurrent || res.outcome == outcomeClosedUpstream
+	return res, res.outcome == outcomeCurrent || res.outcome == outcomeClosedUpstream, nil
 }
 
 func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d publishDecision, res *publishResult, write bool) error {

@@ -60,13 +60,14 @@ type codeStore struct {
 	resend    map[prKey]int64
 	unbound   map[prKey]int
 	holdUntil map[prKey]time.Time
+	heldSHA   map[prKey]string
 }
 
 func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
 	return &codeStore{
 		ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{},
 		sent: map[prKey]map[string]sentAnnouncement{}, resend: map[prKey]int64{},
-		unbound: map[prKey]int{}, holdUntil: map[prKey]time.Time{},
+		unbound: map[prKey]int{}, holdUntil: map[prKey]time.Time{}, heldSHA: map[prKey]string{},
 	}
 }
 
@@ -80,6 +81,7 @@ func (s *codeStore) recordAnnouncement(k prKey, sha, digest string, lastReview i
 	delete(s.resend, k)
 	delete(s.unbound, k)
 	delete(s.holdUntil, k)
+	delete(s.heldSHA, k)
 }
 
 func (s *codeStore) announcementOf(k prKey, sha string) (sentAnnouncement, bool) {
@@ -101,10 +103,15 @@ func (s *codeStore) cancelReannouncement(k prKey) {
 	delete(s.resend, k)
 }
 
-func (s *codeStore) held(k prKey) bool {
+// held reports whether announcing sha waits for the review listing; another head is announced at once.
+func (s *codeStore) held(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.now().Before(s.holdUntil[k])
+	return s.heldLocked(k, sha)
+}
+
+func (s *codeStore) heldLocked(k prKey, sha string) bool {
+	return s.heldSHA[k] == sha && s.now().Before(s.holdUntil[k])
 }
 
 func (s *codeStore) reannouncing(k prKey) bool {
@@ -115,23 +122,23 @@ func (s *codeStore) reannouncing(k prKey) bool {
 }
 
 // bindFailed asks for a re-announcement; after the first consecutive failure it holds off, doubling up to a day.
-func (s *codeStore) bindFailed(k prKey) {
+func (s *codeStore) bindFailed(k prKey, sha string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.resend[k] = max(s.resend[k], 0)
 	s.unbound[k]++
 	if n := s.unbound[k]; n > 1 {
-		s.holdUntil[k] = s.now().Add(min(s.ttl<<min(n-2, 10), maxBindHold))
+		s.holdUntil[k], s.heldSHA[k] = s.now().Add(min(s.ttl<<min(n-2, 10), maxBindHold)), sha
 	}
 }
 
 func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	a, ok := s.announced[k]
-	if ok && a.sha == sha && s.now().Before(s.holdUntil[k]) {
+	if s.heldLocked(k, sha) {
 		return false
 	}
+	a, ok := s.announced[k]
 	_, resend := s.resend[k]
 	return resend || !ok || a.sha != sha || (a.expired && !a.consumed)
 }
@@ -229,6 +236,7 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 		if k.fork == fork && !ready[k] {
 			delete(s.unbound, k)
 			delete(s.holdUntil, k)
+			delete(s.heldSHA, k)
 		}
 	}
 }

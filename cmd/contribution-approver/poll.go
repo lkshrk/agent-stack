@@ -34,11 +34,13 @@ type poller struct {
 	told        map[prKey]map[string]bool
 	unsent      map[prKey][]notice
 	prTimeout   time.Duration
+	// started separates reviews a restart may already have reported from reviews this process must report.
+	started time.Time
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout,
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, started: codes.now(),
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
 		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},
 	}
@@ -85,6 +87,7 @@ func (p *poller) poll(ctx context.Context) {
 
 func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 	fork := cfg.Fork
+	p.flush(ctx, fork)
 	if p.login == "" {
 		login, err := p.gh.login(ctx)
 		if err != nil {
@@ -98,7 +101,6 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 	if err := p.gh.verifyFork(ctx, cfg); err != nil {
 		return err
 	}
-	p.flush(ctx, fork)
 	pulls, err := p.gh.openPulls(ctx, cfg)
 	if err != nil {
 		return err
@@ -177,7 +179,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 	}
 	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
 	if err != nil {
-		p.codes.bindFailed(k)
+		p.codes.bindFailed(k, sha)
 		return fmt.Errorf("announced, but listing reviews to bind it failed: %w", err)
 	}
 	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body), last)

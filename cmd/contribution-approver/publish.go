@@ -41,9 +41,9 @@ type publishDecision struct {
 	title, body  string
 	lastEditedAt *time.Time
 	reannounce   bool
-	// unannounced: the only binding failure is that no announcement of sha is known, as after a restart.
-	unannounced bool
-	pull        string
+	// unbound: every check up to the announcement binding passed, but the approval binds to no announcement.
+	unbound bool
+	pull    string
 }
 
 type announcementLog interface {
@@ -146,8 +146,7 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 		return d.refuse(err)
 	}
 	if err := checkAnnounced(sent, k, d.sha, digest, d.reviewID); err != nil {
-		_, known := sent.announcementOf(k, d.sha)
-		d.unannounced = !known
+		d.unbound = true
 		return d.refuse(err)
 	}
 	if err := g.checkCI(ctx, cfg, d.sha); err != nil {
