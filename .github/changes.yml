@@ -37,12 +37,14 @@ omnigent-host:
   - '.claude-plugin/**'
   - '.agents/**'
   - 'plugins/**'
+  - 'config/public-contributions.yaml'
 omnigent-server:
   - *shared
   - 'policies/omnigent/**'
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-server/**'
+  - 'config/public-contributions.yaml'
 agent-tools:
   - *shared
   - 'images/agent-tools/**'

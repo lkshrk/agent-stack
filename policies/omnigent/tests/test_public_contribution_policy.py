@@ -6,6 +6,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from . import require_yaml
+
+require_yaml()
+
 from agent_stack_policies import public_contributions
 from agent_stack_policies.public_contributions import prepare_operation
 

@@ -7,6 +7,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from . import require_yaml
+
+require_yaml()
+
 from agent_stack_policies.contribution_checkout import CheckoutError, prepare_checkout
 from agent_stack_policies.public_contributions import Registry
 

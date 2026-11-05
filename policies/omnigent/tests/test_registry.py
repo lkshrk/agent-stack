@@ -5,7 +5,10 @@ import unittest
 
 from agent_stack_policies import POLICY_REGISTRY
 
-from . import assert_not_ask, test_agents, test_loop, test_merge, test_paths, test_process_secrets, test_public_contribution_policy, test_readonly, test_result, test_secret_files, test_spawn, test_tools, test_vcs
+from . import HAS_YAML, assert_not_ask, test_agents, test_loop, test_merge, test_paths, test_process_secrets, test_readonly, test_result, test_secret_files, test_spawn, test_tools, test_vcs
+
+NEEDS_YAML = {"agent_stack_policies.public_contributions"}
+ENTRIES = [entry for entry in POLICY_REGISTRY if HAS_YAML or entry["handler"].rpartition(".")[0] not in NEEDS_YAML]
 
 EVENTS_BY_MODULE = {
     "agent_stack_policies.agents": test_agents.EVENTS,
@@ -20,8 +23,11 @@ EVENTS_BY_MODULE = {
     "agent_stack_policies.readonly": test_readonly.EVENTS,
     "agent_stack_policies.secret_files": test_secret_files.EVENTS,
     "agent_stack_policies.process_secrets": test_process_secrets.EVENTS,
-    "agent_stack_policies.public_contributions": test_public_contribution_policy.EVENTS,
 }
+if HAS_YAML:
+    from . import test_public_contribution_policy
+
+    EVENTS_BY_MODULE["agent_stack_policies.public_contributions"] = test_public_contribution_policy.EVENTS
 DEFAULT_PARAMS = {
     "agent_stack_policies.agents": {},
     "agent_stack_policies.spawn": {"limit": 3},
@@ -49,15 +55,15 @@ def resolve(handler):
 
 class RegistryTest(unittest.TestCase):
     def test_registry_handlers_resolve(self):
-        self.assertTrue(POLICY_REGISTRY)
-        for entry in POLICY_REGISTRY:
+        self.assertTrue(ENTRIES)
+        for entry in ENTRIES:
             _, factory = resolve(entry["handler"])
             self.assertTrue(callable(factory), entry["handler"])
             self.assertEqual(entry["kind"], "factory")
             self.assertEqual(entry["params_schema"]["type"], "object")
 
     def test_registry_schema_lists_required(self):
-        for entry in POLICY_REGISTRY:
+        for entry in ENTRIES:
             _, factory = resolve(entry["handler"])
             required = {
                 name
@@ -69,7 +75,7 @@ class RegistryTest(unittest.TestCase):
             self.assertTrue(required <= set(schema["properties"]), entry["handler"])
 
     def test_no_policy_returns_ask(self):
-        for entry in POLICY_REGISTRY:
+        for entry in ENTRIES:
             module, factory = resolve(entry["handler"])
             policy = factory(**DEFAULT_PARAMS[module.__name__])
             for event in EVENTS_BY_MODULE[module.__name__]:

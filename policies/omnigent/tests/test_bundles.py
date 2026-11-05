@@ -8,6 +8,7 @@ from pathlib import Path
 
 from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT
 
+from . import HAS_YAML
 from .scaling import CEILING, GROWTH_LIMIT, growth
 
 IN_IMAGE = os.environ.get("AGENT_STACK_IN_IMAGE") == "1"
@@ -1318,6 +1319,7 @@ class PublicContributionEngineTest(unittest.TestCase):
                     self.assertEqual(out["public_contributions"].action.name, "DENY")
 
 
+@unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
 class ContributionPromptTest(unittest.TestCase):
     def prompt(self, bundle):
         import yaml
@@ -1362,6 +1364,7 @@ class ContributionPromptTest(unittest.TestCase):
                     self.assertIn(phrase, prompt)
 
 
+@unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
 class GitDirPathGuardTest(unittest.TestCase):
     def test_every_writer_path_guard_denies_git_internals(self):
         import yaml

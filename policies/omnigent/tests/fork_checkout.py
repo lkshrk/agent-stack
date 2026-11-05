@@ -5,6 +5,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from . import require_git, require_yaml
+
+require_yaml()
+
 from agent_stack_policies import contribution_vcs, public_contributions
 
 REGISTRY = Path(__file__).resolve().parents[3] / "config" / "public-contributions.yaml"
@@ -27,6 +31,7 @@ def _environment() -> dict[str, str]:
 
 
 def git(tree: Path, *args: str) -> str:
+    require_git()
     return subprocess.run(
         ["git", "-C", str(tree), *args], check=True, capture_output=True, text=True, env=_environment()
     ).stdout

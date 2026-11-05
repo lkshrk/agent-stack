@@ -1,3 +1,21 @@
+import importlib.util
+import shutil
+import unittest
+
+HAS_YAML = importlib.util.find_spec("yaml") is not None
+HAS_GIT = shutil.which("git") is not None
+
+
+def require_yaml():
+    if not HAS_YAML:
+        raise unittest.SkipTest("needs PyYAML, which the Omnigent images and CI provide")
+
+
+def require_git():
+    if not HAS_GIT:
+        raise unittest.SkipTest("needs git, which omnigent-host and CI provide")
+
+
 def tool_call_event(name, arguments=None, state=None):
     return {
         "type": "tool_call",

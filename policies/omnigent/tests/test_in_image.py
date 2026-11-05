@@ -46,12 +46,15 @@ class InImageTest(unittest.TestCase):
                 self.assertTrue(mode & stat.S_IXOTH, path)
 
     def test_public_contribution_runtime_files_are_root_owned(self):
-        for path in [REGISTRY_PATH, HELPER_PATH, INSTALL_ROOT / PACKAGE / "public_contributions.py"]:
+        host = HELPER_PATH.parent.is_dir()
+        for path in [REGISTRY_PATH, INSTALL_ROOT / PACKAGE / "public_contributions.py", *([HELPER_PATH] if host else [])]:
             with self.subTest(path=path):
                 mode = path.stat().st_mode
                 self.assertEqual(path.stat().st_uid, 0)
                 self.assertTrue(mode & stat.S_IROTH, path)
                 self.assertFalse(mode & stat.S_IWOTH, path)
+        if not host:
+            return
 
         result = subprocess.run(
             [str(HELPER_PATH), "list"],
