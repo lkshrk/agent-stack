@@ -101,6 +101,12 @@ func (s *codeStore) cancelReannouncement(k prKey) {
 	delete(s.resend, k)
 }
 
+func (s *codeStore) held(k prKey) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.now().Before(s.holdUntil[k])
+}
+
 func (s *codeStore) reannouncing(k prKey) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

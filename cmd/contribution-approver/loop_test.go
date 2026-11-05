@@ -871,3 +871,72 @@ func TestOneSlowPullRequestDoesNotStarveTheOthers(t *testing.T) {
 		t.Fatalf("messages = %q, want #7 announced", h.signal.messages())
 	}
 }
+
+func failBindListing(h *harness) {
+	h.poller.notify = &hookNotifier{inner: h.poller.notify, after: func() {
+		h.gh.failWith(http.MethodGet, forkReviews, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	}}
+}
+
+func lastCode(t *testing.T, h *harness) string {
+	t.Helper()
+	msgs := h.signal.messages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if strings.HasPrefix(msgs[i], "Contribution ready") {
+			return codeIn(t, msgs[i])
+		}
+	}
+	t.Fatal("no announcement")
+	return ""
+}
+
+func TestRepliesPromiseANewCodeTruthfully(t *testing.T) {
+	const minute = "a new code follows within a minute"
+	t.Run("expired, held", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		failBindListing(h)
+		pollTimes(h, 2)
+		h.clock.advance(codeTTL)
+		pollTimes(h, 1)
+		if readyMessages(h) != 3 || !h.codes.held(prK) {
+			t.Fatalf("announcements = %d, held = %v; want 3 and a hold", readyMessages(h), h.codes.held(prK))
+		}
+		h.clock.advance(codeTTL)
+		approveWith(h, lastCode(t, h))
+		msgs := h.signal.messages()
+		if done := msgs[len(msgs)-1]; !strings.Contains(done, "expired") || !strings.HasSuffix(done, heldPromise) || strings.Contains(done, minute) {
+			t.Fatalf("reply = %q, want the held promise", done)
+		}
+	})
+	t.Run("expired, not held", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		pollTimes(h, 1)
+		h.clock.advance(codeTTL)
+		approveWith(h, lastCode(t, h))
+		msgs := h.signal.messages()
+		if done := msgs[len(msgs)-1]; !strings.Contains(done, "expired") || !strings.Contains(done, "follows within a minute") || strings.Contains(done, heldPromise) {
+			t.Fatalf("reply = %q, want the minute promise", done)
+		}
+	})
+	t.Run("changed, held", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		failBindListing(h)
+		pollTimes(h, 2)
+		h.gh.editBody(testFork, prNumber, "Adds the thing, edited.", testAgent)
+		approveWith(h, lastCode(t, h))
+		msgs := h.signal.messages()
+		if done := msgs[len(msgs)-1]; !strings.Contains(done, "changed since the announcement") || !strings.HasSuffix(done, heldPromise) || strings.Contains(done, minute) {
+			t.Fatalf("reply = %q, want the held promise", done)
+		}
+	})
+	t.Run("changed, not held", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		pollTimes(h, 1)
+		h.gh.editBody(testFork, prNumber, "Adds the thing, edited.", testAgent)
+		approveWith(h, lastCode(t, h))
+		msgs := h.signal.messages()
+		if done := msgs[len(msgs)-1]; !strings.Contains(done, "changed since the announcement") || !strings.Contains(done, minute) || strings.Contains(done, heldPromise) {
+			t.Fatalf("reply = %q, want the minute promise", done)
+		}
+	})
+}

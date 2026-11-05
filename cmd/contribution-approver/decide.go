@@ -16,6 +16,8 @@ import (
 
 const reviewTimeout = 20 * time.Second
 
+const heldPromise = "a new code follows once the approver can read the pull request's reviews again; nothing was submitted."
+
 var codeFormat = regexp.MustCompile(`^[0-9]{8}$`)
 
 var reviewEvents = map[string]struct{ event, body, done string }{
@@ -82,7 +84,11 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	case codeExpired:
 		log.Printf("contribution-approver: %s with an expired code for %s#%d", req.Action, p.pr.fork, p.pr.number)
-		d.tell(ctx, fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows with the next announcement if it is still ready.", p.pr.fork, p.pr.number))
+		text := fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows within a minute if it is still ready.", p.pr.fork, p.pr.number)
+		if d.codes.held(p.pr) {
+			text = fmt.Sprintf("That code for %s#%d expired; %s", p.pr.fork, p.pr.number, heldPromise)
+		}
+		d.tell(ctx, text)
 		http.Error(w, "expired code", http.StatusGone)
 		return
 	case codeExpiredStale:
@@ -100,7 +106,11 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("contribution-approver: %s %s#%d refused: the pull request changed since the announcement", req.Action, p.pr.fork, p.pr.number)
-		d.tell(ctx, fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label). Nothing was submitted; if it is still ready, a new code follows within a minute.", p.pr.fork, p.pr.number, readyLabel))
+		text := fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label). Nothing was submitted; if it is still ready, a new code follows within a minute.", p.pr.fork, p.pr.number, readyLabel)
+		if d.codes.held(p.pr) {
+			text = fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label); %s", p.pr.fork, p.pr.number, readyLabel, heldPromise)
+		}
+		d.tell(ctx, text)
 		http.Error(w, "pull request changed", http.StatusConflict)
 		return
 	}
