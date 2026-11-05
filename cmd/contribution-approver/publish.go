@@ -66,17 +66,20 @@ type pageCapError struct{ what string }
 func (e *pageCapError) Error() string { return e.what }
 
 func (d publishDecision) refuse(err error) publishDecision {
+	d.verdict, d.reason = classify(err)
+	return d
+}
+
+func classify(err error) (verdict, string) {
 	var r *refusal
 	var capped *pageCapError
 	switch {
 	case errors.As(err, &r):
-		d.verdict, d.reason = r.verdict, r.reason
+		return r.verdict, r.reason
 	case errors.As(err, &capped):
-		d.verdict, d.reason = verdictHard, capped.what
-	default:
-		d.verdict, d.reason = verdictTransient, err.Error()
+		return verdictHard, capped.what
 	}
-	return d
+	return verdictTransient, err.Error()
 }
 
 type ownerReview struct {
@@ -139,7 +142,7 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 	if head, ok := sent.announcementOf(k, pr.Head.SHA); !ok || head.digest != digest {
 		d.reannounce = true
 	}
-	if d.lastEditedAt, err = g.checkEdits(ctx, cfg, number, pr, d.reviewedAt); err != nil {
+	if d.lastEditedAt, err = g.checkEdits(ctx, cfg, "pullRequest", number, pr.Title, pr.Body, d.reviewedAt); err != nil {
 		return d.refuse(err)
 	}
 	if err := g.checkTimeline(ctx, cfg, number, &d.reviewedAt); err != nil {
@@ -226,7 +229,7 @@ func checkPull(cfg forkConfig, pr pullRequest) error {
 
 const editsQuery = `query($owner: String!, $name: String!, $number: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
+    %s(number: $number) {
       title
       body
       lastEditedAt
@@ -259,29 +262,27 @@ type editHistory struct {
 	} `json:"userContentEdits"`
 }
 
-func (g *githubClient) editPage(ctx context.Context, cfg forkConfig, number int, after *string) (*editHistory, error) {
+func (g *githubClient) editPage(ctx context.Context, cfg forkConfig, kind string, number int, after *string) (*editHistory, error) {
 	owner, name, _ := strings.Cut(cfg.Fork, "/")
 	vars := map[string]any{"owner": owner, "name": name, "number": number, "after": after}
 	var res struct {
 		Data *struct {
-			Repository *struct {
-				PullRequest *editHistory `json:"pullRequest"`
-			} `json:"repository"`
+			Repository map[string]*editHistory `json:"repository"`
 		} `json:"data"`
 		Errors []json.RawMessage `json:"errors"`
 	}
-	err := g.do(ctx, http.MethodPost, "/graphql", nil, map[string]any{"query": editsQuery, "variables": vars}, "application/json", &res)
+	err := g.do(ctx, http.MethodPost, "/graphql", nil, map[string]any{"query": fmt.Sprintf(editsQuery, kind), "variables": vars}, "application/json", &res)
 	if err != nil {
 		return nil, err
 	}
-	if len(res.Errors) > 0 || res.Data == nil || res.Data.Repository == nil || res.Data.Repository.PullRequest == nil {
+	if len(res.Errors) > 0 || res.Data == nil || res.Data.Repository[kind] == nil {
 		return nil, fmt.Errorf("GitHub GraphQL returned an error for the edit history of %s#%d", cfg.Fork, number)
 	}
-	return res.Data.Repository.PullRequest, nil
+	return res.Data.Repository[kind], nil
 }
 
 // The newest revision's diff is the full body, so a dropped post-review revision leaves a mismatch.
-func (g *githubClient) checkEdits(ctx context.Context, cfg forkConfig, number int, pr pullRequest, reviewed time.Time) (*time.Time, error) {
+func (g *githubClient) checkEdits(ctx context.Context, cfg forkConfig, kind string, number int, title, body string, reviewed time.Time) (*time.Time, error) {
 	var first *editHistory
 	var edits []contentEdit
 	var after *string
@@ -289,7 +290,7 @@ func (g *githubClient) checkEdits(ctx context.Context, cfg forkConfig, number in
 		if page > maxPages {
 			return nil, &pageCapError{fmt.Sprintf("%s#%d has more than %d body revisions", cfg.Fork, number, maxPages*pageSize)}
 		}
-		h, err := g.editPage(ctx, cfg, number, after)
+		h, err := g.editPage(ctx, cfg, kind, number, after)
 		if err != nil {
 			return nil, err
 		}
@@ -309,7 +310,7 @@ func (g *githubClient) checkEdits(ctx context.Context, cfg forkConfig, number in
 			return nil, fmt.Errorf("%s#%d edit history has no cursor", cfg.Fork, number)
 		}
 	}
-	if first.Title != pr.Title || first.Body != pr.Body {
+	if first.Title != title || first.Body != body {
 		return nil, fmt.Errorf("%s#%d changed while it was read", cfg.Fork, number)
 	}
 	if first.LastEditedAt != nil && !first.LastEditedAt.Before(reviewed) {
@@ -325,7 +326,7 @@ func (g *githubClient) checkEdits(ctx context.Context, cfg forkConfig, number in
 			return nil, hard("a body revision was deleted after the approval")
 		}
 	}
-	if len(edits) > 0 && edits[0].DeletedAt == nil && (edits[0].Diff == nil || *edits[0].Diff != pr.Body) {
+	if len(edits) > 0 && edits[0].DeletedAt == nil && (edits[0].Diff == nil || *edits[0].Diff != body) {
 		return nil, hard("the body differs from its newest revision, so an edit is missing from its history")
 	}
 	return first.LastEditedAt, nil

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"strings"
 	"time"
 	"unicode"
@@ -20,28 +21,32 @@ const (
 
 // poller is driven by one goroutine, run; only links and kick are shared with the decision handler.
 type poller struct {
-	gh          *githubClient
-	forks       []forkConfig
-	codes       *codeStore
-	notify      notifier
-	login       string
-	refused     map[prKey]string
-	forkTimeout time.Duration
-	kick        chan struct{}
-	links       *upstreamLinks
-	settled     map[prKey]string
-	retried     map[prKey]string
-	told        map[prKey]map[string]bool
-	unsent      map[prKey][]notice
-	prTimeout   time.Duration
+	gh           *githubClient
+	forks        []forkConfig
+	codes        *codeStore
+	notify       notifier
+	login        string
+	refused      map[prKey]string
+	forkTimeout  time.Duration
+	kick         chan struct{}
+	links        *upstreamLinks
+	settled      map[prKey]string
+	retried      map[prKey]string
+	told         map[prKey]map[string]bool
+	unsent       map[prKey][]notice
+	prTimeout    time.Duration
+	draftTimeout time.Duration
+	livePulls    map[string]map[prKey]bool
+	liveDrafts   map[string]map[prKey]bool
 	// started separates reviews a restart may already have reported from reviews this process must report.
 	started time.Time
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, started: codes.now(),
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, started: codes.now(),
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
+		livePulls: map[string]map[prKey]bool{}, liveDrafts: map[string]map[prKey]bool{},
 		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},
 	}
 }
@@ -77,33 +82,48 @@ func contentDigest(title, body string) string {
 func (p *poller) poll(ctx context.Context) {
 	for _, cfg := range p.forks {
 		fctx, cancel := context.WithTimeout(ctx, p.forkTimeout)
-		err := p.pollFork(fctx, cfg)
+		verified, err := p.pollFork(fctx, cfg)
 		cancel()
 		if err != nil {
 			log.Printf("contribution-approver: poll %s: %v", cfg.Fork, err)
 		}
+		if !verified {
+			continue
+		}
+		dctx, cancel := context.WithTimeout(ctx, p.forkTimeout)
+		if err := p.pollDrafts(dctx, cfg); err != nil {
+			log.Printf("contribution-approver: drafts %s: %v", cfg.Fork, err)
+		}
+		cancel()
+		live := maps.Clone(p.livePulls[cfg.Fork])
+		if live == nil {
+			live = map[prKey]bool{}
+		}
+		maps.Copy(live, p.liveDrafts[cfg.Fork])
+		p.keepOnly(cfg.Fork, live)
 	}
 }
 
-func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
+// pollFork reports whether the fork was verified, which drafts need before they are polled.
+func (p *poller) pollFork(ctx context.Context, cfg forkConfig) (bool, error) {
 	fork := cfg.Fork
 	p.flush(ctx, fork)
 	if p.login == "" {
 		login, err := p.gh.login(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 		p.login = login
 	}
 	if p.login != cfg.Owner {
-		return fmt.Errorf("the GitHub token belongs to %s, not the fork owner %s", p.login, cfg.Owner)
+		return false, fmt.Errorf("the GitHub token belongs to %s, not the fork owner %s", p.login, cfg.Owner)
 	}
 	if err := p.gh.verifyFork(ctx, cfg); err != nil {
-		return err
+		return false, err
 	}
 	pulls, err := p.gh.openPulls(ctx, cfg)
 	if err != nil {
-		return err
+		return true, err
 	}
 	ready := map[prKey]bool{}
 	for _, pr := range pulls {
@@ -122,8 +142,8 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 		cancel()
 	}
 	p.codes.keepOnly(fork, ready)
-	p.keepOnly(fork, ready)
-	return nil
+	p.livePulls[fork] = ready
+	return true, nil
 }
 
 func isReady(cfg forkConfig, pr pullRequest) bool {

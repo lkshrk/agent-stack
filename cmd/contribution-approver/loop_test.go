@@ -100,7 +100,7 @@ func TestASettledPullRequestNeedsOnlyItsReviewsAndThePullRequest(t *testing.T) {
 			t.Errorf("%s %s sent If-None-Match %q and got %d, want a 304 revalidation", c.Method, c.Path, c.IfNoneMatch, c.Status)
 		}
 	}
-	want := []string{"GET " + forkRepo, "GET " + forkPulls, "GET " + forkReviews, "GET " + forkPR}
+	want := []string{"GET " + forkRepo, "GET " + forkPulls, "GET " + forkReviews, "GET " + forkPR, "GET " + forkIssues}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls = %v, want %v", got, want)
 	}
