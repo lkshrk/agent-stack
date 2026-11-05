@@ -257,6 +257,10 @@ func (c *fakeReq) error(status int, message string) {
 	c.send(status, map[string]any{"message": message, "status": strconv.Itoa(status)})
 }
 
+func (c *fakeReq) invalidField(resource, field, code string) {
+	c.send(http.StatusUnprocessableEntity, map[string]any{"message": "Validation Failed", "errors": []any{map[string]any{"resource": resource, "field": field, "code": code}}, "status": "422"})
+}
+
 func (c *fakeReq) invalid(message string) {
 	c.send(http.StatusUnprocessableEntity, map[string]any{"message": "Validation Failed", "errors": []any{map[string]any{"message": message, "code": "custom"}}, "status": "422"})
 }

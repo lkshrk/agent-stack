@@ -155,16 +155,16 @@ func (g *fakeGitHub) createPull(c *fakeReq) {
 		}
 	}
 	if headRepo == nil {
-		c.invalid("head " + head + " is not in the repository network")
+		c.invalidField("PullRequest", "head", "invalid")
 		return
 	}
 	sha, ok := headRepo.refs[branch]
 	if !ok {
-		c.invalid("head " + head + " does not exist")
+		c.invalidField("PullRequest", "head", "invalid")
 		return
 	}
 	if _, ok := r.refs[base]; !ok {
-		c.invalid("base " + base + " does not exist")
+		c.invalidField("PullRequest", "base", "invalid")
 		return
 	}
 	for _, pr := range r.pulls {

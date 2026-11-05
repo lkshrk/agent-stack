@@ -89,6 +89,7 @@ func (p pullRequest) hasLabel(name string) bool {
 type apiError struct {
 	method, path string
 	status       int
+	body         []byte
 }
 
 func (e *apiError) Error() string {
@@ -128,7 +129,7 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 		return fmt.Errorf("GitHub %s %s: read failed", method, path)
 	}
 	if res.StatusCode/100 != 2 {
-		return &apiError{method: method, path: path, status: res.StatusCode}
+		return &apiError{method: method, path: path, status: res.StatusCode, body: raw}
 	}
 	if b, ok := out.(*[]byte); ok {
 		*b = raw

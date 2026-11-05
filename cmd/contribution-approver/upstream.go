@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -180,6 +181,9 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	err = g.do(ctx, http.MethodPost, "/repos/"+cfg.Upstream+"/pulls", nil, payload, "application/vnd.github+json", &created)
 	var api *apiError
 	if errors.As(err, &api) && api.status == http.StatusUnprocessableEntity {
+		if headTaken(api.body) {
+			return &refusal{verdictTransient, "the upstream head is taken or not visible yet, so opening the pull request waits"}
+		}
 		return hard("GitHub refused to open the upstream pull request")
 	}
 	if err != nil {
@@ -188,6 +192,26 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	res.upstream, res.upstreamURL = created.Number, upstreamURL(cfg, created.Number)
 	res.outcome = outcomePublished
 	return nil
+}
+
+// headTaken matches the 422s that a third party's open pull request or a not yet visible branch cause.
+func headTaken(body []byte) bool {
+	var res struct {
+		Errors []struct {
+			Message string `json:"message"`
+			Field   string `json:"field"`
+			Code    string `json:"code"`
+		} `json:"errors"`
+	}
+	if json.Unmarshal(body, &res) != nil {
+		return false
+	}
+	for _, e := range res.Errors {
+		if strings.HasPrefix(e.Message, "A pull request already exists") || (e.Field == "head" && e.Code == "invalid") {
+			return true
+		}
+	}
+	return false
 }
 
 func upstreamURL(cfg forkConfig, number int) string {

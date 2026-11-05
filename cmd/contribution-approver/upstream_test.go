@@ -794,3 +794,68 @@ func TestPublishBlocksANewCommitApprovedInTheSecondOfTheClose(t *testing.T) {
 	wantNoWritesSince(t, h, before)
 	wantRef(t, h, shaA)
 }
+
+type beforeTransport struct {
+	base         http.RoundTripper
+	method, path string
+	run          func()
+}
+
+func (bt *beforeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method == bt.method && r.URL.Path == bt.path {
+		bt.run()
+	}
+	return bt.base.RoundTrip(r)
+}
+
+func beforeUpstreamPOST(h *harness, run func()) {
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &beforeTransport{base: gh.http.Transport, method: "POST", path: upPulls, run: run}}
+}
+
+const headTakenReason = "the upstream head is taken or not visible yet, so opening the pull request waits"
+
+func TestPublishWaitsWhenGitHubSaysTheHeadIsTaken(t *testing.T) {
+	cases := map[string]func(h *harness){
+		"a third party's open pull request": func(h *harness) { thirdPartyPull(h, "main") },
+		"the branch is not visible": func(h *harness) {
+			beforeUpstreamPOST(h, func() { h.gh.update(func() { delete(h.gh.fork.refs, publishRef) }) })
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			rv := approve(h, shaA)
+			setup(h)
+			r := publishPR(t, h)
+			wantOutcome(t, r, outcomeRetry)
+			if r.reason != headTakenReason || r.dismissed {
+				t.Fatalf("result = %+v", r)
+			}
+			if h.gh.callCount("PUT", "/repos/lkshrk/omnigent/pulls/7/reviews/"+itoa(int(rv.id))+"/dismissals") != 0 || h.gh.reviewsOf(prNumber)[0].state != "APPROVED" {
+				t.Fatal("a taken head dismissed the approval")
+			}
+		})
+	}
+}
+
+func TestPublishRefusesOtherUpstreamPOSTRejections(t *testing.T) {
+	cases := map[string]func(h *harness){
+		"a missing base": func(h *harness) {
+			beforeUpstreamPOST(h, func() { h.gh.update(func() { delete(h.gh.upstream.refs, "main") }) })
+		},
+		"a 422 without errors": func(h *harness) { h.gh.fail("POST", upPulls, 422) },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			approve(h, shaA)
+			setup(h)
+			r := publishPR(t, h)
+			wantOutcome(t, r, outcomeRefused)
+			if !r.dismissed || r.reason != "GitHub refused to open the upstream pull request" {
+				t.Fatalf("result = %+v", r)
+			}
+		})
+	}
+}
