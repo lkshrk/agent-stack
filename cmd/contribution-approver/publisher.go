@@ -73,7 +73,11 @@ func (p *poller) maybePublish(ctx context.Context, cfg forkConfig, k prKey) {
 	case res.alreadyUpstream, res.upstreamUnknown:
 		p.codes.cancelReannouncement(k)
 	case res.outcome == outcomeRetry && res.decision.unbound:
-		if r, ok, err := p.gh.settledUpstream(ctx, cfg, res.decision); err == nil && ok {
+		r, ok, err := p.gh.settledUpstream(ctx, cfg, res.decision)
+		switch {
+		case err != nil:
+			p.codes.cancelReannouncement(k)
+		case ok:
 			if r.carried() {
 				p.codes.cancelReannouncement(k)
 				probed = res.decision.reviewedAt.Before(p.started)
@@ -130,7 +134,7 @@ func (p *poller) report(ctx context.Context, cfg forkConfig, k prKey, res publis
 	case res.outcome == outcomeRefused:
 		p.tellOnce(ctx, k, reasonKey, "Not publishing "+name+at+": "+res.reason+". "+dismissalNote(res))
 	case res.outcome == outcomeRetry:
-		if d.reviewID != 0 {
+		if d.reviewID != 0 && d.verdict == verdictPublish {
 			p.retried[k] = attempt
 		}
 		if res.reason == headTakenReason {

@@ -1047,3 +1047,28 @@ func TestAHardRefusalWithTwoOpenUpstreamPullRequestsStillDismisses(t *testing.T)
 		t.Fatal("a hard refusal that is not upstream did not dismiss")
 	}
 }
+
+func TestAnUnreadableUpstreamNeverReannouncesAnUnboundApproval(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	announcedAndApproved(t, h)
+	pollTimes(h, 1)
+	up := onlyUpstream(t, h)
+	h.gh.editBody(testFork, prNumber, "Adds the thing, edited later.", testAgent)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 1)
+	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	h.clock.advance(time.Minute)
+	h.gh.failWith(http.MethodGet, upPulls, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	before, announced := len(h.signal.messages()), readyMessages(h)
+
+	pollTimes(h, 1)
+
+	if msgs := messagesSince(h, before); len(msgs) != 0 || readyMessages(h) != announced {
+		t.Fatalf("messages = %q, want none while upstream is unreadable", msgs)
+	}
+	pollTimes(h, 2)
+	want := testFork + "#7 at " + shaA + " is already upstream: https://github.com/omnigent-ai/omnigent/pull/" + itoa(up.number) + "; the title and body were not changed."
+	if msgs := messagesSince(h, before); len(msgs) != 1 || msgs[0] != want || readyMessages(h) != announced {
+		t.Fatalf("messages = %q, want only %q", msgs, want)
+	}
+}
