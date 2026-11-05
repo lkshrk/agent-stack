@@ -34,6 +34,7 @@ type issueItem struct {
 	State       string          `json:"state"`
 	Title       string          `json:"title"`
 	Body        string          `json:"body"`
+	CreatedAt   *time.Time      `json:"created_at"`
 	UpdatedAt   *time.Time      `json:"updated_at"`
 	User        *ghUser         `json:"user"`
 	PullRequest json.RawMessage `json:"pull_request"`
@@ -81,10 +82,12 @@ type draftDecision struct {
 	recorded bool
 	// searchable: the draft names one kind and a target, so an identical upstream post can be looked up.
 	searchable bool
-	comment    bool
-	target     int
-	title      string
-	body       string
+	// posted: this approval's upstream link from the ledger; nothing is written upstream again.
+	posted  string
+	comment bool
+	target  int
+	title   string
+	body    string
 }
 
 func (d draftDecision) refuse(err error) draftDecision {
@@ -100,10 +103,22 @@ const (
 	draftRefused
 	draftPublished
 	draftRecorded
+	draftWaiting
 )
 
 func (o draftOutcome) String() string {
-	return [...]string{"nothing", "retry", "refused", "published", "recorded"}[o]
+	return [...]string{"nothing", "retry", "refused", "published", "recorded", "waiting"}[o]
+}
+
+type draftKey struct {
+	fork     string
+	number   int
+	approval int64
+}
+
+type draftPost struct {
+	link    string
+	comment bool
 }
 
 type draftResult struct {
@@ -164,7 +179,7 @@ func (g *githubClient) issueEvents(ctx context.Context, cfg forkConfig, number i
 	return all, err
 }
 
-func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number int) draftDecision {
+func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number int, ledger map[draftKey]draftPost) draftDecision {
 	d := draftDecision{number: number}
 	var is issueItem
 	if err := g.get(ctx, fmt.Sprintf("/repos/%s/issues/%d", cfg.Fork, number), nil, &is); err != nil {
@@ -200,6 +215,10 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 	}
 	if record != nil {
 		d.verdict, d.recorded = verdictPublish, true
+		return d
+	}
+	if post, ok := ledger[draftKey{cfg.Fork, number, d.approval}]; ok {
+		d.verdict, d.posted, d.comment = verdictPublish, post.link, post.comment
 		return d
 	}
 	oneKind := is.hasLabel(issueLabel) != is.hasLabel(commentLabel)
@@ -281,33 +300,33 @@ func checkLabelHistory(is issueItem, events []issueEvent) error {
 	return nil
 }
 
-const labelQuery = `query($owner: String!, $name: String!, $label: String!) {
+var labelQuery = fmt.Sprintf(`query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
-    label(name: $label) { updatedAt }
+    approved: label(name: %q) { updatedAt }
+    issue: label(name: %q) { updatedAt }
+    comment: label(name: %q) { updatedAt }
   }
-}`
+}`, approvedLabel, issueLabel, commentLabel)
 
 func (g *githubClient) checkLabelsUnchanged(ctx context.Context, cfg forkConfig, approvedAt time.Time) error {
 	owner, name, _ := strings.Cut(cfg.Fork, "/")
-	for _, label := range draftLabels {
-		var res struct {
-			Data *struct {
-				Repository *struct {
-					Label *struct {
-						UpdatedAt time.Time `json:"updatedAt"`
-					} `json:"label"`
-				} `json:"repository"`
-			} `json:"data"`
-			Errors []json.RawMessage `json:"errors"`
-		}
-		vars := map[string]any{"owner": owner, "name": name, "label": label}
-		if err := g.do(ctx, http.MethodPost, "/graphql", nil, map[string]any{"query": labelQuery, "variables": vars}, "application/json", &res); err != nil {
-			return err
-		}
-		if len(res.Errors) > 0 || res.Data == nil || res.Data.Repository == nil {
-			return fmt.Errorf("GitHub GraphQL returned an error for the labels of %s", cfg.Fork)
-		}
-		if l := res.Data.Repository.Label; l != nil && !l.UpdatedAt.Before(approvedAt) {
+	var res struct {
+		Data *struct {
+			Repository map[string]*struct {
+				UpdatedAt time.Time `json:"updatedAt"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []json.RawMessage `json:"errors"`
+	}
+	vars := map[string]any{"owner": owner, "name": name}
+	if err := g.do(ctx, http.MethodPost, "/graphql", nil, map[string]any{"query": labelQuery, "variables": vars}, "application/json", &res); err != nil {
+		return err
+	}
+	if len(res.Errors) > 0 || res.Data == nil || len(res.Data.Repository) != len(draftLabels) {
+		return fmt.Errorf("GitHub GraphQL returned an error for the labels of %s", cfg.Fork)
+	}
+	for _, l := range res.Data.Repository {
+		if l != nil && !l.UpdatedAt.Before(approvedAt) {
 			return hard("a draft label was changed at or after the approval")
 		}
 	}
@@ -315,7 +334,7 @@ func (g *githubClient) checkLabelsUnchanged(ctx context.Context, cfg forkConfig,
 }
 
 func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) draftResult {
-	d := p.gh.evaluateDraft(ctx, cfg, number)
+	d := p.gh.evaluateDraft(ctx, cfg, number, p.posted)
 	res := draftResult{decision: d, reason: d.reason}
 	switch {
 	case d.foreign:
@@ -330,7 +349,9 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 		return p.refuseDraft(ctx, cfg, res)
 	case d.recorded:
 		res.outcome = draftRecorded
-		return p.gh.finishDraft(ctx, cfg, res)
+		return p.settleDraft(ctx, cfg, res, "")
+	case d.posted != "":
+		return p.settleDraft(ctx, cfg, res, d.posted)
 	}
 	link, found, err := p.gh.findPublished(ctx, cfg, d)
 	if err == nil && !found {
@@ -348,10 +369,16 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 		}
 		return res
 	}
-	return p.recordDraft(ctx, cfg, res, link)
+	return p.settleDraft(ctx, cfg, p.ledger(cfg, res, link), link)
 }
 
-// refuseDraft spends a hard refusal unless an identical post is already upstream, which is recorded instead.
+func (p *poller) ledger(cfg forkConfig, res draftResult, link string) draftResult {
+	d := res.decision
+	p.posted[draftKey{cfg.Fork, d.number, d.approval}] = draftPost{link: link, comment: d.comment}
+	return res
+}
+
+// refuseDraft spends a hard refusal unless this approval's post is already upstream, which is recorded instead.
 func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResult) draftResult {
 	if !res.decision.searchable {
 		return p.gh.spendDraft(ctx, cfg, res)
@@ -359,42 +386,49 @@ func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResul
 	link, found, err := p.gh.findPublished(ctx, cfg, res.decision)
 	switch {
 	case err == nil && found:
-		return p.recordDraft(ctx, cfg, res, link)
+		return p.settleDraft(ctx, cfg, p.ledger(cfg, res, link), link)
 	case err != nil:
 		if v, _ := classify(err); v != verdictHard {
-			res.outcome, res.reason = draftRetry, "upstream could not be searched, so the refusal waits"
+			res.outcome = draftWaiting
 			return res
 		}
 	}
 	return p.gh.spendDraft(ctx, cfg, res)
 }
 
-// recordDraft writes the owner record, then spends the approval before closing, so a reopened draft never publishes again.
-func (p *poller) recordDraft(ctx context.Context, cfg forkConfig, res draftResult, link string) draftResult {
-	marker := issueMarker
-	if res.decision.comment {
-		marker = commentMarker
+// settleDraft records link, if any, and spends the approval before closing, on its own deadline so an expired evaluation cannot strand a post.
+func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResult, link string) draftResult {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.settleTimeout)
+	defer cancel()
+	d := res.decision
+	if link != "" {
+		marker := issueMarker
+		if d.comment {
+			marker = commentMarker
+		}
+		record := map[string]any{"body": marker + "\n" + link}
+		if err := p.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, d.number), nil, record, "application/vnd.github+json", nil); err != nil {
+			res.outcome, res.reason = draftRetry, "the publish record could not be written: "+err.Error()
+			return res
+		}
+		res.outcome, res.url = draftPublished, link
 	}
-	record := map[string]any{"body": marker + "\n" + link}
-	if err := p.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, res.decision.number), nil, record, "application/vnd.github+json", nil); err != nil {
-		res.outcome, res.reason = draftRetry, "the publish record could not be written: "+err.Error()
-		return res
-	}
-	res.outcome, res.url = draftPublished, link
-	return p.gh.finishDraft(ctx, cfg, res)
-}
-
-func (g *githubClient) finishDraft(ctx context.Context, cfg forkConfig, res draftResult) draftResult {
-	if res.unlabeled = g.unlabelApproval(ctx, cfg, res.decision.number); res.unlabeled {
-		res.closed = g.closeDraft(ctx, cfg, res.decision.number) == nil
+	if res.unlabeled = p.gh.unlabelApproval(ctx, cfg, d.number); res.unlabeled {
+		res.closed = p.gh.closeDraft(ctx, cfg, d.number) == nil
 	}
 	return res
 }
 
+// since: only a post created at or after this approval can be its publish.
+func (d draftDecision) since(c issueItem) bool {
+	return c.CreatedAt != nil && !c.CreatedAt.Before(d.approvedAt)
+}
+
+// findPublished ignores issue titles because maintainers retitle.
 func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (string, bool, error) {
 	if d.comment {
 		found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target), nil, "upstream comments to search", func(c issueItem) bool {
-			return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0
+			return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0 && d.since(c)
 		})
 		if err := rejected(err, "the upstream issue to comment on cannot be found"); err != nil || found == nil {
 			return "", false, err
@@ -403,7 +437,7 @@ func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draf
 	}
 	q := url.Values{"creator": {cfg.Owner}, "state": {"all"}}
 	found, err := listAll(ctx, g, "/repos/"+cfg.Upstream+"/issues", q, "upstream issues to search", func(c issueItem) bool {
-		return !c.isPull() && c.by(cfg.Owner) && c.Title == d.title && c.Body == d.body && c.Number > 0
+		return !c.isPull() && c.by(cfg.Owner) && c.Body == d.body && c.Number > 0 && d.since(c)
 	})
 	if err != nil || found == nil {
 		return "", false, err
@@ -449,7 +483,8 @@ func rejected(err error, reason string) error {
 
 func rateLimited(api *apiError) bool {
 	return api.header.Get("Retry-After") != "" || api.header.Get("X-Ratelimit-Remaining") == "0" ||
-		strings.Contains(strings.ToLower(string(api.body)), "secondary rate limit")
+		strings.Contains(strings.ToLower(string(api.body)), "secondary rate limit") ||
+		strings.Contains(strings.ToLower(string(api.body)), "abuse detection")
 }
 
 func issueURL(cfg forkConfig, number int) string {
@@ -504,6 +539,11 @@ func (p *poller) pollDrafts(ctx context.Context, cfg forkConfig) error {
 		cancel()
 	}
 	p.liveDrafts[cfg.Fork] = live
+	for k := range p.posted {
+		if k.fork == cfg.Fork && !live[prKey{fork: k.fork, number: k.number}] {
+			delete(p.posted, k)
+		}
+	}
 	return nil
 }
 
@@ -522,6 +562,8 @@ func (p *poller) reportDraft(ctx context.Context, cfg forkConfig, k prKey, res d
 		p.tellOnce(ctx, k, done, withLink(text, ownDraftURL(cfg, res.url)))
 	case draftRecorded:
 		p.tellOnce(ctx, k, done, fmt.Sprintf("The draft %s#%d already has a publish record, so it was not published again.", cfg.Fork, k.number))
+	case draftWaiting:
+		p.tellOnce(ctx, k, fmt.Sprintf("draft\x00wait\x00%d", d.approval), "Not publishing "+name+" yet: "+res.reason+". Upstream cannot be searched for an earlier copy right now, so the approval label stays until it can.")
 	case draftRefused:
 		note := "The approval label was removed; add it again to publish."
 		if !res.unlabeled {

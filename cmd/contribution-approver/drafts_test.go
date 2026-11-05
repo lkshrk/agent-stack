@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -277,7 +279,6 @@ func TestRecoveryReadsEveryUpstreamPage(t *testing.T) {
 func TestOnlyAnIdenticalOwnerIssueCountsAsFiled(t *testing.T) {
 	for name, add := range map[string]func(*harness){
 		"other author": func(h *harness) { h.gh.addIssue(testUpstream, 0, draftTitle, draftBody, "someone") },
-		"other title":  func(h *harness) { h.gh.addIssue(testUpstream, 0, "bug(web): different", draftBody, testOwner) },
 		"other body":   func(h *harness) { h.gh.addIssue(testUpstream, 0, draftTitle, "Different steps.", testOwner) },
 		"pull request": func(h *harness) {
 			h.gh.addPull(testUpstream, fakePR{fakeIssue: &fakeIssue{title: draftTitle, body: draftBody, user: testOwner}, headRepo: testFork, headRef: "x", sha: shaA})
@@ -803,7 +804,7 @@ func TestEvaluateDraftOnlyActsOnOpenApprovedIssues(t *testing.T) {
 	h.gh.closeIssue(testFork, 12, testOwner)
 	h.gh.addIssue(testFork, 13, draftTitle, draftBody, testAgent, issueLabel)
 	for _, n := range []int{11, 12, 13} {
-		d := h.poller.gh.evaluateDraft(context.Background(), h.poller.forks[0], n)
+		d := h.poller.gh.evaluateDraft(context.Background(), h.poller.forks[0], n, nil)
 		if d.verdict != verdictNone || d.foreign {
 			t.Errorf("#%d: verdict %s, want none", n, d.verdict)
 		}
@@ -1053,6 +1054,22 @@ func TestDraftLabelsMustMatchTheirHistory(t *testing.T) {
 		pollTimes(h, 2)
 		wantNothingWritten(t, h, 0)
 	})
+	for name, answer := range map[string]map[string]any{
+		"no data":       {"data": nil},
+		"no repository": {"data": map[string]any{"repository": nil}},
+		"a label missing from the answer": {"data": map[string]any{"repository": map[string]any{
+			"approved": map[string]any{"updatedAt": "2026-01-01T00:00:00Z"}, "issue": nil,
+		}}},
+	} {
+		t.Run("a label answer with "+name+" waits", func(t *testing.T) {
+			h := issueDraft(t)
+			h.gh.mu.Lock()
+			h.gh.gqlLabelAnswer = answer
+			h.gh.mu.Unlock()
+			pollTimes(h, 2)
+			wantNothingWritten(t, h, 0)
+		})
+	}
 	t.Run("a partly failed label read waits", func(t *testing.T) {
 		h := issueDraft(t)
 		h.gh.failLabelGraphQL("boom")
@@ -1082,6 +1099,7 @@ func TestAnUpstream403IsHardUnlessRateLimited(t *testing.T) {
 		"retry-after":          {Status: http.StatusForbidden, Header: map[string]string{"Retry-After": "60"}},
 		"no requests left":     {Status: http.StatusForbidden, Header: map[string]string{"X-Ratelimit-Remaining": "0"}},
 		"secondary rate limit": {Status: http.StatusForbidden, Message: "You have exceeded a secondary rate limit. Please wait a few minutes before you try again."},
+		"abuse detection":      {Status: http.StatusForbidden, Message: "You have triggered an abuse detection mechanism. Please wait a few minutes before you try again."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := commentDraft(t)
@@ -1099,6 +1117,7 @@ func TestAHardRefusalOfAPostAlreadyUpstreamRecordsIt(t *testing.T) {
 	h := issueDraft(t)
 	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
 	pollTimes(h, 1)
+	restart(h)
 	h.gh.comment(testFork, draftNumber, testAgent, "note")
 	h.clock.advance(time.Minute)
 	before := len(h.gh.writes())
@@ -1121,11 +1140,20 @@ func TestAHardRefusalWaitsWhenUpstreamCannotBeSearched(t *testing.T) {
 	h.gh.editBody(testFork, draftNumber, "rewritten", testAgent)
 	h.clock.advance(time.Minute)
 	h.gh.fail("GET", upstreamIssues, http.StatusBadGateway)
-	pollTimes(h, 2)
+	pollTimes(h, 3)
 	wantNothingWritten(t, h, 0)
+	msgs := h.signal.messages()
+	if len(msgs) != 1 || msgs[0] != "Not publishing the draft "+testFork+"#9 yet: the body was edited at or after the approval. Upstream cannot be searched for an earlier copy right now, so the approval label stays until it can." {
+		t.Fatalf("messages = %q, want one waiting notice", msgs)
+	}
 	h.gh.fail("GET", upstreamIssues, 0)
 	pollTimes(h, 1)
-	wantRefused(t, h, 0, "edited at or after the approval")
+	if got := writeSummary(h.gh.writes()); strings.Join(got, ",") != "DELETE "+forkDraftApproval {
+		t.Fatalf("writes = %v, want only the approval label removed", got)
+	}
+	if msgs := h.signal.messages(); len(msgs) != 2 || !strings.HasPrefix(msgs[1], "Not publishing the draft "+testFork+"#9: ") {
+		t.Fatalf("messages = %q, want the refusal after the waiting notice", msgs)
+	}
 }
 
 func TestARefusalWithoutOneKindSearchesNothing(t *testing.T) {
@@ -1136,5 +1164,218 @@ func TestARefusalWithoutOneKindSearchesNothing(t *testing.T) {
 	wantRefused(t, h, 0, "exactly one of")
 	if c := h.gh.callCount("GET", upstreamIssues); c != 0 {
 		t.Fatalf("searched upstream %d times", c)
+	}
+}
+
+func TestAnOlderOwnerPostIsNeverTakenAsThePublish(t *testing.T) {
+	t.Run("a refusal renamed onto an older issue", func(t *testing.T) {
+		h := newDraft(t, issueLabel, draftTitle, draftBody)
+		h.gh.addIssue(testUpstream, 600, "old owner issue", "old owner body", testOwner)
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		h.gh.rename(testFork, draftNumber, "old owner issue", testAgent)
+		h.gh.editBody(testFork, draftNumber, "old owner body", testAgent)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 1)
+		wantRefused(t, h, 0, "at or after the approval")
+	})
+	t.Run("a refusal redirected onto an older comment", func(t *testing.T) {
+		h := newDraft(t, issueLabel, draftTitle, draftBody)
+		h.gh.comment(testUpstream, 42, testOwner, "old owner comment")
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		h.gh.unlabel(testFork, draftNumber, issueLabel, testAgent)
+		h.gh.label(testFork, draftNumber, commentLabel, testAgent)
+		h.gh.rename(testFork, draftNumber, "Comment on #42", testAgent)
+		h.gh.editBody(testFork, draftNumber, "old owner comment", testAgent)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 1)
+		wantRefused(t, h, 0, "after the approval")
+	})
+	for name, mk := range map[string]func(*harness){
+		"issue":   func(h *harness) { h.gh.addIssue(testUpstream, 600, draftTitle, draftBody, testOwner) },
+		"comment": func(h *harness) { h.gh.comment(testUpstream, 42, testOwner, commentBody) },
+	} {
+		t.Run("an identical older "+name+" is posted again", func(t *testing.T) {
+			h := newDraft(t, map[string]string{"issue": issueLabel, "comment": commentLabel}[name], map[string]string{"issue": draftTitle, "comment": "Comment on #42"}[name], map[string]string{"issue": draftBody, "comment": commentBody}[name])
+			mk(h)
+			h.clock.advance(time.Minute)
+			approveDraft(h)
+			h.clock.advance(time.Minute)
+			pollTimes(h, 1)
+			if up := upstreamWrites(h.gh.writes()); len(up) != 1 || up[0].Method != "POST" {
+				t.Fatalf("upstream writes = %v, want one new post", writeSummary(up))
+			}
+		})
+	}
+}
+
+func TestIssueRecoveryIgnoresAMaintainerRetitle(t *testing.T) {
+	h := issueDraft(t)
+	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	restart(h)
+	h.gh.rename(testUpstream, 43, "bug(web): retitled by a maintainer", "maintainer")
+	h.clock.advance(time.Minute)
+	before := len(h.gh.writes())
+	pollTimes(h, 2)
+	w := writesSince(h, before)
+	if got := writeSummary(w); strings.Join(got, ",") != "POST "+forkDraftComments+",DELETE "+forkDraftApproval+",PATCH "+forkDraft {
+		t.Fatalf("writes = %v, want the retitled issue recorded", got)
+	}
+	if w[0].Body["body"] != issueMarker+"\n"+upstreamIssueURL(43) {
+		t.Fatalf("record = %q", w[0].Body["body"])
+	}
+}
+
+func wantOnePostRecorded(t *testing.T, h *harness, link string) {
+	t.Helper()
+	if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+		t.Fatalf("upstream writes = %v, want one", writeSummary(up))
+	}
+	is := draftState(h)
+	if is.state != "closed" || hasLabel(is, approvedLabel) {
+		t.Fatalf("the draft is %s with labels %v, want closed and spent", is.state, is.labels)
+	}
+	if r := ownerRecord(t, h); !strings.HasSuffix(r.body, "\n"+link) {
+		t.Fatalf("record = %q, want the link %s", r.body, link)
+	}
+	if msgs := h.signal.messages(); len(msgs) != 1 || !strings.Contains(msgs[0], "upstream as a") || !strings.HasSuffix(msgs[0], link) {
+		t.Fatalf("messages = %q, want one publish notice", msgs)
+	}
+}
+
+func TestAFailedRecordAndAnUpstreamRetitleDoNotPostTwice(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mk   func(*testing.T) *harness
+		link string
+	}{"issue": {issueDraft, upstreamIssueURL(43)}, "comment": {commentDraft, ""}} {
+		t.Run(name, func(t *testing.T) {
+			h := tc.mk(t)
+			h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+			pollTimes(h, 1)
+			h.gh.rename(testUpstream, 42, "bug(web): retitled by a maintainer", "maintainer")
+			if name == "issue" {
+				h.gh.rename(testUpstream, 43, "bug(web): retitled by a maintainer", "maintainer")
+			}
+			h.clock.advance(time.Minute)
+			pollTimes(h, 2)
+			link := tc.link
+			if link == "" {
+				link = fmt.Sprintf("%s#issuecomment-%d", upstreamIssueURL(42), h.gh.issue(testUpstream, 42).comments[0].id)
+			}
+			wantOnePostRecorded(t, h, link)
+		})
+	}
+}
+
+func TestAFailedSpendThenADeletedRecordDoesNotPostTwice(t *testing.T) {
+	h := newDraft(t, issueLabel, draftTitle, "first text")
+	h.gh.editBody(testFork, draftNumber, draftBody, testAgent)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.gh.failWith("DELETE", forkDraftApproval, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	h.gh.deleteComment(testFork, draftNumber, ownerRecord(t, h).id)
+	h.gh.rename(testUpstream, 43, "bug(web): retitled by a maintainer", "maintainer")
+	h.clock.advance(time.Minute)
+	pollTimes(h, 2)
+	wantOnePostRecorded(t, h, upstreamIssueURL(43))
+}
+
+func TestALostRecordThenAnAgentEditIsNotReportedAsRefused(t *testing.T) {
+	h := issueDraft(t)
+	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	h.gh.editBody(testFork, draftNumber, "agent text", testAgent)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 2)
+	wantOnePostRecorded(t, h, upstreamIssueURL(43))
+}
+
+// answerAfterDeadline delivers the matching response only once the request's context has expired.
+type answerAfterDeadline struct {
+	base         http.RoundTripper
+	method, path string
+}
+
+func (a *answerAfterDeadline) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != a.method || r.URL.Path != a.path {
+		return a.base.RoundTrip(r)
+	}
+	res, err := a.base.RoundTrip(r.WithContext(context.WithoutCancel(r.Context())))
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	res.Body = io.NopCloser(bytes.NewReader(body))
+	<-r.Context().Done()
+	return res, nil
+}
+
+func TestTheCleanupOutlivesTheDraftTimeout(t *testing.T) {
+	h := issueDraft(t)
+	h.poller.draftTimeout = 100 * time.Millisecond
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &answerAfterDeadline{base: gh.http.Transport, method: http.MethodPost, path: upstreamIssues}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	h.poller.poll(ctx)
+
+	wantPublishedOnce(t, h, 0, upstreamIssues, map[string]any{"title": draftTitle, "body": draftBody}, upstreamIssueURL(43), issueMarker)
+}
+
+func TestTheDraftLabelsAreReadInOneQuery(t *testing.T) {
+	h := issueDraft(t)
+	pollTimes(h, 1)
+	n := 0
+	for _, c := range h.gh.allCalls() {
+		if q, _ := c.Body["query"].(string); c.Path == "/graphql" && strings.Contains(q, "label(name:") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("label queries = %d, want 1", n)
+	}
+}
+
+func TestTheLedgerForgetsDraftsThatLeaveTheList(t *testing.T) {
+	h := issueDraft(t)
+	h.gh.fail("DELETE", forkDraftApproval, http.StatusBadGateway)
+	pollTimes(h, 1)
+	if len(h.poller.posted) != 1 {
+		t.Fatalf("ledger = %v, want the post kept while the approval is unspent", h.poller.posted)
+	}
+	h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent)
+	pollTimes(h, 1)
+	if len(h.poller.posted) != 0 {
+		t.Fatalf("ledger = %v, want it pruned", h.poller.posted)
+	}
+}
+
+func TestRecoveryFindsAPostFromTheApprovalsSecond(t *testing.T) {
+	for name, kind := range map[string][]string{"issue": {issueLabel, draftTitle, draftBody}, "comment": {commentLabel, "Comment on #42", commentBody}} {
+		t.Run(name, func(t *testing.T) {
+			h := newDraft(t, kind[0], kind[1], kind[2])
+			approveDraft(h)
+			h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+			pollTimes(h, 1)
+			restart(h)
+			pollTimes(h, 1)
+			if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+				t.Fatalf("upstream writes = %v, want one", writeSummary(up))
+			}
+			if is := draftState(h); is.state != "closed" {
+				t.Fatalf("the draft is %s, want it recorded and closed", is.state)
+			}
+		})
 	}
 }

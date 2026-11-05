@@ -21,30 +21,33 @@ const (
 
 // poller is driven by one goroutine, run; only links and kick are shared with the decision handler.
 type poller struct {
-	gh           *githubClient
-	forks        []forkConfig
-	codes        *codeStore
-	notify       notifier
-	login        string
-	refused      map[prKey]string
-	forkTimeout  time.Duration
-	kick         chan struct{}
-	links        *upstreamLinks
-	settled      map[prKey]string
-	retried      map[prKey]string
-	told         map[prKey]map[string]bool
-	unsent       map[prKey][]notice
-	prTimeout    time.Duration
-	draftTimeout time.Duration
-	livePulls    map[string]map[prKey]bool
-	liveDrafts   map[string]map[prKey]bool
+	gh            *githubClient
+	forks         []forkConfig
+	codes         *codeStore
+	notify        notifier
+	login         string
+	refused       map[prKey]string
+	forkTimeout   time.Duration
+	kick          chan struct{}
+	links         *upstreamLinks
+	settled       map[prKey]string
+	retried       map[prKey]string
+	told          map[prKey]map[string]bool
+	unsent        map[prKey][]notice
+	prTimeout     time.Duration
+	draftTimeout  time.Duration
+	settleTimeout time.Duration
+	// posted: upstream links written by this process, so a retry of the same approval never writes upstream again.
+	posted     map[draftKey]draftPost
+	livePulls  map[string]map[prKey]bool
+	liveDrafts map[string]map[prKey]bool
 	// started separates reviews a restart may already have reported from reviews this process must report.
 	started time.Time
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, started: codes.now(),
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, settleTimeout: prTimeout, posted: map[draftKey]draftPost{}, started: codes.now(),
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
 		livePulls: map[string]map[prKey]bool{}, liveDrafts: map[string]map[prKey]bool{},
 		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},

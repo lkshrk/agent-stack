@@ -31,28 +31,29 @@ type fakeCall struct {
 }
 
 type fakeGitHub struct {
-	mu            sync.Mutex
-	t             testing.TB
-	srv           *httptest.Server
-	clock         *clock
-	login         string
-	repos         map[string]*fakeRepo
-	fork          *fakeRepo
-	upstream      *fakeRepo
-	prs           map[int]*fakePR
-	runs          map[string][]fakeRun
-	parents       map[string][]string
-	trees         map[string]map[string]string
-	reviews       []review
-	failPost      bool
-	failures      map[string]*fakeFailure
-	gqlError      string
-	gqlLabelError string
-	requests      []string
-	calls         []fakeCall
-	billed        int
-	nextID        int64
-	routes        []fakeRoute
+	mu             sync.Mutex
+	t              testing.TB
+	srv            *httptest.Server
+	clock          *clock
+	login          string
+	repos          map[string]*fakeRepo
+	fork           *fakeRepo
+	upstream       *fakeRepo
+	prs            map[int]*fakePR
+	runs           map[string][]fakeRun
+	parents        map[string][]string
+	trees          map[string]map[string]string
+	reviews        []review
+	failPost       bool
+	failures       map[string]*fakeFailure
+	gqlError       string
+	gqlLabelError  string
+	gqlLabelAnswer map[string]any
+	requests       []string
+	calls          []fakeCall
+	billed         int
+	nextID         int64
+	routes         []fakeRoute
 }
 
 // fakeFailure fails matching calls after the first Skip, Times of them (0 = all); After applies the write before failing.

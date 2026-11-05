@@ -13,8 +13,9 @@ import (
 var fakeGQLArg = regexp.MustCompile(`(\w+)\s*:\s*(\$\w+|"[^"]*"|-?\d+)`)
 
 type fakeGQLField struct {
-	args string
-	sub  fakeGQLSel
+	field string
+	args  string
+	sub   fakeGQLSel
 }
 
 type fakeGQLSel map[string]*fakeGQLField
@@ -62,10 +63,17 @@ func fakeGQLBlock(q string, i int) (fakeGQLSel, int, error) {
 		if start == i {
 			return nil, i, fmt.Errorf("unsupported syntax at %q", q[i:])
 		}
-		name, f := q[start:i], &fakeGQLField{}
+		name, f := q[start:i], &fakeGQLField{field: q[start:i]}
 		i = fakeGQLSkip(q, i, " \t\r\n")
 		if i < len(q) && q[i] == ':' {
-			return nil, i, fmt.Errorf("aliases are not supported (%s)", name)
+			i = fakeGQLSkip(q, i+1, " \t\r\n")
+			start = i
+			i = fakeGQLSkip(q, i, "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+			if start == i {
+				return nil, i, fmt.Errorf("unsupported alias at %q", q[i:])
+			}
+			f.field = q[start:i]
+			i = fakeGQLSkip(q, i, " \t\r\n")
 		}
 		if i < len(q) && q[i] == '(' {
 			end := strings.IndexByte(q[i:], ')')
@@ -106,6 +114,9 @@ func fakeGQLFilter(v any, sel fakeGQLSel, path string) (any, error) {
 		}
 		out := map[string]any{}
 		for name, f := range sel {
+			if f.field != name {
+				return nil, fmt.Errorf("aliases are not supported (%s)", name)
+			}
 			field, ok := val[name]
 			if !ok {
 				return nil, fmt.Errorf("the fake does not model %s.%s", path, name)
@@ -178,8 +189,20 @@ func (g *fakeGitHub) graphql(c *fakeReq) {
 		return
 	}
 	repoSel := root["repository"]
-	if len(root) != 1 || repoSel == nil || len(repoSel.sub) != 1 {
-		reject(fmt.Errorf("only repository{pullRequest|issue} is supported"))
+	if len(root) != 1 || repoSel == nil || len(repoSel.sub) == 0 {
+		reject(fmt.Errorf("only repository{pullRequest|issue|label} is supported"))
+		return
+	}
+	labels := true
+	for _, v := range repoSel.sub {
+		labels = labels && v.field == "label"
+	}
+	if labels {
+		g.labelNodes(c, repoSel, args)
+		return
+	}
+	if len(repoSel.sub) != 1 {
+		reject(fmt.Errorf("only one repository{pullRequest|issue} is supported"))
 		return
 	}
 	var kind string
@@ -187,8 +210,8 @@ func (g *fakeGitHub) graphql(c *fakeReq) {
 	for k, v := range repoSel.sub {
 		kind, nodeSel = k, v
 	}
-	if kind == "label" {
-		g.labelNode(c, repoSel, nodeSel, args)
+	if nodeSel.field != kind {
+		reject(fmt.Errorf("aliases are not supported (%s)", kind))
 		return
 	}
 	if kind != "pullRequest" && kind != "issue" {
@@ -309,34 +332,42 @@ func (g *fakeGitHub) editsConnection(is *fakeIssue, a map[string]string) (map[st
 	}, ""
 }
 
-func (g *fakeGitHub) labelNode(c *fakeReq, repoSel, nodeSel *fakeGQLField, args func(string) map[string]string) {
+func (g *fakeGitHub) labelNodes(c *fakeReq, repoSel *fakeGQLField, args func(string) map[string]string) {
 	ra := args(repoSel.args)
 	r, ok := g.repos[strings.ToLower(ra["owner"]+"/"+ra["name"])]
 	if !ok {
 		c.send(http.StatusOK, fakeGQLNotFound(map[string]any{"repository": nil}, "Could not resolve to a Repository.", "repository"))
 		return
 	}
-	name := args(nodeSel.args)["name"]
-	at, ok := r.labelUpdated[name]
-	if !ok {
-		for _, is := range r.issues {
-			if slices.Contains(is.labels, name) {
-				at, ok = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), true
+	if g.gqlLabelAnswer != nil {
+		c.send(http.StatusOK, g.gqlLabelAnswer)
+		return
+	}
+	repo := map[string]any{}
+	for alias, f := range repoSel.sub {
+		name := args(f.args)["name"]
+		at, ok := r.labelUpdated[name]
+		if !ok {
+			for _, is := range r.issues {
+				if slices.Contains(is.labels, name) {
+					at, ok = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), true
+				}
 			}
 		}
+		if !ok {
+			repo[alias] = nil
+			continue
+		}
+		node := map[string]any{"id": "LA_" + name, "name": name, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": fakeTS(at)}
+		filtered, err := fakeGQLFilter(node, f.sub, "label")
+		if err != nil {
+			g.t.Errorf("fake GraphQL cannot answer: %v", err)
+			c.send(http.StatusOK, map[string]any{"errors": []any{map[string]any{"message": err.Error()}}})
+			return
+		}
+		repo[alias] = filtered
 	}
-	if !ok {
-		c.send(http.StatusOK, map[string]any{"data": map[string]any{"repository": map[string]any{"label": nil}}})
-		return
-	}
-	node := map[string]any{"id": "LA_" + name, "name": name, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": fakeTS(at)}
-	filtered, err := fakeGQLFilter(node, nodeSel.sub, "label")
-	if err != nil {
-		g.t.Errorf("fake GraphQL cannot answer: %v", err)
-		c.send(http.StatusOK, map[string]any{"errors": []any{map[string]any{"message": err.Error()}}})
-		return
-	}
-	res := map[string]any{"data": map[string]any{"repository": map[string]any{"label": filtered}}}
+	res := map[string]any{"data": map[string]any{"repository": repo}}
 	if g.gqlLabelError != "" {
 		res["errors"] = []any{map[string]any{"message": g.gqlLabelError}}
 	}
