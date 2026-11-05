@@ -130,10 +130,11 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 	if err != nil {
 		return d.refuse(err)
 	}
+	d.pull = pullFingerprint(pr)
 	if err := checkPull(cfg, pr); err != nil {
 		return d.refuse(err)
 	}
-	d.title, d.body, d.pull = pr.Title, pr.Body, pullFingerprint(pr)
+	d.title, d.body = pr.Title, pr.Body
 	k, digest := prKey{fork: cfg.Fork, number: number}, contentDigest(pr.Title, pr.Body)
 	if head, ok := sent.announcementOf(k, pr.Head.SHA); !ok || head.digest != digest {
 		d.reannounce = true

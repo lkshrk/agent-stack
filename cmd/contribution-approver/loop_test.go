@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -239,16 +240,18 @@ func TestCurrentAfterARetryTellsTheOwnerTheCodeIsPublished(t *testing.T) {
 	}
 }
 
-func TestCurrentWithoutARetryIsNotTold(t *testing.T) {
+func TestANewApprovalOfAPublishedCommitSaysTheTextWasNotChanged(t *testing.T) {
 	h := publishable(t, shaA, nil)
 	announcedAndApproved(t, h)
 	pollTimes(h, 1)
+	up := onlyUpstream(t, h)
 	h.clock.advance(time.Minute)
 	approve(h, shaA)
 	before := len(h.signal.messages())
-	pollTimes(h, 2)
-	if msgs := messagesSince(h, before); len(msgs) != 0 {
-		t.Fatalf("messages = %q, want none for an already published commit", msgs)
+	pollTimes(h, 3)
+	msgs := messagesSince(h, before)
+	if len(msgs) != 1 || msgs[0] != testFork+"#7 at "+shaA+" is already upstream: https://github.com/omnigent-ai/omnigent/pull/"+itoa(up.number)+"; the title and body were not changed." {
+		t.Fatalf("messages = %q, want one saying the text was not changed", msgs)
 	}
 }
 
@@ -336,8 +339,8 @@ func TestDecideNamesAKnownUpstreamPullRequest(t *testing.T) {
 
 	msgs = h.signal.messages()
 	done := msgs[len(msgs)-1]
-	if !strings.Contains(done, "Approved "+testFork+"#7 at "+shaB) || !strings.Contains(done, "https://github.com/omnigent-ai/omnigent/pull/"+itoa(up.number)) {
-		t.Fatalf("done text = %q, want the upstream pull request", done)
+	if !strings.Contains(done, "Approved "+testFork+"#7 at "+shaB) || !strings.Contains(done, "the last known upstream pull request is https://github.com/omnigent-ai/omnigent/pull/"+itoa(up.number)) {
+		t.Fatalf("done text = %q, want the last known upstream pull request", done)
 	}
 }
 
@@ -644,5 +647,227 @@ func TestAPublishedNoticeThatFailedIsSentOnTheNextPoll(t *testing.T) {
 
 	if msgs := messagesSince(h, before); len(msgs) != 1 || !strings.HasPrefix(msgs[0], "Published ") {
 		t.Fatalf("messages = %q, want the publish notice once", msgs)
+	}
+}
+
+func setSignalDown(h *harness, down bool) {
+	h.signal.mu.Lock()
+	defer h.signal.mu.Unlock()
+	h.signal.fail = down
+}
+
+func countContaining(msgs []string, part string) int {
+	n := 0
+	for _, m := range msgs {
+		if strings.Contains(m, part) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestOwnerNoticesWaitForSignal(t *testing.T) {
+	t.Run("a dismissed refusal", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announcedAndApproved(t, h)
+		h.gh.rename(testFork, prNumber, "feat(web): renamed after the approval", testAgent)
+		h.clock.advance(time.Minute)
+		before := len(h.signal.messages())
+		setSignalDown(h, true)
+		pollTimes(h, 1)
+		setSignalDown(h, false)
+
+		pollTimes(h, 3)
+
+		if n := countContaining(messagesSince(h, before), "The approval was dismissed"); n != 1 {
+			t.Fatalf("messages = %q, want the refusal once", messagesSince(h, before))
+		}
+	})
+	t.Run("a closed upstream pull request", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		closedUpstreamAfterReapproval(t, h)
+		before := len(h.signal.messages())
+		setSignalDown(h, true)
+		pollTimes(h, 1)
+		setSignalDown(h, false)
+
+		pollTimes(h, 3)
+
+		if n := countContaining(messagesSince(h, before), "closed or merged"); n != 1 {
+			t.Fatalf("messages = %q, want the close once", messagesSince(h, before))
+		}
+	})
+	t.Run("a recurring notice while Signal is down", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announcedAndApproved(t, h)
+		thirdPartyPull(h, "main")
+		before := len(h.signal.messages())
+		setSignalDown(h, true)
+		pollTimes(h, 3)
+		setSignalDown(h, false)
+
+		pollTimes(h, 2)
+
+		if n := countContaining(messagesSince(h, before), headTakenReason); n != 1 {
+			t.Fatalf("messages = %q, want the notice once", messagesSince(h, before))
+		}
+	})
+	t.Run("a pull request that stopped being ready", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announcedAndApproved(t, h)
+		h.gh.rename(testFork, prNumber, "feat(web): renamed after the approval", testAgent)
+		h.clock.advance(time.Minute)
+		before := len(h.signal.messages())
+		setSignalDown(h, true)
+		pollTimes(h, 1)
+		h.gh.unlabel(testFork, prNumber, readyLabel, testAgent)
+		setSignalDown(h, false)
+
+		pollTimes(h, 2)
+
+		if n := countContaining(messagesSince(h, before), "The approval was dismissed"); n != 1 {
+			t.Fatalf("messages = %q, want the refusal once", messagesSince(h, before))
+		}
+	})
+}
+
+func TestAChangeAfterPublishingNeverDismissesOrRefuses(t *testing.T) {
+	const later = "; later changes to the title or body are not published."
+	const unchanged = "; the title and body were not changed."
+	for name, tc := range map[string]struct {
+		change           func(h *harness)
+		first, reapprove string
+	}{
+		"body edit": {func(h *harness) { h.gh.editBody(testFork, prNumber, "Adds the thing, edited later.", testAgent) }, later, unchanged},
+		"rename":    {func(h *harness) { h.gh.rename(testFork, prNumber, "feat(web): renamed later", testAgent) }, later, unchanged},
+		"base changed and back": {func(h *harness) {
+			h.gh.setRef(testFork, "next", shaMain)
+			h.gh.changeBase(prNumber, "next", testAgent)
+			h.gh.changeBase(prNumber, "main", testAgent)
+		}, "", later},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			announcedAndApproved(t, h)
+			pollTimes(h, 1)
+			up := onlyUpstream(t, h)
+			already := testFork + "#7 at " + shaA + " is already upstream: https://github.com/omnigent-ai/omnigent/pull/" + itoa(up.number)
+			tc.change(h)
+			h.clock.advance(time.Minute)
+			before, writes := len(h.signal.messages()), len(h.gh.writes())
+
+			pollTimes(h, 3)
+
+			wantNoWritesSince(t, h, writes)
+			var want []string
+			if tc.first != "" {
+				want = append(want, already+tc.first)
+			}
+			if msgs := messagesSince(h, before); strings.Join(msgs, "|") != strings.Join(want, "|") {
+				t.Fatalf("messages = %q, want %q", msgs, want)
+			}
+			if h.gh.reviewsOf(prNumber)[0].state != "APPROVED" {
+				t.Fatal("the published approval was dismissed")
+			}
+
+			h.clock.advance(time.Minute)
+			approve(h, shaA)
+			pollTimes(h, 2)
+			wantNoWritesSince(t, h, writes)
+			want = append(want, already+tc.reapprove)
+			if msgs := messagesSince(h, before); strings.Join(msgs, "|") != strings.Join(want, "|") {
+				t.Fatalf("messages after the re-approval = %q, want %q", msgs, want)
+			}
+		})
+	}
+}
+
+func TestARestartRetellsAnUpstreamCloseAfterTheApprovalOnce(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	announcedAndApproved(t, h)
+	pollTimes(h, 1)
+	up := onlyUpstream(t, h)
+	moveHead(h, shaB)
+	setBothCompares(h, shaB, "ahead", 1, map[string]any{"filename": "web/src/thing.ts"})
+	approve(h, shaB)
+	h.clock.advance(time.Minute)
+	h.gh.closeIssue(testUpstream, up.number, maintainer)
+	h.clock.advance(time.Minute)
+	before := len(h.signal.messages())
+	pollTimes(h, 2)
+	if n := countContaining(messagesSince(h, before), "closed or merged after the approval"); n != 1 {
+		t.Fatalf("messages = %q, want the close once", messagesSince(h, before))
+	}
+	restart(h)
+
+	pollTimes(h, 3)
+
+	if n := countContaining(messagesSince(h, before), "closed or merged after the approval"); n != 2 {
+		t.Fatalf("messages = %q, want one resend after the restart", messagesSince(h, before))
+	}
+}
+
+func TestAListingHoldDoesNotDelayANewHead(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.poller.notify = &hookNotifier{inner: h.poller.notify, after: func() {
+		h.gh.failWith(http.MethodGet, forkReviews, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	}}
+	pollTimes(h, 3)
+	if n := readyMessages(h); n != 2 {
+		t.Fatalf("announcements = %d, want 2 before the hold", n)
+	}
+	moveHead(h, shaB)
+	setBothCompares(h, shaB, "ahead", 1, map[string]any{"filename": "web/src/thing.ts"})
+
+	pollTimes(h, 1)
+
+	if n := countContaining(h.signal.messages(), "Head: "+shaB); n != 1 {
+		t.Fatalf("messages = %q, want the new head announced at once", h.signal.messages())
+	}
+}
+
+func TestDecideKicksAfterTellingTheOwner(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.poller.poll(context.Background())
+	code := codeIn(t, h.signal.messages()[0])
+	told := -1
+	gh := h.poller.gh
+	api := (&decider{token: testShared, codes: h.codes, gh: gh, forks: h.poller.forks, notify: h.poller.notify, links: h.poller.links,
+		kick: func() { told = countContaining(h.signal.messages(), "Approved ") }}).routes()
+	req := httptest.NewRequest(http.MethodPost, "/v1/decisions", strings.NewReader(`{"action":"approve","code":"`+code+`"}`))
+	req.Header.Set("Authorization", "Bearer "+testShared)
+	rec := httptest.NewRecorder()
+	api.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || told != 1 {
+		t.Fatalf("answer = %d, done messages at the kick = %d; want the owner told first", rec.Code, told)
+	}
+}
+
+func TestARecurringReadErrorIsLoggedAgainAfterARecovery(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.gh.fail(http.MethodGet, forkReviews, http.StatusBadGateway)
+	pollTimes(h, 2)
+	h.gh.fail(http.MethodGet, forkReviews, 0)
+	pollTimes(h, 1)
+	h.gh.fail(http.MethodGet, forkReviews, http.StatusBadGateway)
+	pollTimes(h, 2)
+	if n := strings.Count(h.logs(), "publish "+testFork+"#7: GitHub GET "+forkReviews); n != 2 {
+		t.Fatalf("read error logged %d times, want once per outage:\n%s", n, h.logs())
+	}
+}
+
+func TestOneSlowPullRequestDoesNotStarveTheOthers(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	h.gh.readyPR(8, shaA)
+	h.poller.prTimeout = 100 * time.Millisecond
+	h.poller.forkTimeout = time.Second
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &stallTransport{base: gh.http.Transport, path: "/repos/lkshrk/omnigent/pulls/8/reviews"}}
+
+	h.poller.poll(context.Background())
+
+	if n := countContaining(h.signal.messages(), testFork+"#7"); n != 1 {
+		t.Fatalf("messages = %q, want #7 announced", h.signal.messages())
 	}
 }

@@ -35,6 +35,14 @@ type publishResult struct {
 	dismissed   bool
 	upstream    int
 	upstreamURL string
+	// alreadyUpstream: a hard refusal came after the approved SHA was already upstream, so nothing was dismissed.
+	alreadyUpstream bool
+}
+
+const carriedReason = "a closed or merged upstream pull request already carried "
+
+func (r publishResult) carried() bool {
+	return r.outcome == outcomeCurrent || (r.outcome == outcomeClosedUpstream && strings.HasPrefix(r.reason, carriedReason))
 }
 
 type upstreamPullRequest struct {
@@ -79,6 +87,12 @@ func (p *poller) publish(ctx context.Context, cfg forkConfig, number int) publis
 		res.outcome = outcomeRetry
 		return res
 	case verdictHard:
+		if fullSHA.MatchString(d.sha) && d.reviewID != 0 {
+			if r, ok := p.gh.settledUpstream(ctx, cfg, d); ok && r.carried() {
+				r.alreadyUpstream = true
+				return r
+			}
+		}
 		return p.gh.spend(ctx, cfg, res)
 	}
 	if err := p.gh.publishUpstream(ctx, cfg, d, &res, true); err != nil {
@@ -160,7 +174,7 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	}
 	if carried != nil {
 		res.upstream, res.upstreamURL = carried.Number, upstreamURL(cfg, carried.Number)
-		res.outcome, res.reason = outcomeClosedUpstream, "a closed or merged upstream pull request already carried "+d.sha
+		res.outcome, res.reason = outcomeClosedUpstream, carriedReason+d.sha
 		return nil
 	}
 	if len(open) == 1 {

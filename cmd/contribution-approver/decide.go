@@ -82,7 +82,7 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	case codeExpired:
 		log.Printf("contribution-approver: %s with an expired code for %s#%d", req.Action, p.pr.fork, p.pr.number)
-		d.tell(ctx, fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows within a minute if it is still ready.", p.pr.fork, p.pr.number))
+		d.tell(ctx, fmt.Sprintf("That code expired. Nothing was submitted; a new code for %s#%d follows with the next announcement if it is still ready.", p.pr.fork, p.pr.number))
 		http.Error(w, "expired code", http.StatusGone)
 		return
 	case codeExpiredStale:
@@ -119,14 +119,14 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("contribution-approver: %s %s#%d at %s submitted", req.Action, p.pr.fork, p.pr.number, p.sha)
+	done := fmt.Sprintf(review.done, p.pr.fork, p.pr.number, p.sha)
+	if link := d.knownUpstream(p.pr); link != "" && req.Action == "approve" {
+		done = fmt.Sprintf("Approved %s#%d at %s. Publishing upstream follows; the last known upstream pull request is %s. The result comes here.", p.pr.fork, p.pr.number, p.sha, link)
+	}
+	d.tell(ctx, done)
 	if d.kick != nil {
 		d.kick()
 	}
-	done := fmt.Sprintf(review.done, p.pr.fork, p.pr.number, p.sha)
-	if link := d.knownUpstream(p.pr); link != "" && req.Action == "approve" {
-		done = fmt.Sprintf("Approved %s#%d at %s. Publishing upstream follows on %s; the result comes here.", p.pr.fork, p.pr.number, p.sha, link)
-	}
-	d.tell(ctx, done)
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintf(w, `{"result":%q}`, req.Action)
 }

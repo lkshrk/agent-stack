@@ -804,6 +804,7 @@ func TestAnAnnouncedHeadWhoseTextChangedIsAnnouncedAgainOnce(t *testing.T) {
 	h.poller.poll(context.Background())
 	h.clock.advance(time.Minute)
 	h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+	h.gh.fail(http.MethodPost, "/repos/omnigent-ai/omnigent/pulls", http.StatusBadGateway)
 	h.poller.poll(context.Background())
 	h.clock.advance(time.Minute)
 	h.gh.editBody(testFork, prNumber, "Adds the thing, reworded.", testAgent)

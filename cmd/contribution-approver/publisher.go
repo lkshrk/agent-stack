@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 )
 
@@ -45,15 +46,14 @@ func settledKey(reviewID int64, sha, pull string) string {
 }
 
 func (p *poller) maybePublish(ctx context.Context, cfg forkConfig, k prKey) {
-	p.flush(ctx, k)
 	rv, err := p.gh.decidingReview(ctx, cfg, k.number)
 	var capped *pageCapError
-	switch {
-	case errors.As(err, &capped):
-	case err != nil:
+	if err != nil && !errors.As(err, &capped) {
 		p.logOnce(k, "read\x00"+err.Error(), "contribution-approver: publish %s#%d: %v", cfg.Fork, k.number, err)
 		return
-	case rv == nil || rv.State != "APPROVED":
+	}
+	if err == nil && (rv == nil || rv.State != "APPROVED") {
+		p.clearReadLogs(k)
 		return
 	}
 	if rv != nil {
@@ -62,16 +62,23 @@ func (p *poller) maybePublish(ctx context.Context, cfg forkConfig, k prKey) {
 			p.logOnce(k, "read\x00"+err.Error(), "contribution-approver: publish %s#%d: %v", cfg.Fork, k.number, err)
 			return
 		}
+		p.clearReadLogs(k)
 		if p.settled[k] == settledKey(rv.ID, rv.CommitID, pullFingerprint(pr)) {
 			return
 		}
 	}
 	res := p.publish(ctx, cfg, k.number)
 	probed := false
-	if res.outcome == outcomeRetry && res.decision.unannounced {
+	switch {
+	case res.alreadyUpstream:
+		p.codes.cancelReannouncement(k)
+	case res.outcome == outcomeRetry && res.decision.unannounced:
 		if r, ok := p.gh.settledUpstream(ctx, cfg, res.decision); ok {
-			p.codes.cancelReannouncement(k)
-			res, probed = r, true
+			if r.carried() {
+				p.codes.cancelReannouncement(k)
+				probed = true
+			}
+			res = r
 		}
 	}
 	p.report(ctx, cfg, k, res, probed)
@@ -97,31 +104,46 @@ func (p *poller) report(ctx context.Context, cfg forkConfig, k prKey, res publis
 	if res.outcome != outcomeRetry {
 		delete(p.retried, k)
 	}
-	p.logOnce(k, fmt.Sprintf("outcome\x00%s\x00%s\x00%s", res.outcome, attempt, res.reason), "contribution-approver: publish %s%s: %s %s", name, at, res.outcome, res.reason)
-	switch res.outcome {
-	case outcomePublished:
+	upstreamKey := fmt.Sprintf("upstream\x00%d", d.reviewID)
+	reasonKey := fmt.Sprintf("tell\x00%d\x00%s", d.reviewID, res.reason)
+	p.logOnce(k, fmt.Sprintf("outcome\x00%s\x00%s\x00%s\x00%v", res.outcome, attempt, res.reason, res.alreadyUpstream), "contribution-approver: publish %s%s: %s %s", name, at, res.outcome, res.reason)
+	switch {
+	case res.alreadyUpstream:
 		p.links.set(k, link)
-		p.send(ctx, k, withLink("Published "+name+at+" upstream", link))
-	case outcomeCurrent:
+		p.tellOnce(ctx, k, fmt.Sprintf("after\x00%d", d.reviewID), name+at+" is already upstream"+linkPart(link)+"; later changes to the title or body are not published.")
+	case res.outcome == outcomePublished:
 		p.links.set(k, link)
-		if retried {
-			p.send(ctx, k, withLink("Published "+name+at+" upstream; the code is published, but the title and body may not be updated", link))
+		p.tellOnce(ctx, k, upstreamKey, withLink("Published "+name+at+" upstream", link))
+	case res.outcome == outcomeCurrent:
+		p.links.set(k, link)
+		switch {
+		case retried:
+			p.tellOnce(ctx, k, upstreamKey, withLink("Published "+name+at+" upstream; the code is published, but the title and body may not be updated", link))
+		case !probed:
+			p.tellOnce(ctx, k, upstreamKey, name+at+" is already upstream"+linkPart(link)+"; the title and body were not changed.")
 		}
-	case outcomeClosedUpstream:
-		p.links.set(k, "")
+	case res.outcome == outcomeClosedUpstream:
+		p.links.set(k, link)
 		if !probed {
-			p.tellOnce(ctx, k, d.reviewID, res.reason, withLink("Not publishing "+name+at+": "+res.reason, link))
+			p.tellOnce(ctx, k, reasonKey, withLink("Not publishing "+name+at+": "+res.reason, link))
 		}
-	case outcomeRefused:
-		p.tellOnce(ctx, k, d.reviewID, res.reason, "Not publishing "+name+at+": "+res.reason+". "+dismissalNote(res))
-	case outcomeRetry:
+	case res.outcome == outcomeRefused:
+		p.tellOnce(ctx, k, reasonKey, "Not publishing "+name+at+": "+res.reason+". "+dismissalNote(res))
+	case res.outcome == outcomeRetry:
 		if d.reviewID != 0 {
 			p.retried[k] = attempt
 		}
 		if res.reason == headTakenReason {
-			p.tellOnce(ctx, k, d.reviewID, res.reason, "Publishing "+name+at+" waits: "+res.reason+". It is tried again on every poll.")
+			p.tellOnce(ctx, k, reasonKey, "Publishing "+name+at+" waits: "+res.reason+". It is tried again on every poll.")
 		}
 	}
+}
+
+func linkPart(link string) string {
+	if link == "" {
+		return ""
+	}
+	return ": " + link
 }
 
 const headTakenReason = "the upstream head is taken or not visible yet, so opening the pull request waits"
@@ -150,30 +172,56 @@ func ownUpstreamURL(cfg forkConfig, url string) string {
 	return ""
 }
 
-func (p *poller) tellOnce(ctx context.Context, k prKey, reviewID int64, reason, text string) {
-	key := fmt.Sprintf("tell\x00%d\x00%s", reviewID, reason)
+type notice struct{ key, text string }
+
+// tellOnce marks key only once Signal accepts the text; a failed send waits in unsent for the next poll.
+func (p *poller) tellOnce(ctx context.Context, k prKey, key, text string) {
 	if p.told[k][key] {
 		return
 	}
-	if err := p.notify.Notify(ctx, text); err != nil {
-		log.Printf("contribution-approver: owner notice not sent: %v", err)
-		return
+	for _, n := range p.unsent[k] {
+		if n.key == key {
+			return
+		}
 	}
-	p.mark(k, key)
+	if !p.deliver(ctx, k, notice{key, text}) {
+		p.unsent[k] = append(p.unsent[k], notice{key, text})
+	}
 }
 
-func (p *poller) send(ctx context.Context, k prKey, text string) {
-	if err := p.notify.Notify(ctx, text); err != nil {
+func (p *poller) deliver(ctx context.Context, k prKey, n notice) bool {
+	if err := p.notify.Notify(ctx, n.text); err != nil {
 		log.Printf("contribution-approver: owner notice not sent, retried on the next poll: %v", err)
-		p.unsent[k] = append(p.unsent[k], text)
+		return false
+	}
+	p.mark(k, n.key)
+	return true
+}
+
+func (p *poller) flush(ctx context.Context, fork string) {
+	for k, pending := range p.unsent {
+		if k.fork != fork {
+			continue
+		}
+		var left []notice
+		for _, n := range pending {
+			if !p.deliver(ctx, k, n) {
+				left = append(left, n)
+			}
+		}
+		if len(left) == 0 {
+			delete(p.unsent, k)
+		} else {
+			p.unsent[k] = left
+		}
 	}
 }
 
-func (p *poller) flush(ctx context.Context, k prKey) {
-	pending := p.unsent[k]
-	delete(p.unsent, k)
-	for _, text := range pending {
-		p.send(ctx, k, text)
+func (p *poller) clearReadLogs(k prKey) {
+	for key := range p.told[k] {
+		if strings.HasPrefix(key, "log\x00read\x00") {
+			delete(p.told[k], key)
+		}
 	}
 }
 
@@ -203,11 +251,6 @@ func (p *poller) keepOnly(fork string, ready map[prKey]bool) {
 	for k := range p.told {
 		if k.fork == fork && !ready[k] {
 			delete(p.told, k)
-		}
-	}
-	for k := range p.unsent {
-		if k.fork == fork && !ready[k] {
-			delete(p.unsent, k)
 		}
 	}
 	p.links.keepOnly(fork, ready)

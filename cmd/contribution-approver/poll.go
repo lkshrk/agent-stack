@@ -32,14 +32,15 @@ type poller struct {
 	settled     map[prKey]string
 	retried     map[prKey]string
 	told        map[prKey]map[string]bool
-	unsent      map[prKey][]string
+	unsent      map[prKey][]notice
+	prTimeout   time.Duration
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout,
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout,
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
-		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]string{},
+		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},
 	}
 }
 
@@ -97,6 +98,7 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 	if err := p.gh.verifyFork(ctx, cfg); err != nil {
 		return err
 	}
+	p.flush(ctx, fork)
 	pulls, err := p.gh.openPulls(ctx, cfg)
 	if err != nil {
 		return err
@@ -108,13 +110,14 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 		}
 		k := prKey{fork: fork, number: pr.Number}
 		ready[k] = true
-		p.maybePublish(ctx, cfg, k)
-		if !p.codes.needsAnnouncement(k, pr.Head.SHA) {
-			continue
+		pctx, cancel := context.WithTimeout(ctx, p.prTimeout)
+		p.maybePublish(pctx, cfg, k)
+		if p.codes.needsAnnouncement(k, pr.Head.SHA) {
+			if err := p.announce(pctx, cfg, k, pr.Head.SHA); err != nil {
+				log.Printf("contribution-approver: announce %s#%d: %v", fork, pr.Number, err)
+			}
 		}
-		if err := p.announce(ctx, cfg, k, pr.Head.SHA); err != nil {
-			log.Printf("contribution-approver: announce %s#%d: %v", fork, pr.Number, err)
-		}
+		cancel()
 	}
 	p.codes.keepOnly(fork, ready)
 	p.keepOnly(fork, ready)

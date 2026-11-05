@@ -16,6 +16,7 @@ const (
 	codeTTL        = 30 * time.Minute
 	pollInterval   = 60 * time.Second
 	pollTimeout    = 45 * time.Second
+	prTimeout      = 20 * time.Second
 	minSharedToken = 32
 	defaultGitHub  = "https://api.github.com"
 )

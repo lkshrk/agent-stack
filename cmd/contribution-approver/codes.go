@@ -122,10 +122,10 @@ func (s *codeStore) bindFailed(k prKey) {
 func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.now().Before(s.holdUntil[k]) {
+	a, ok := s.announced[k]
+	if ok && a.sha == sha && s.now().Before(s.holdUntil[k]) {
 		return false
 	}
-	a, ok := s.announced[k]
 	_, resend := s.resend[k]
 	return resend || !ok || a.sha != sha || (a.expired && !a.consumed)
 }
