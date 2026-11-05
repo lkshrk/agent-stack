@@ -31,32 +31,35 @@ type fakeCall struct {
 }
 
 type fakeGitHub struct {
-	mu       sync.Mutex
-	t        testing.TB
-	srv      *httptest.Server
-	clock    *clock
-	login    string
-	repos    map[string]*fakeRepo
-	fork     *fakeRepo
-	upstream *fakeRepo
-	prs      map[int]*fakePR
-	runs     map[string][]fakeRun
-	parents  map[string][]string
-	trees    map[string]map[string]string
-	reviews  []review
-	failPost bool
-	failures map[string]*fakeFailure
-	gqlError string
-	requests []string
-	calls    []fakeCall
-	billed   int
-	nextID   int64
-	routes   []fakeRoute
+	mu            sync.Mutex
+	t             testing.TB
+	srv           *httptest.Server
+	clock         *clock
+	login         string
+	repos         map[string]*fakeRepo
+	fork          *fakeRepo
+	upstream      *fakeRepo
+	prs           map[int]*fakePR
+	runs          map[string][]fakeRun
+	parents       map[string][]string
+	trees         map[string]map[string]string
+	reviews       []review
+	failPost      bool
+	failures      map[string]*fakeFailure
+	gqlError      string
+	gqlLabelError string
+	requests      []string
+	calls         []fakeCall
+	billed        int
+	nextID        int64
+	routes        []fakeRoute
 }
 
 // fakeFailure fails matching calls after the first Skip, Times of them (0 = all); After applies the write before failing.
 type fakeFailure struct {
 	Status      int
+	Header      map[string]string
+	Message     string
 	After       bool
 	Skip, Times int
 	seen        int
@@ -139,6 +142,13 @@ func (g *fakeGitHub) failGraphQL(message string) {
 	g.gqlError = message
 }
 
+// failLabelGraphQL answers label queries with their data plus an error, as a partial GraphQL failure does.
+func (g *fakeGitHub) failLabelGraphQL(message string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.gqlLabelError = message
+}
+
 func (g *fakeGitHub) allCalls() []fakeCall {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -194,15 +204,18 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 			g.route(c)
 			c.w = w
 		}
-		c.injected(f.Status)
+		c.injected(f)
 		return
 	}
 	g.route(c)
 }
 
-func (c *fakeReq) injected(status int) {
-	if status != fakeDrop {
-		c.error(status, "injected failure")
+func (c *fakeReq) injected(f *fakeFailure) {
+	if f.Status != fakeDrop {
+		for k, v := range f.Header {
+			c.w.Header().Set(k, v)
+		}
+		c.error(f.Status, fakeOr(f.Message, "injected failure"))
 		return
 	}
 	c.call.Status = 0

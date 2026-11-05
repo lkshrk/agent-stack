@@ -105,6 +105,7 @@ type apiError struct {
 	method, path string
 	status       int
 	body         []byte
+	header       http.Header
 }
 
 func (e *apiError) Error() string {
@@ -152,7 +153,7 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 	case res.StatusCode == http.StatusNotModified && revalidate:
 		raw = cached.body
 	case res.StatusCode/100 != 2:
-		return &apiError{method: method, path: path, status: res.StatusCode, body: raw}
+		return &apiError{method: method, path: path, status: res.StatusCode, body: raw, header: res.Header}
 	case method == http.MethodGet && res.Header.Get("ETag") != "":
 		g.storeETag(cacheKey, res.Header.Get("ETag"), raw)
 	}

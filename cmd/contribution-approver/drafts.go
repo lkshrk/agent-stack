@@ -79,10 +79,12 @@ type draftDecision struct {
 	// foreign: the newest approval label was applied by someone other than the owner.
 	foreign  bool
 	recorded bool
-	comment  bool
-	target   int
-	title    string
-	body     string
+	// searchable: the draft names one kind and a target, so an identical upstream post can be looked up.
+	searchable bool
+	comment    bool
+	target     int
+	title      string
+	body       string
 }
 
 func (d draftDecision) refuse(err error) draftDecision {
@@ -200,23 +202,34 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		d.verdict, d.recorded = verdictPublish, true
 		return d
 	}
+	oneKind := is.hasLabel(issueLabel) != is.hasLabel(commentLabel)
+	d.title, d.body, d.comment = is.Title, is.Body, is.hasLabel(commentLabel)
+	titled := true
+	if d.comment {
+		m := commentTitle.FindStringSubmatch(is.Title)
+		titled = m != nil
+		if titled {
+			d.target, err = strconv.Atoi(m[1])
+			titled = err == nil
+		}
+	}
+	blank := strings.TrimSpace(is.Body) == ""
+	d.searchable = oneKind && titled && !blank
 	if err := checkDraftEvents(cfg, events, at); err != nil {
 		return d.refuse(err)
 	}
-	if is.hasLabel(issueLabel) == is.hasLabel(commentLabel) {
+	if err := checkLabelHistory(is, events); err != nil {
+		return d.refuse(err)
+	}
+	if err := g.checkLabelsUnchanged(ctx, cfg, d.approvedAt); err != nil {
+		return d.refuse(err)
+	}
+	switch {
+	case !oneKind:
 		return d.refuse(hard("the draft needs exactly one of %s or %s", issueLabel, commentLabel))
-	}
-	d.title, d.body, d.comment = is.Title, is.Body, is.hasLabel(commentLabel)
-	if d.comment {
-		m := commentTitle.FindStringSubmatch(is.Title)
-		if m == nil {
-			return d.refuse(hard("a comment draft's title must be exactly Comment on #<number>"))
-		}
-		if d.target, err = strconv.Atoi(m[1]); err != nil {
-			return d.refuse(hard("a comment draft's title must be exactly Comment on #<number>"))
-		}
-	}
-	if strings.TrimSpace(is.Body) == "" {
+	case !titled:
+		return d.refuse(hard("a comment draft's title must be exactly Comment on #<number>"))
+	case blank:
 		return d.refuse(hard("the draft body is empty"))
 	}
 	last, err := g.checkEdits(ctx, cfg, "issue", number, is.Title, is.Body, d.approvedAt)
@@ -250,6 +263,57 @@ func checkDraftEvents(cfg forkConfig, events []issueEvent, at int) error {
 	return nil
 }
 
+var draftLabels = []string{approvedLabel, issueLabel, commentLabel}
+
+// checkLabelHistory replays the draft labels' events; a repository label renamed into one of them leaves no event, so the replay disagrees.
+func checkLabelHistory(is issueItem, events []issueEvent) error {
+	replayed := map[string]bool{}
+	for _, e := range events {
+		if e.labelled(draftLabels...) {
+			replayed[e.Label.Name] = e.Event == "labeled"
+		}
+	}
+	for _, name := range draftLabels {
+		if replayed[name] != is.hasLabel(name) {
+			return hard("the draft labels do not match their history")
+		}
+	}
+	return nil
+}
+
+const labelQuery = `query($owner: String!, $name: String!, $label: String!) {
+  repository(owner: $owner, name: $name) {
+    label(name: $label) { updatedAt }
+  }
+}`
+
+func (g *githubClient) checkLabelsUnchanged(ctx context.Context, cfg forkConfig, approvedAt time.Time) error {
+	owner, name, _ := strings.Cut(cfg.Fork, "/")
+	for _, label := range draftLabels {
+		var res struct {
+			Data *struct {
+				Repository *struct {
+					Label *struct {
+						UpdatedAt time.Time `json:"updatedAt"`
+					} `json:"label"`
+				} `json:"repository"`
+			} `json:"data"`
+			Errors []json.RawMessage `json:"errors"`
+		}
+		vars := map[string]any{"owner": owner, "name": name, "label": label}
+		if err := g.do(ctx, http.MethodPost, "/graphql", nil, map[string]any{"query": labelQuery, "variables": vars}, "application/json", &res); err != nil {
+			return err
+		}
+		if len(res.Errors) > 0 || res.Data == nil || res.Data.Repository == nil {
+			return fmt.Errorf("GitHub GraphQL returned an error for the labels of %s", cfg.Fork)
+		}
+		if l := res.Data.Repository.Label; l != nil && !l.UpdatedAt.Before(approvedAt) {
+			return hard("a draft label was changed at or after the approval")
+		}
+	}
+	return nil
+}
+
 func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) draftResult {
 	d := p.gh.evaluateDraft(ctx, cfg, number)
 	res := draftResult{decision: d, reason: d.reason}
@@ -263,17 +327,19 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 		res.outcome = draftRetry
 		return res
 	case d.verdict == verdictHard:
-		return p.gh.spendDraft(ctx, cfg, res)
+		return p.refuseDraft(ctx, cfg, res)
 	case d.recorded:
 		res.outcome = draftRecorded
-		res.closed = p.gh.closeDraft(ctx, cfg, number) == nil
-		return res
+		return p.gh.finishDraft(ctx, cfg, res)
 	}
-	file, marker := p.gh.fileIssue, issueMarker
-	if d.comment {
-		file, marker = p.gh.postComment, commentMarker
+	link, found, err := p.gh.findPublished(ctx, cfg, d)
+	if err == nil && !found {
+		post := p.gh.fileIssue
+		if d.comment {
+			post = p.gh.postComment
+		}
+		link, err = post(ctx, cfg, d)
 	}
-	link, err := file(ctx, cfg, d)
 	if err != nil {
 		v, reason := classify(err)
 		res.reason, res.outcome = reason, draftRetry
@@ -282,29 +348,72 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 		}
 		return res
 	}
+	return p.recordDraft(ctx, cfg, res, link)
+}
+
+// refuseDraft spends a hard refusal unless an identical post is already upstream, which is recorded instead.
+func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResult) draftResult {
+	if !res.decision.searchable {
+		return p.gh.spendDraft(ctx, cfg, res)
+	}
+	link, found, err := p.gh.findPublished(ctx, cfg, res.decision)
+	switch {
+	case err == nil && found:
+		return p.recordDraft(ctx, cfg, res, link)
+	case err != nil:
+		if v, _ := classify(err); v != verdictHard {
+			res.outcome, res.reason = draftRetry, "upstream could not be searched, so the refusal waits"
+			return res
+		}
+	}
+	return p.gh.spendDraft(ctx, cfg, res)
+}
+
+// recordDraft writes the owner record, then spends the approval before closing, so a reopened draft never publishes again.
+func (p *poller) recordDraft(ctx context.Context, cfg forkConfig, res draftResult, link string) draftResult {
+	marker := issueMarker
+	if res.decision.comment {
+		marker = commentMarker
+	}
 	record := map[string]any{"body": marker + "\n" + link}
-	if err := p.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, number), nil, record, "application/vnd.github+json", nil); err != nil {
+	if err := p.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, res.decision.number), nil, record, "application/vnd.github+json", nil); err != nil {
 		res.outcome, res.reason = draftRetry, "the publish record could not be written: "+err.Error()
 		return res
 	}
 	res.outcome, res.url = draftPublished, link
-	res.closed = p.gh.closeDraft(ctx, cfg, number) == nil
+	return p.gh.finishDraft(ctx, cfg, res)
+}
+
+func (g *githubClient) finishDraft(ctx context.Context, cfg forkConfig, res draftResult) draftResult {
+	if res.unlabeled = g.unlabelApproval(ctx, cfg, res.decision.number); res.unlabeled {
+		res.closed = g.closeDraft(ctx, cfg, res.decision.number) == nil
+	}
 	return res
 }
 
-func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
+func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (string, bool, error) {
+	if d.comment {
+		found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target), nil, "upstream comments to search", func(c issueItem) bool {
+			return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0
+		})
+		if err := rejected(err, "the upstream issue to comment on cannot be found"); err != nil || found == nil {
+			return "", false, err
+		}
+		return commentURL(cfg, d.target, found.ID), true, nil
+	}
 	q := url.Values{"creator": {cfg.Owner}, "state": {"all"}}
 	found, err := listAll(ctx, g, "/repos/"+cfg.Upstream+"/issues", q, "upstream issues to search", func(c issueItem) bool {
 		return !c.isPull() && c.by(cfg.Owner) && c.Title == d.title && c.Body == d.body && c.Number > 0
 	})
-	if err != nil {
-		return "", err
+	if err != nil || found == nil {
+		return "", false, err
 	}
-	if found != nil {
-		return issueURL(cfg, found.Number), nil
-	}
+	return issueURL(cfg, found.Number), true, nil
+}
+
+func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
 	var created issueItem
-	err = g.do(ctx, http.MethodPost, "/repos/"+cfg.Upstream+"/issues", nil, map[string]any{"title": d.title, "body": d.body}, "application/vnd.github+json", &created)
+	err := g.do(ctx, http.MethodPost, "/repos/"+cfg.Upstream+"/issues", nil, map[string]any{"title": d.title, "body": d.body}, "application/vnd.github+json", &created)
 	if err := rejected(err, "GitHub refused to file the issue upstream"); err != nil {
 		return "", err
 	}
@@ -313,17 +422,8 @@ func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDec
 
 func (g *githubClient) postComment(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
 	path := fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target)
-	found, err := listAll(ctx, g, path, nil, "upstream comments to search", func(c issueItem) bool {
-		return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0
-	})
-	if err := rejected(err, "the upstream issue to comment on cannot be found"); err != nil {
-		return "", err
-	}
-	if found != nil {
-		return commentURL(cfg, d.target, found.ID), nil
-	}
 	var created issueItem
-	err = g.do(ctx, http.MethodPost, path, nil, map[string]any{"body": d.body}, "application/vnd.github+json", &created)
+	err := g.do(ctx, http.MethodPost, path, nil, map[string]any{"body": d.body}, "application/vnd.github+json", &created)
 	if err := rejected(err, "GitHub refused the upstream comment"); err != nil {
 		return "", err
 	}
@@ -333,10 +433,23 @@ func (g *githubClient) postComment(ctx context.Context, cfg forkConfig, d draftD
 // rejected turns the answers that a retry cannot change into a hard refusal.
 func rejected(err error, reason string) error {
 	var api *apiError
-	if errors.As(err, &api) && (api.status == http.StatusNotFound || api.status == http.StatusGone || api.status == http.StatusUnprocessableEntity) {
+	if !errors.As(err, &api) {
+		return err
+	}
+	switch api.status {
+	case http.StatusNotFound, http.StatusGone, http.StatusUnprocessableEntity:
 		return hard("%s", reason)
+	case http.StatusForbidden:
+		if !rateLimited(api) {
+			return hard("%s", reason)
+		}
 	}
 	return err
+}
+
+func rateLimited(api *apiError) bool {
+	return api.header.Get("Retry-After") != "" || api.header.Get("X-Ratelimit-Remaining") == "0" ||
+		strings.Contains(strings.ToLower(string(api.body)), "secondary rate limit")
 }
 
 func issueURL(cfg forkConfig, number int) string {
@@ -347,8 +460,10 @@ func commentURL(cfg forkConfig, number int, id int64) string {
 	return fmt.Sprintf("%s#issuecomment-%d", issueURL(cfg, number), id)
 }
 
+var draftURL = regexp.MustCompile(`^https://github\.com/([^/]+/[^/]+)/issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?$`)
+
 func ownDraftURL(cfg forkConfig, link string) string {
-	if regexp.MustCompile(`^https://github\.com/` + regexp.QuoteMeta(cfg.Upstream) + `/issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?$`).MatchString(link) {
+	if m := draftURL.FindStringSubmatch(link); m != nil && m[1] == cfg.Upstream {
 		return link
 	}
 	return ""

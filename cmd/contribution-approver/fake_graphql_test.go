@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var fakeGQLArg = regexp.MustCompile(`(\w+)\s*:\s*(\$\w+|"[^"]*"|-?\d+)`)
@@ -185,6 +187,10 @@ func (g *fakeGitHub) graphql(c *fakeReq) {
 	for k, v := range repoSel.sub {
 		kind, nodeSel = k, v
 	}
+	if kind == "label" {
+		g.labelNode(c, repoSel, nodeSel, args)
+		return
+	}
 	if kind != "pullRequest" && kind != "issue" {
 		reject(fmt.Errorf("unsupported repository field %s", kind))
 		return
@@ -301,4 +307,38 @@ func (g *fakeGitHub) editsConnection(is *fakeIssue, a map[string]string) (map[st
 		"totalCount": len(newest), "nodes": nodes,
 		"pageInfo": map[string]any{"hasNextPage": end < len(newest), "hasPreviousPage": start > 0, "endCursor": endCursor, "startCursor": startCursor},
 	}, ""
+}
+
+func (g *fakeGitHub) labelNode(c *fakeReq, repoSel, nodeSel *fakeGQLField, args func(string) map[string]string) {
+	ra := args(repoSel.args)
+	r, ok := g.repos[strings.ToLower(ra["owner"]+"/"+ra["name"])]
+	if !ok {
+		c.send(http.StatusOK, fakeGQLNotFound(map[string]any{"repository": nil}, "Could not resolve to a Repository.", "repository"))
+		return
+	}
+	name := args(nodeSel.args)["name"]
+	at, ok := r.labelUpdated[name]
+	if !ok {
+		for _, is := range r.issues {
+			if slices.Contains(is.labels, name) {
+				at, ok = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), true
+			}
+		}
+	}
+	if !ok {
+		c.send(http.StatusOK, map[string]any{"data": map[string]any{"repository": map[string]any{"label": nil}}})
+		return
+	}
+	node := map[string]any{"id": "LA_" + name, "name": name, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": fakeTS(at)}
+	filtered, err := fakeGQLFilter(node, nodeSel.sub, "label")
+	if err != nil {
+		g.t.Errorf("fake GraphQL cannot answer: %v", err)
+		c.send(http.StatusOK, map[string]any{"errors": []any{map[string]any{"message": err.Error()}}})
+		return
+	}
+	res := map[string]any{"data": map[string]any{"repository": map[string]any{"label": filtered}}}
+	if g.gqlLabelError != "" {
+		res["errors"] = []any{map[string]any{"message": g.gqlLabelError}}
+	}
+	c.send(http.StatusOK, res)
 }

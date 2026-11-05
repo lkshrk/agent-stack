@@ -28,6 +28,7 @@ type fakeRepo struct {
 	checks                                 map[string][]fakeCheckRun
 	compares                               map[string]*fakeCompare
 	nextNumber                             int
+	labelUpdated                           map[string]time.Time
 }
 
 type fakeIssue struct {
@@ -112,7 +113,7 @@ func newFakeRepo(fullName, parent, defaultBranch, headSHA string) *fakeRepo {
 	return &fakeRepo{
 		fullName: fullName, owner: strings.SplitN(fullName, "/", 2)[0], parent: parent, defaultBranch: defaultBranch,
 		members: map[string]bool{}, issues: map[int]*fakeIssue{}, pulls: map[int]*fakePR{}, refs: map[string]string{defaultBranch: headSHA},
-		runs: map[string][]fakeRun{}, checks: map[string][]fakeCheckRun{}, compares: map[string]*fakeCompare{}, nextNumber: 1,
+		runs: map[string][]fakeRun{}, checks: map[string][]fakeCheckRun{}, compares: map[string]*fakeCompare{}, nextNumber: 1, labelUpdated: map[string]time.Time{},
 	}
 }
 
@@ -273,7 +274,11 @@ func (g *fakeGitHub) newPull(r *fakeRepo, pr *fakePR) *fakePR {
 func (g *fakeGitHub) addIssue(repo string, number int, title, body, user string, labels ...string) fakeIssue {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return *cloneIssue(g.newIssue(g.mustRepo(repo), number, title, body, user, labels))
+	is := g.newIssue(g.mustRepo(repo), number, title, body, user, nil)
+	for _, l := range labels {
+		g.addLabel(is, l, user)
+	}
+	return *cloneIssue(is)
 }
 
 func (g *fakeGitHub) issue(repo string, number int) fakeIssue {
@@ -491,6 +496,31 @@ func (g *fakeGitHub) comment(repo string, number int, user, body string) fakeCom
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return *g.newComment(g.mustIssue(g.mustRepo(repo), number), user, body)
+}
+
+func (g *fakeGitHub) deleteComment(repo string, number int, id int64) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	is := g.mustIssue(g.mustRepo(repo), number)
+	i := slices.IndexFunc(is.comments, func(c *fakeComment) bool { return c.id == id })
+	if i < 0 {
+		g.t.Fatalf("%s#%d has no comment %d", repo, number, id)
+	}
+	is.comments = slices.Delete(is.comments, i, i+1)
+}
+
+// renameRepoLabel renames a repository label: issues carry the new name, their events keep the old one, and no event is recorded.
+func (g *fakeGitHub) renameRepoLabel(repo, from, to string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	r := g.mustRepo(repo)
+	for _, is := range r.issues {
+		if i := slices.Index(is.labels, from); i >= 0 {
+			is.labels[i] = to
+		}
+	}
+	delete(r.labelUpdated, from)
+	r.labelUpdated[to] = g.now()
 }
 
 func (g *fakeGitHub) newComment(is *fakeIssue, user, body string) *fakeComment {
