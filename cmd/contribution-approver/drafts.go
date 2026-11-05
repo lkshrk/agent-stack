@@ -243,7 +243,7 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 	if d.comment {
 		d.target = current
 	}
-	d.targets = targetsSince(events, at, is.Title)
+	d.targets = targetsSince(events, cfg.Owner, is.Title)
 	blank := strings.TrimSpace(is.Body) == ""
 	if edited {
 		return d.refuse(hard("a publish record on the draft was edited; delete the edited publish record comment on the draft, then approve again"))
@@ -289,17 +289,24 @@ func commentTarget(title string) (int, bool) {
 	return n, err == nil
 }
 
-// targetsSince lists the comment targets of the title at the approval, recovered from the first later rename, and of the current title.
-func targetsSince(events []issueEvent, at int, title string) []int {
-	approved := title
-	for _, e := range events[at+1:] {
-		if e.Event == "renamed" && e.Rename != nil {
-			approved = e.Rename.From
-			break
+// targetsSince lists the comment targets of the title at every owner approval, recovered from the first rename after it, and of the current title.
+func targetsSince(events []issueEvent, owner, title string) []int {
+	var titles []string
+	for i, e := range events {
+		if e.Event != "labeled" || !e.labelled(approvedLabel) || !e.by(owner) {
+			continue
 		}
+		approved := title
+		for _, r := range events[i+1:] {
+			if r.Event == "renamed" && r.Rename != nil {
+				approved = r.Rename.From
+				break
+			}
+		}
+		titles = append(titles, approved)
 	}
 	var targets []int
-	for _, t := range []string{approved, title} {
+	for _, t := range append(titles, title) {
 		if n, ok := commentTarget(t); ok && !slices.Contains(targets, n) {
 			targets = append(targets, n)
 		}
@@ -398,10 +405,11 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 	case d.posted != "":
 		return p.settleDraft(ctx, cfg, res, d.posted, draftPublished)
 	}
-	found, link, comment, err := p.gh.findPublished(ctx, cfg, d)
-	if err == nil && found != nil {
-		return p.settleFound(ctx, cfg, res, found, link, comment)
+	hit, err := p.gh.findPublished(ctx, cfg, d)
+	if err == nil && hit != nil {
+		return p.settleFound(ctx, cfg, res, hit)
 	}
+	var link string
 	if err == nil {
 		post := p.gh.fileIssue
 		if d.comment {
@@ -423,16 +431,23 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 	return p.settleDraft(ctx, cfg, res, link, draftPublished)
 }
 
-// settleFound settles a post carrying this draft's marker; one created before this approval with other content is an earlier publish.
-func (p *poller) settleFound(ctx context.Context, cfg forkConfig, res draftResult, found *issueItem, link string, comment bool) draftResult {
-	res.decision.comment = comment
+type upstreamHit struct {
+	post    *issueItem
+	link    string
+	comment bool
+	target  int
+}
+
+// settleFound settles a post carrying this draft's marker; one created before this approval with other content or target is an earlier publish.
+func (p *poller) settleFound(ctx context.Context, cfg forkConfig, res draftResult, hit *upstreamHit) draftResult {
+	res.decision.comment = hit.comment
 	d := res.decision
-	differs := found.Body != d.upstreamBody(cfg) || (!d.comment && found.Title != d.title)
-	if found.CreatedAt != nil && found.CreatedAt.Before(d.approvedAt) && differs {
-		return p.settleDraft(ctx, cfg, res, link, draftAlready)
+	differs := hit.post.Body != d.upstreamBody(cfg) || (!hit.comment && hit.post.Title != d.title) || (hit.comment && hit.target != d.target)
+	if hit.post.CreatedAt != nil && hit.post.CreatedAt.Before(d.approvedAt) && differs {
+		return p.settleDraft(ctx, cfg, res, hit.link, draftAlready)
 	}
-	p.remember(ctx, cfg, d, link)
-	return p.settleDraft(ctx, cfg, res, link, draftPublished)
+	p.remember(ctx, cfg, d, hit.link)
+	return p.settleDraft(ctx, cfg, res, hit.link, draftPublished)
 }
 
 // remember keeps the link until the record is written and tells the owner before anything else can fail.
@@ -468,10 +483,10 @@ func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResul
 	if p.pending(k, refusalKey(d.approval, res.reason)) {
 		return p.gh.spendDraft(ctx, cfg, res)
 	}
-	found, link, comment, err := p.gh.findPublished(ctx, cfg, d)
+	hit, err := p.gh.findPublished(ctx, cfg, d)
 	switch {
-	case err == nil && found != nil:
-		return p.settleFound(ctx, cfg, res, found, link, comment)
+	case err == nil && hit != nil:
+		return p.settleFound(ctx, cfg, res, hit)
 	case err != nil:
 		if v, _ := classify(err); v != verdictHard {
 			res.outcome = draftWaiting
@@ -483,10 +498,11 @@ func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResul
 
 // settleDraft records link, if any, and spends the approval before closing, on its own deadline so an expired evaluation cannot strand a post.
 func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResult, link string, outcome draftOutcome) draftResult {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
-	defer cancel()
 	d := res.decision
 	k := prKey{fork: cfg.Fork, number: d.number}
+	p.tellSettled(ctx, cfg, d, link, outcome)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
+	defer cancel()
 	if link != "" {
 		marker := issueMarker
 		if d.comment {
@@ -504,17 +520,24 @@ func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResul
 	if res.unlabeled = p.gh.unlabelApproval(ctx, cfg, d.number); res.unlabeled {
 		res.closed = p.gh.closeDraft(ctx, cfg, d.number) == nil
 	}
+	return res
+}
+
+// tellSettled tells an earlier publish or a found record before the settle writes, on its own deadline, so a slow record cannot starve it.
+func (p *poller) tellSettled(ctx context.Context, cfg forkConfig, d draftDecision, link string, outcome draftOutcome) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
+	defer cancel()
+	k := prKey{fork: cfg.Fork, number: d.number}
 	switch outcome {
 	case draftAlready:
 		text := fmt.Sprintf("The draft %s#%d is already upstream", cfg.Fork, d.number)
-		if link := ownDraftURL(cfg, res.url); link != "" {
+		if link := ownDraftURL(cfg, link); link != "" {
 			text += ": " + link
 		}
 		p.tellOnce(ctx, k, doneKey(d.approval), text+"; later changes are not published.")
 	case draftRecorded:
 		p.tellOnce(ctx, k, doneKey(d.approval), fmt.Sprintf("The draft %s#%d already has a publish record, so it was not published again.", cfg.Fork, d.number))
 	}
-	return res
 }
 
 func draftMarker(cfg forkConfig, number int) string {
@@ -526,7 +549,7 @@ func (d draftDecision) upstreamBody(cfg forkConfig) string {
 }
 
 // findPublished finds the owner's upstream issue or comment carrying this draft's marker, whatever kind and target the draft names now.
-func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (*issueItem, string, bool, error) {
+func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (*upstreamHit, error) {
 	marker := draftMarker(cfg, d.number)
 	since := url.Values{}
 	if !d.createdAt.IsZero() {
@@ -540,28 +563,28 @@ func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draf
 		return !c.isPull() && c.by(cfg.Owner) && c.Number > 0 && strings.Contains(c.Body, marker)
 	})
 	if err != nil {
-		return nil, "", false, err
+		return nil, err
 	}
 	if found != nil {
-		return found, issueURL(cfg, found.Number), false, nil
+		return &upstreamHit{post: found, link: issueURL(cfg, found.Number)}, nil
 	}
 	for _, target := range d.targets {
 		found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, target), since, "upstream comments to search", func(c issueItem) bool {
 			return c.by(cfg.Owner) && c.ID > 0 && strings.Contains(c.Body, marker)
 		})
-		var api *apiError
-		strict := d.comment && target == d.target
-		if errors.As(err, &api) && api.status == http.StatusNotFound && !strict {
-			continue
-		}
-		if err := rejected(err, "the upstream issue to comment on cannot be found"); err != nil {
-			return nil, "", false, err
+		err = rejected(err, "the upstream issue to comment on cannot be found")
+		if err != nil {
+			strict := d.comment && target == d.target
+			if v, _ := classify(err); v == verdictHard && !strict {
+				continue
+			}
+			return nil, err
 		}
 		if found != nil {
-			return found, commentURL(cfg, target, found.ID), true, nil
+			return &upstreamHit{post: found, link: commentURL(cfg, target, found.ID), comment: true, target: target}, nil
 		}
 	}
-	return nil, "", false, nil
+	return nil, nil
 }
 
 func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {

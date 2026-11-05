@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2018,4 +2019,192 @@ func TestAnIssueDraftNamingAMissingIssueStillFiles(t *testing.T) {
 	h.clock.advance(time.Minute)
 	pollTimes(h, 1)
 	wantPublishedOnce(t, h, 0, upstreamIssues, map[string]any{"title": "Comment on #9999", "body": draftBody}, upstreamIssueURL(43), issueMarker)
+}
+
+func TestTheCurrentTitleCanNameAnEarlierApprovalsTarget(t *testing.T) {
+	h := lostCommentAnswer(t)
+	h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent)
+	h.gh.rename(testFork, draftNumber, "Comment on #44", testAgent)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.gh.rename(testFork, draftNumber, "Comment on #42", testAgent)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 2)
+	if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+		t.Fatalf("upstream writes = %v, want one", writeSummary(up))
+	}
+	for _, m := range h.signal.messages() {
+		if strings.HasPrefix(m, "Not publishing") {
+			t.Fatalf("false refusal notice: %q", m)
+		}
+	}
+	if is := draftState(h); is.state != "closed" {
+		t.Fatalf("the draft is %s, want it recorded", is.state)
+	}
+	ownerRecord(t, h)
+}
+
+func wantOneCommentAndAlreadyUpstream(t *testing.T, h *harness) {
+	t.Helper()
+	up := upstreamWrites(h.gh.writes())
+	if len(up) != 1 || up[0].Path != upstreamComments {
+		t.Fatalf("upstream writes = %v, want only the comment on #42", writeSummary(up))
+	}
+	link := fmt.Sprintf("%s#issuecomment-%d", upstreamIssueURL(42), h.gh.issue(testUpstream, 42).comments[0].id)
+	want := "The draft " + testFork + "#9 is already upstream: " + link + "; later changes are not published."
+	if msgs := h.signal.messages(); !slices.Contains(msgs, want) {
+		t.Fatalf("messages = %q, want %q", msgs, want)
+	}
+}
+
+func publishedCommentRetargeted(t *testing.T) *harness {
+	t.Helper()
+	h := commentDraft(t)
+	h.gh.addIssue(testUpstream, 44, "bug(web): another", "Another.", "someone")
+	pollTimes(h, 1)
+	if up := upstreamWrites(h.gh.writes()); len(up) != 1 || draftState(h).state != "closed" {
+		t.Fatalf("setup: %v %s", writeSummary(up), draftState(h).state)
+	}
+	h.clock.advance(time.Minute)
+	h.gh.reopen(testFork, draftNumber, testAgent)
+	return h
+}
+
+func TestAnEarlierApprovalsCommentIsFoundAfterARetarget(t *testing.T) {
+	t.Run("the record is deleted", func(t *testing.T) {
+		h := publishedCommentRetargeted(t)
+		h.gh.deleteComment(testFork, draftNumber, ownerRecord(t, h).id)
+		h.gh.rename(testFork, draftNumber, "Comment on #44", testAgent)
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 2)
+		wantOneCommentAndAlreadyUpstream(t, h)
+	})
+	t.Run("the record is edited and the owner follows the notice", func(t *testing.T) {
+		h := publishedCommentRetargeted(t)
+		editOwnerComment(h, testFork, draftNumber, commentMarker+"\nhttps://example.invalid/")
+		h.gh.rename(testFork, draftNumber, "Comment on #44", testAgent)
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 1)
+		h.gh.deleteComment(testFork, draftNumber, ownerRecord(t, h).id)
+		if draftState(h).state == "closed" {
+			h.gh.reopen(testFork, draftNumber, testOwner)
+		}
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 2)
+		wantOneCommentAndAlreadyUpstream(t, h)
+	})
+	t.Run("a lost answer, the label stripped, then a retarget", func(t *testing.T) {
+		h := lostCommentAnswer(t)
+		h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent)
+		h.gh.rename(testFork, draftNumber, "Comment on #44", testAgent)
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 2)
+		wantOneCommentAndAlreadyUpstream(t, h)
+	})
+}
+
+func TestAnEarlierTargetThatCannotBeReadIsSkipped(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusGone, http.StatusForbidden, http.StatusUnprocessableEntity} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			h := newDraft(t, issueLabel, "Comment on #77", draftBody)
+			h.gh.fail("GET", "/repos/omnigent-ai/omnigent/issues/77/comments", status)
+			approveDraft(h)
+			h.clock.advance(time.Minute)
+			pollTimes(h, 1)
+			wantPublishedOnce(t, h, 0, upstreamIssues, map[string]any{"title": "Comment on #77", "body": draftBody}, upstreamIssueURL(43), issueMarker)
+		})
+	}
+	for _, status := range []int{http.StatusGone, http.StatusForbidden, http.StatusUnprocessableEntity} {
+		t.Run(fmt.Sprintf("the current target stays strict: %d", status), func(t *testing.T) {
+			h := commentDraft(t)
+			h.gh.fail("GET", upstreamComments, status)
+			pollTimes(h, 1)
+			wantRefused(t, h, 0, "the upstream issue to comment on cannot be found")
+		})
+	}
+}
+
+func TestASlowRecordDoesNotStarveTheAlreadyUpstreamNotice(t *testing.T) {
+	h := issueDraft(t)
+	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	h.clock.advance(time.Minute)
+	h.gh.unlabel(testFork, draftNumber, approvedLabel, testOwner)
+	h.gh.editBody(testFork, draftNumber, "a new body the owner wants filed", testOwner)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.poller.writeTimeout = 300 * time.Millisecond
+	started := make(chan struct{})
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &slowAnswer{base: gh.http.Transport, method: http.MethodPost, path: forkDraftComments, delay: 5 * time.Second, started: started}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		h.poller.run(ctx, time.Hour)
+		close(done)
+	}()
+	<-started
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the poll loop did not return after shutdown")
+	}
+	want := "The draft " + testFork + "#9 is already upstream: " + upstreamIssueURL(43) + "; later changes are not published."
+	if msgs := h.signal.messages(); !slices.Contains(msgs, want) {
+		t.Fatalf("messages = %q, want %q delivered before exit", msgs, want)
+	}
+}
+
+func TestAPostUnderALaterApprovalsTargetIsFound(t *testing.T) {
+	h := newDraft(t, commentLabel, "Comment on #42", commentBody)
+	h.gh.addIssue(testUpstream, 44, "bug(web): another", "Another.", "someone")
+	h.gh.addIssue(testUpstream, 46, "bug(web): a third", "Third.", "someone")
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.gh.unlabel(testFork, draftNumber, approvedLabel, testOwner)
+	h.gh.rename(testFork, draftNumber, "Comment on #44", testOwner)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.gh.failWith("POST", "/repos/omnigent-ai/omnigent/issues/44/comments", fakeFailure{Status: http.StatusBadGateway, After: true, Times: 1})
+	pollTimes(h, 1)
+	h.gh.rename(testFork, draftNumber, "Comment on #46", testAgent)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 2)
+	link := fmt.Sprintf("%s#issuecomment-%d", upstreamIssueURL(44), h.gh.issue(testUpstream, 44).comments[0].id)
+	wantOnePostRecorded(t, h, link)
+}
+
+func TestTheSettleNoticeOutlivesAnExpiredEvaluation(t *testing.T) {
+	h := issueDraft(t)
+	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	restart(h)
+	h.clock.advance(time.Minute)
+	h.gh.unlabel(testFork, draftNumber, approvedLabel, testOwner)
+	h.gh.editBody(testFork, draftNumber, "a new body the owner wants filed", testOwner)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.poller.draftTimeout = 100 * time.Millisecond
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &answerAfterDeadline{base: gh.http.Transport, method: http.MethodGet, path: upstreamIssues}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h.poller.poll(ctx)
+	want := "The draft " + testFork + "#9 is already upstream: " + upstreamIssueURL(43) + "; later changes are not published."
+	if msgs := h.signal.messages(); !slices.Contains(msgs, want) {
+		t.Fatalf("messages = %q, want %q", msgs, want)
+	}
 }
