@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -14,7 +16,7 @@ func (g *fakeGitHub) routeTable() []fakeRoute {
 		method, pattern string
 		handle          func(*fakeReq)
 	}{
-		{"GET", `/user`, func(c *fakeReq) { c.send(http.StatusOK, user(g.login)) }},
+		{"GET", `/user`, func(c *fakeReq) { c.send(http.StatusOK, fakeUser(g.login)) }},
 		{"POST", `/graphql`, g.graphql},
 		{"GET", repo, g.getRepo},
 		{"GET", repo + `/pulls`, g.listPulls},
@@ -82,11 +84,11 @@ func (c *fakeReq) issue() (*fakeRepo, *fakeIssue) {
 	return r, is
 }
 
-func headLabel(pr *fakePR) string {
+func fakeHeadLabel(pr *fakePR) string {
 	return strings.SplitN(pr.headRepo, "/", 2)[0] + ":" + pr.headRef
 }
 
-func numbersDesc[T any](m map[int]T) []int {
+func fakeNumbersDesc[T any](m map[int]T) []int {
 	var ns []int
 	for n := range m {
 		ns = append(ns, n)
@@ -105,17 +107,17 @@ func (g *fakeGitHub) listPulls(c *fakeReq) {
 		state = "open"
 	}
 	head, base := c.query.Get("head"), c.query.Get("base")
-	if head != "" && !strings.Contains(head, ":") {
-		head = r.owner + ":" + head
+	if !strings.Contains(head, ":") {
+		head = ""
 	}
-	ns := numbersDesc(r.pulls)
+	ns := fakeNumbersDesc(r.pulls)
 	if c.query.Get("direction") == "asc" {
 		sort.Ints(ns)
 	}
 	items := []any{}
 	for _, n := range ns {
 		pr := r.pulls[n]
-		if (state != "all" && pr.state != state) || (head != "" && !strings.EqualFold(headLabel(pr), head)) || (base != "" && pr.base != base) {
+		if (state != "all" && pr.state != state) || (head != "" && !strings.EqualFold(fakeHeadLabel(pr), head)) || (base != "" && pr.base != base) {
 			continue
 		}
 		items = append(items, g.prJSON(r, pr, false))
@@ -166,7 +168,7 @@ func (g *fakeGitHub) createPull(c *fakeReq) {
 		return
 	}
 	for _, pr := range r.pulls {
-		if pr.state == "open" && pr.base == base && strings.EqualFold(headLabel(pr), owner+":"+branch) {
+		if pr.state == "open" && pr.base == base && strings.EqualFold(fakeHeadLabel(pr), owner+":"+branch) {
 			c.invalid("A pull request already exists for " + owner + ":" + branch + ".")
 			return
 		}
@@ -185,27 +187,38 @@ func (g *fakeGitHub) patchPull(c *fakeReq) {
 	if pr == nil {
 		return
 	}
-	if title, ok := c.str("title"); ok {
+	title, hasTitle := c.str("title")
+	body, hasBody := c.str("body")
+	base, hasBase := c.str("base")
+	state, hasState := c.str("state")
+	mcm, hasMCM := c.body["maintainer_can_modify"].(bool)
+	switch {
+	case hasTitle && title == "":
+		c.invalid("title cannot be blank")
+		return
+	case hasBase && r.refs[base] == "":
+		c.invalid("base " + base + " does not exist")
+		return
+	case hasState && state != "open" && state != "closed":
+		c.invalid("state must be open or closed")
+		return
+	case hasState && state == "open" && pr.mergedAt != nil:
+		c.invalid("merged pull requests cannot be reopened")
+		return
+	}
+	if hasTitle {
 		g.retitle(pr.fakeIssue, title, g.login)
 	}
-	if body, ok := c.str("body"); ok {
+	if hasBody {
 		g.rewrite(pr.fakeIssue, body, g.login)
 	}
-	if base, ok := c.str("base"); ok {
-		if _, exists := r.refs[base]; !exists {
-			c.invalid("base " + base + " does not exist")
-			return
-		}
+	if hasBase {
 		g.rebase(pr, base, g.login)
 	}
-	if state, ok := c.str("state"); ok {
-		if pr.mergedAt != nil && state == "open" {
-			c.invalid("merged pull requests cannot be reopened")
-			return
-		}
+	if hasState {
 		g.setState(pr.fakeIssue, state, "", g.login)
 	}
-	if mcm, ok := c.body["maintainer_can_modify"].(bool); ok {
+	if hasMCM {
 		pr.maintainerCanModify = mcm
 	}
 	c.send(http.StatusOK, g.prJSON(r, pr, true))
@@ -281,6 +294,10 @@ func (g *fakeGitHub) createReview(c *fakeReq) {
 	if sha == "" {
 		sha = pr.sha
 	}
+	if sha != pr.sha && !slices.Contains(pr.heads, sha) && !g.knownCommit(sha) {
+		c.invalid("No commit found for SHA: " + sha)
+		return
+	}
 	rv := g.newReview(pr, g.login, state, sha, body)
 	c.send(http.StatusOK, g.reviewJSON(r, pr, rv))
 }
@@ -322,9 +339,9 @@ func (g *fakeGitHub) listIssues(c *fakeReq) {
 	}
 	creator := c.query.Get("creator")
 	items := []any{}
-	for _, n := range numbersDesc(r.issues) {
+	for _, n := range fakeNumbersDesc(r.issues) {
 		is := r.issues[n]
-		if (state != "all" && is.state != state) || (creator != "" && !strings.EqualFold(is.user, creator)) || !hasLabels(is.labels, want) {
+		if (state != "all" && is.state != state) || (creator != "" && !strings.EqualFold(is.user, creator)) || !fakeHasLabels(is.labels, want) {
 			continue
 		}
 		items = append(items, g.issueJSON(r, is))
@@ -332,7 +349,7 @@ func (g *fakeGitHub) listIssues(c *fakeReq) {
 	c.list(items)
 }
 
-func hasLabels(have, want []string) bool {
+func fakeHasLabels(have, want []string) bool {
 	for _, w := range want {
 		found := false
 		for _, h := range have {
@@ -378,6 +395,10 @@ func (g *fakeGitHub) patchIssue(c *fakeReq) {
 		g.rewrite(is, body, g.login)
 	}
 	if state, ok := c.str("state"); ok {
+		if state == "open" && is.pull != nil && is.pull.mergedAt != nil {
+			c.invalid("merged pull requests cannot be reopened")
+			return
+		}
 		reason, _ := c.str("state_reason")
 		g.setState(is, state, reason, g.login)
 	}
@@ -438,7 +459,7 @@ func (g *fakeGitHub) addLabels(c *fakeReq) {
 			g.addLabel(is, s, g.login)
 		}
 	}
-	c.send(http.StatusOK, labelsJSON(is.labels))
+	c.send(http.StatusOK, fakeLabelsJSON(is.labels))
 }
 
 func (g *fakeGitHub) deleteLabel(c *fakeReq) {
@@ -450,10 +471,10 @@ func (g *fakeGitHub) deleteLabel(c *fakeReq) {
 		c.error(http.StatusNotFound, "Label does not exist")
 		return
 	}
-	c.send(http.StatusOK, labelsJSON(is.labels))
+	c.send(http.StatusOK, fakeLabelsJSON(is.labels))
 }
 
-func refJSON(r *fakeRepo, branch, sha string) map[string]any {
+func fakeRefJSON(r *fakeRepo, branch, sha string) map[string]any {
 	return map[string]any{
 		"ref": "refs/heads/" + branch, "node_id": "REF_" + branch,
 		"url":    fmt.Sprintf("https://api.github.com/repos/%s/git/refs/heads/%s", r.fullName, branch),
@@ -471,7 +492,7 @@ func (g *fakeGitHub) getRef(c *fakeReq) {
 		c.error(http.StatusNotFound, "Not Found")
 		return
 	}
-	c.send(http.StatusOK, refJSON(r, c.m["branch"], sha))
+	c.send(http.StatusOK, fakeRefJSON(r, c.m["branch"], sha))
 }
 
 func (g *fakeGitHub) createRef(c *fakeReq) {
@@ -491,7 +512,7 @@ func (g *fakeGitHub) createRef(c *fakeReq) {
 		return
 	}
 	r.refs[branch] = sha
-	c.send(http.StatusCreated, refJSON(r, branch, sha))
+	c.send(http.StatusCreated, fakeRefJSON(r, branch, sha))
 }
 
 func (g *fakeGitHub) updateRef(c *fakeReq) {
@@ -520,14 +541,14 @@ func (g *fakeGitHub) updateRef(c *fakeReq) {
 	for _, rr := range g.repos {
 		for _, pr := range rr.pulls {
 			if pr.state == "open" && strings.EqualFold(pr.headRepo, r.fullName) && pr.headRef == branch && pr.sha != sha {
-				pr.sha = sha
+				pr.sha, pr.heads = sha, append(pr.heads, sha)
 				if !fastForward {
 					g.event(pr.fakeIssue, &fakeEvent{event: "head_ref_force_pushed", actor: g.login})
 				}
 			}
 		}
 	}
-	c.send(http.StatusOK, refJSON(r, branch, sha))
+	c.send(http.StatusOK, fakeRefJSON(r, branch, sha))
 }
 
 func (g *fakeGitHub) deleteRef(c *fakeReq) {
@@ -543,6 +564,26 @@ func (g *fakeGitHub) deleteRef(c *fakeReq) {
 	c.send(http.StatusNoContent, nil)
 }
 
+func (g *fakeGitHub) resolve(r *fakeRepo, spec string) (string, bool) {
+	if fullSHA.MatchString(spec) {
+		return spec, true
+	}
+	owner, branch, found := strings.Cut(spec, ":")
+	if !found {
+		sha, ok := r.refs[spec]
+		return sha, ok
+	}
+	for _, cand := range g.repos {
+		related := cand == r || strings.EqualFold(cand.fullName, r.parent) || strings.EqualFold(cand.parent, r.fullName) || (r.parent != "" && strings.EqualFold(cand.parent, r.parent))
+		if related && strings.EqualFold(cand.owner, owner) {
+			sha, ok := cand.refs[branch]
+			return sha, ok
+		}
+	}
+	return "", false
+}
+
+// compare prefers setCompare entries, then the commit graph, then the legacy per-PR changes for heads outside the graph.
 func (g *fakeGitHub) compare(c *fakeReq) {
 	r := c.repo()
 	if r == nil {
@@ -550,9 +591,21 @@ func (g *fakeGitHub) compare(c *fakeReq) {
 	}
 	base, head := c.m["base"], c.m["head"]
 	cmp, ok := r.compares[base+"..."+head]
-	if !ok {
+	baseSHA, baseOK := g.resolve(r, base)
+	headSHA, headOK := g.resolve(r, head)
+	if !ok && headOK && g.knownCommit(headSHA) {
+		if !baseOK {
+			c.error(http.StatusNotFound, "Not Found")
+			return
+		}
+		if cmp, ok = g.computeCompare(baseSHA, headSHA); !ok {
+			c.error(http.StatusNotFound, "No common ancestor between "+base+" and "+head+".")
+			return
+		}
+	}
+	if !ok && r == g.fork {
 		for _, pr := range g.fork.pulls {
-			if r == g.fork && pr.sha == head {
+			if pr.sha == head {
 				cmp = &fakeCompare{status: pr.compareStatus, aheadBy: 1, files: pr.changes}
 			}
 		}
@@ -568,9 +621,7 @@ func (g *fakeGitHub) compare(c *fakeReq) {
 				break
 			}
 			out := map[string]any{"status": "modified", "additions": 1, "deletions": 0, "changes": 1}
-			for k, v := range f {
-				out[k] = v
-			}
+			maps.Copy(out, f)
 			if _, ok := out["sha"]; !ok {
 				out["sha"] = fakeSHA("blob", fmt.Sprint(out["filename"]), head)
 			}
@@ -579,7 +630,7 @@ func (g *fakeGitHub) compare(c *fakeReq) {
 	}
 	c.send(http.StatusOK, map[string]any{
 		"status": cmp.status, "ahead_by": cmp.aheadBy, "behind_by": cmp.behindBy, "total_commits": cmp.aheadBy,
-		"base_commit": map[string]any{"sha": r.refs[strings.TrimPrefix(base, r.owner+":")]}, "merge_base_commit": map[string]any{},
+		"base_commit": map[string]any{"sha": baseSHA}, "merge_base_commit": map[string]any{},
 		"commits": []any{}, "files": files,
 	})
 }
@@ -614,11 +665,18 @@ func (g *fakeGitHub) workflowRuns(c *fakeReq) {
 			}
 			items = append(items, map[string]any{
 				"id": fakeSuiteID(r.fullName, s, run.path) + int64(i), "head_sha": s, "path": run.path, "status": run.status, "conclusion": conclusion,
-				"event": "pull_request", "check_suite_id": fakeSuiteID(r.fullName, s, run.path), "run_attempt": 1,
+				"event": fakeOr(run.event, "pull_request"), "head_branch": run.headBranch, "check_suite_id": fakeSuiteID(r.fullName, s, run.path), "run_attempt": 1,
 			})
 		}
 	}
 	c.objectPage("workflow_runs", items)
+}
+
+func fakeOr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func (g *fakeGitHub) checkRuns(c *fakeReq) {
@@ -630,9 +688,22 @@ func (g *fakeGitHub) checkRuns(c *fakeReq) {
 	if s, ok := r.refs[strings.TrimPrefix(sha, "heads/")]; ok {
 		sha = s
 	}
+	filter := fakeOr(c.query.Get("filter"), "latest")
+	if filter != "latest" && filter != "all" {
+		c.invalid("filter must be latest or all")
+		return
+	}
 	name, status := c.query.Get("check_name"), c.query.Get("status")
+	all := r.checks[sha]
+	newest := map[string]int{}
+	for i, cr := range all {
+		newest[cr.app+"\x00"+cr.name] = i
+	}
 	items := []any{}
-	for i, cr := range r.checks[sha] {
+	for i, cr := range all {
+		if filter == "latest" && newest[cr.app+"\x00"+cr.name] != i {
+			continue
+		}
 		if (name != "" && cr.name != name) || (status != "" && cr.status != status) {
 			continue
 		}
@@ -643,7 +714,8 @@ func (g *fakeGitHub) checkRuns(c *fakeReq) {
 		suite := fakeSuiteID(r.fullName, sha, cr.path)
 		items = append(items, map[string]any{
 			"id": suite*100 + int64(i), "name": cr.name, "head_sha": sha, "status": cr.status, "conclusion": conclusion,
-			"check_suite": map[string]any{"id": suite}, "app": map[string]any{"slug": "github-actions"},
+			"check_suite": map[string]any{"id": suite, "head_branch": cr.headBranch, "event": fakeOr(cr.event, "pull_request")},
+			"app":         map[string]any{"slug": cr.app, "owner": fakeUser(cr.app)},
 		})
 	}
 	c.objectPage("check_runs", items)

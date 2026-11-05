@@ -32,7 +32,7 @@ type fakeCall struct {
 
 type fakeGitHub struct {
 	mu       sync.Mutex
-	t        *testing.T
+	t        testing.TB
 	srv      *httptest.Server
 	clock    *clock
 	login    string
@@ -42,9 +42,10 @@ type fakeGitHub struct {
 	prs      map[int]*fakePR
 	runs     map[string][]fakeRun
 	parents  map[string][]string
+	trees    map[string]map[string]string
 	reviews  []review
 	failPost bool
-	failures map[string]int
+	failures map[string]*fakeFailure
 	gqlError string
 	requests []string
 	calls    []fakeCall
@@ -52,6 +53,16 @@ type fakeGitHub struct {
 	nextID   int64
 	routes   []fakeRoute
 }
+
+// fakeFailure fails matching calls after the first Skip, Times of them (0 = all); After applies the write before failing.
+type fakeFailure struct {
+	Status      int
+	After       bool
+	Skip, Times int
+	seen        int
+}
+
+const fakeDrop = -1
 
 type fakeRoute struct {
 	method string
@@ -72,7 +83,7 @@ type fakeReq struct {
 func newFakeGitHub(t *testing.T) *fakeGitHub {
 	g := &fakeGitHub{
 		t: t, login: "lkshrk", clock: &clock{t: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)},
-		repos: map[string]*fakeRepo{}, parents: map[string][]string{}, failures: map[string]int{}, nextID: 1000,
+		repos: map[string]*fakeRepo{}, parents: map[string][]string{}, trees: map[string]map[string]string{}, failures: map[string]*fakeFailure{}, nextID: 1000,
 	}
 	g.upstream = newFakeRepo(testUpstream, "", "main", shaUpMain)
 	g.fork = newFakeRepo(testFork, testUpstream, "main", shaMain)
@@ -84,6 +95,7 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 	return g
 }
 
+// Every fakeGitHub helper, including allCalls, writes and callCount, locks g.mu; never call one inside update().
 func (g *fakeGitHub) update(f func()) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -97,13 +109,28 @@ func (g *fakeGitHub) reviewCalls() []review {
 }
 
 func (g *fakeGitHub) fail(method, path string, status int) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
 	if status == 0 {
+		g.mu.Lock()
+		defer g.mu.Unlock()
 		delete(g.failures, method+" "+path)
 		return
 	}
-	g.failures[method+" "+path] = status
+	g.failWith(method, path, fakeFailure{Status: status})
+}
+
+func (g *fakeGitHub) failWith(method, path string, f fakeFailure) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	f.seen = 0
+	g.failures[method+" "+path] = &f
+}
+
+func (f *fakeFailure) fires() bool {
+	if f == nil {
+		return false
+	}
+	f.seen++
+	return f.seen > f.Skip && (f.Times == 0 || f.seen <= f.Skip+f.Times)
 }
 
 func (g *fakeGitHub) failGraphQL(message string) {
@@ -161,10 +188,31 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		c.call.Body = c.body
 	}
-	if status, ok := g.failures[r.Method+" "+r.URL.Path]; ok {
+	if f := g.failures[r.Method+" "+r.URL.Path]; f.fires() {
+		if f.After {
+			c.w = httptest.NewRecorder()
+			g.route(c)
+			c.w = w
+		}
+		c.injected(f.Status)
+		return
+	}
+	g.route(c)
+}
+
+func (c *fakeReq) injected(status int) {
+	if status != fakeDrop {
 		c.error(status, "injected failure")
 		return
 	}
+	c.call.Status = 0
+	if conn, _, err := c.w.(http.Hijacker).Hijack(); err == nil {
+		_ = conn.Close()
+	}
+}
+
+func (g *fakeGitHub) route(c *fakeReq) {
+	r := c.r
 	for _, rt := range g.routes {
 		if rt.method != r.Method {
 			continue
@@ -226,7 +274,7 @@ func (c *fakeReq) send(status int, v any) {
 		sum := sha256.Sum256(raw)
 		etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 		c.w.Header().Set("ETag", etag)
-		if matchesETag(c.r.Header.Get("If-None-Match"), etag) {
+		if fakeMatchesETag(c.r.Header.Get("If-None-Match"), etag) {
 			c.call.Status = http.StatusNotModified
 			c.w.WriteHeader(http.StatusNotModified)
 			return
@@ -237,7 +285,7 @@ func (c *fakeReq) send(status int, v any) {
 	_, _ = c.w.Write(raw)
 }
 
-func matchesETag(header, etag string) bool {
+func fakeMatchesETag(header, etag string) bool {
 	weak := func(s string) string { return strings.TrimPrefix(strings.TrimSpace(s), "W/") }
 	for _, candidate := range strings.Split(header, ",") {
 		if strings.TrimSpace(candidate) == "*" || weak(candidate) == weak(etag) {
@@ -295,7 +343,7 @@ func (c *fakeReq) page(items []any) []any {
 
 func (c *fakeReq) list(items []any) { c.send(http.StatusOK, c.page(items)) }
 
-func decodeJSON(t *testing.T, raw []byte, out any) {
+func fakeDecodeJSON(t *testing.T, raw []byte, out any) {
 	t.Helper()
 	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(out); err != nil {
 		t.Fatalf("decode %q: %v", raw, err)

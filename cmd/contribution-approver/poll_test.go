@@ -53,11 +53,11 @@ func TestPollSkipsPullRequestsThatAreNotReady(t *testing.T) {
 		"no label":  func(g *fakeGitHub, pr *fakePR) { pr.labels = []string{"other"} },
 		"ci failed": func(g *fakeGitHub, pr *fakePR) { g.runs[pr.sha][0].conclusion = "failure" },
 		"ci running": func(g *fakeGitHub, pr *fakePR) {
-			g.runs[pr.sha][0] = fakeRun{"in_progress", "", ".github/workflows/contribution-ci.yml"}
+			g.runs[pr.sha][0] = fakeRun{status: "in_progress", path: ".github/workflows/contribution-ci.yml"}
 		},
 		"no ci run": func(g *fakeGitHub, pr *fakePR) { delete(g.runs, pr.sha) },
 		"one red run": func(g *fakeGitHub, pr *fakePR) {
-			g.runs[pr.sha] = append(g.runs[pr.sha], fakeRun{"completed", "failure", ".github/workflows/contribution-ci.yml"})
+			g.runs[pr.sha] = append(g.runs[pr.sha], fakeRun{status: "completed", conclusion: "failure", path: ".github/workflows/contribution-ci.yml"})
 		},
 		"other workflow":     func(g *fakeGitHub, pr *fakePR) { g.runs[pr.sha][0].path = ".github/workflows/other.yml" },
 		"head in other repo": func(g *fakeGitHub, pr *fakePR) { pr.headRepo = "someone/omnigent" },
