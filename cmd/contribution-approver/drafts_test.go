@@ -104,6 +104,9 @@ func wantPublishedOnce(t *testing.T, h *harness, before int, path string, body m
 	if is := draftState(h); is.state != "closed" || hasLabel(is, approvedLabel) {
 		t.Fatalf("the fork issue is %s with labels %v, want closed and the approval spent", is.state, is.labels)
 	}
+	if len(h.poller.posted) != 0 {
+		t.Fatalf("ledger = %v, want it cleared once the record exists", h.poller.posted)
+	}
 }
 
 func wantRefused(t *testing.T, h *harness, before int, reason string) {
@@ -224,7 +227,11 @@ func TestALostRecordDoesNotPublishTwice(t *testing.T) {
 			h.gh.failWith("POST", tc.path, tc.fail)
 
 			pollTimes(h, 1)
-			if !hasLabel(draftState(h), approvedLabel) || draftState(h).state != "open" || len(h.signal.messages()) != 0 {
+			told := 0
+			if tc.path == forkDraftComments {
+				told = 1
+			}
+			if !hasLabel(draftState(h), approvedLabel) || draftState(h).state != "open" || len(h.signal.messages()) != told {
 				t.Fatalf("a failed write was treated as final: %q", h.signal.messages())
 			}
 			before := len(h.gh.writes())
@@ -280,6 +287,7 @@ func TestOnlyAnIdenticalOwnerIssueCountsAsFiled(t *testing.T) {
 	for name, add := range map[string]func(*harness){
 		"other author": func(h *harness) { h.gh.addIssue(testUpstream, 0, draftTitle, draftBody, "someone") },
 		"other body":   func(h *harness) { h.gh.addIssue(testUpstream, 0, draftTitle, "Different steps.", testOwner) },
+		"other title":  func(h *harness) { h.gh.addIssue(testUpstream, 0, "bug(web): different", draftBody, testOwner) },
 		"pull request": func(h *harness) {
 			h.gh.addPull(testUpstream, fakePR{fakeIssue: &fakeIssue{title: draftTitle, body: draftBody, user: testOwner}, headRepo: testFork, headRef: "x", sha: shaA})
 		},
@@ -1113,23 +1121,27 @@ func TestAnUpstream403IsHardUnlessRateLimited(t *testing.T) {
 	}
 }
 
-func TestAHardRefusalOfAPostAlreadyUpstreamRecordsIt(t *testing.T) {
+func TestARefusalNamesAPostThatMayAlreadyBeUpstream(t *testing.T) {
 	h := issueDraft(t)
 	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
 	pollTimes(h, 1)
 	restart(h)
 	h.gh.comment(testFork, draftNumber, testAgent, "note")
 	h.clock.advance(time.Minute)
-	before := len(h.gh.writes())
+	before, told := len(h.gh.writes()), len(h.signal.messages())
 
 	pollTimes(h, 1)
 
-	w := writesSince(h, before)
-	if got := writeSummary(w); strings.Join(got, ",") != "POST "+forkDraftComments+",DELETE "+forkDraftApproval+",PATCH "+forkDraft {
-		t.Fatalf("writes = %v, want the post recorded instead of refused", got)
+	if got := writeSummary(writesSince(h, before)); strings.Join(got, ",") != "DELETE "+forkDraftApproval {
+		t.Fatalf("writes = %v, want the refusal to stand", got)
 	}
-	if msgs := h.signal.messages(); len(msgs) != 1 || msgs[0] != "Filed the draft "+testFork+"#9 upstream as an issue: "+upstreamIssueURL(43) {
-		t.Fatalf("messages = %q", msgs)
+	msgs := h.signal.messages()[told:]
+	want := "Not publishing the draft " + testFork + "#9: the draft changed after the approval. It may already be upstream: " + upstreamIssueURL(43) + ". The approval label was removed; add it again to publish."
+	if len(msgs) != 1 || msgs[0] != want {
+		t.Fatalf("messages = %q, want %q", msgs, want)
+	}
+	if draftState(h).state != "open" {
+		t.Fatal("a refused draft was closed as published")
 	}
 }
 
@@ -1324,7 +1336,7 @@ func TestTheCleanupOutlivesTheDraftTimeout(t *testing.T) {
 	h := issueDraft(t)
 	h.poller.draftTimeout = 100 * time.Millisecond
 	gh := h.poller.gh
-	gh.http = &http.Client{Transport: &answerAfterDeadline{base: gh.http.Transport, method: http.MethodPost, path: upstreamIssues}}
+	gh.http = &http.Client{Transport: &slowAnswer{base: gh.http.Transport, method: http.MethodPost, path: upstreamIssues, delay: 300 * time.Millisecond}}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -1347,18 +1359,170 @@ func TestTheDraftLabelsAreReadInOneQuery(t *testing.T) {
 	}
 }
 
-func TestTheLedgerForgetsDraftsThatLeaveTheList(t *testing.T) {
-	h := issueDraft(t)
-	h.gh.fail("DELETE", forkDraftApproval, http.StatusBadGateway)
-	pollTimes(h, 1)
-	if len(h.poller.posted) != 1 {
-		t.Fatalf("ledger = %v, want the post kept while the approval is unspent", h.poller.posted)
+func TestALedgeredDraftIsNeverPostedAgain(t *testing.T) {
+	steps := map[string]func(*harness){
+		"the agent removes the label": func(h *harness) { h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent) },
+		"the agent relabels and the approver strips it": func(h *harness) {
+			h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent)
+			h.gh.label(testFork, draftNumber, approvedLabel, testAgent)
+			h.clock.advance(time.Minute)
+			pollTimes(h, 1)
+			if hasLabel(draftState(h), approvedLabel) {
+				t.Fatal("the foreign label was not stripped")
+			}
+		},
+		"the owner removes the label": func(h *harness) { h.gh.unlabel(testFork, draftNumber, approvedLabel, testOwner) },
 	}
-	h.gh.unlabel(testFork, draftNumber, approvedLabel, testAgent)
-	pollTimes(h, 1)
-	if len(h.poller.posted) != 0 {
-		t.Fatalf("ledger = %v, want it pruned", h.poller.posted)
+	for name, step := range steps {
+		for kind, mk := range map[string]func(*testing.T) *harness{"issue": issueDraft, "comment": commentDraft} {
+			t.Run(kind+": "+name, func(t *testing.T) {
+				h := mk(t)
+				h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+				pollTimes(h, 1)
+				msgs := h.signal.messages()
+				if len(msgs) != 1 || !strings.Contains(msgs[0], "upstream as a") || !strings.Contains(msgs[0], "https://github.com/"+testUpstream+"/issues/") {
+					t.Fatalf("messages = %q, want the link told as soon as it was posted", msgs)
+				}
+				link := msgs[0][strings.Index(msgs[0], "https://"):]
+				h.clock.advance(time.Minute)
+				step(h)
+				h.clock.advance(time.Minute)
+				pollTimes(h, 1)
+				approveDraft(h)
+				h.clock.advance(time.Minute)
+				pollTimes(h, 2)
+				wantOnePostRecorded(t, h, link)
+			})
+		}
 	}
+}
+
+func TestRecoveryNeverTakesAnotherDraftsPost(t *testing.T) {
+	kinds := map[string]struct{ label, title9, title10 string }{
+		"issue":   {issueLabel, draftTitle, "bug(web): another draft"},
+		"comment": {commentLabel, "Comment on #42", "Comment on #42"},
+	}
+	for kind, k := range kinds {
+		for name, recordFails := range map[string]bool{"recorded": false, "while its record is pending": true} {
+			t.Run(kind+": "+name, func(t *testing.T) {
+				h := newDraft(t, k.label, k.title9, draftBody)
+				h.gh.addIssue(testFork, 10, k.title10, "Another body.", testAgent, k.label)
+				h.clock.advance(time.Minute)
+				approveDraft(h)
+				h.gh.label(testFork, 10, approvedLabel, testOwner)
+				h.clock.advance(time.Minute)
+				h.gh.rename(testFork, draftNumber, k.title10, testAgent)
+				h.gh.editBody(testFork, draftNumber, "Another body.", testAgent)
+				h.clock.advance(time.Minute)
+				if recordFails {
+					h.gh.failWith("POST", "/repos/lkshrk/omnigent/issues/10/comments", fakeFailure{Status: http.StatusBadGateway})
+				}
+				pollTimes(h, 1)
+				if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+					t.Fatalf("upstream writes = %v, want only #10 published", writeSummary(up))
+				}
+				if is := draftState(h); is.state != "open" || hasLabel(is, approvedLabel) {
+					t.Fatalf("#9 is %s with labels %v, want it refused", is.state, is.labels)
+				}
+				for _, m := range h.signal.messages() {
+					if strings.Contains(m, "#9") && (!strings.HasPrefix(m, "Not publishing") || strings.Contains(m, "https://")) {
+						t.Fatalf("#9 told %q, want a plain refusal", m)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestTwoDraftsWithOneBodyAreFiledApart(t *testing.T) {
+	h := newDraft(t, issueLabel, draftTitle, draftBody)
+	h.gh.addIssue(testFork, 10, "bug(web): another title", draftBody, testAgent, issueLabel)
+	h.clock.advance(time.Minute)
+	approveDraft(h)
+	h.gh.label(testFork, 10, approvedLabel, testOwner)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 1)
+	up := upstreamWrites(h.gh.writes())
+	if len(up) != 2 || up[0].Body["title"] == up[1].Body["title"] {
+		t.Fatalf("upstream writes = %v, want each draft filed", writeSummary(up))
+	}
+	msgs := h.signal.messages()
+	if len(msgs) != 2 || msgs[0][strings.Index(msgs[0], "https://"):] == msgs[1][strings.Index(msgs[1], "https://"):] {
+		t.Fatalf("messages = %q, want two different links", msgs)
+	}
+}
+
+func TestTheWaitingNoticeSurvivesCloseAndReopen(t *testing.T) {
+	h := newDraft(t, issueLabel, draftTitle, draftBody)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	h.gh.editBody(testFork, draftNumber, "rewritten", testAgent)
+	h.clock.advance(time.Minute)
+	h.gh.fail("GET", upstreamIssues, http.StatusBadGateway)
+	pollTimes(h, 2)
+	for range 3 {
+		h.gh.closeIssue(testFork, draftNumber, testAgent)
+		pollTimes(h, 1)
+		h.gh.reopen(testFork, draftNumber, testAgent)
+		pollTimes(h, 1)
+	}
+	if msgs := h.signal.messages(); len(msgs) != 1 {
+		t.Fatalf("messages = %q, want one waiting notice", msgs)
+	}
+}
+
+// slowAnswer applies the matching request upstream, then answers only after delay unless the caller gave up first.
+type slowAnswer struct {
+	base         http.RoundTripper
+	method, path string
+	delay        time.Duration
+}
+
+func (s *slowAnswer) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != s.method || r.URL.Path != s.path {
+		return s.base.RoundTrip(r)
+	}
+	res, err := s.base.RoundTrip(r.WithContext(context.WithoutCancel(r.Context())))
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case <-time.After(s.delay):
+		return res, nil
+	case <-r.Context().Done():
+		_ = res.Body.Close()
+		return nil, r.Context().Err()
+	}
+}
+
+func TestTheUpstreamWriteOutlivesTheDraftTimeout(t *testing.T) {
+	t.Run("an expired evaluation still writes once", func(t *testing.T) {
+		h := issueDraft(t)
+		h.poller.draftTimeout = 100 * time.Millisecond
+		gh := h.poller.gh
+		gh.http = &http.Client{Transport: &answerAfterDeadline{base: gh.http.Transport, method: http.MethodGet, path: upstreamIssues}}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.poller.poll(ctx)
+		wantPublishedOnce(t, h, 0, upstreamIssues, map[string]any{"title": draftTitle, "body": draftBody}, upstreamIssueURL(43), issueMarker)
+	})
+	t.Run("a slow answer and an upstream edit never post twice", func(t *testing.T) {
+		h := issueDraft(t)
+		h.poller.draftTimeout = 100 * time.Millisecond
+		gh := h.poller.gh
+		base := gh.http.Transport
+		gh.http = &http.Client{Transport: &slowAnswer{base: base, method: http.MethodPost, path: upstreamIssues, delay: 300 * time.Millisecond}}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		h.poller.poll(ctx)
+		gh.http = &http.Client{Transport: base}
+		h.gh.editBody(testUpstream, 43, draftBody+"\n\nLinked: ENG-1", "bot")
+		h.clock.advance(time.Minute)
+		pollTimes(h, 2)
+		if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+			t.Fatalf("upstream writes = %v, want one", writeSummary(up))
+		}
+	})
 }
 
 func TestRecoveryFindsAPostFromTheApprovalsSecond(t *testing.T) {
@@ -1375,6 +1539,46 @@ func TestRecoveryFindsAPostFromTheApprovalsSecond(t *testing.T) {
 			}
 			if is := draftState(h); is.state != "closed" {
 				t.Fatalf("the draft is %s, want it recorded and closed", is.state)
+			}
+		})
+	}
+}
+
+func lostRecordAfterRestart(t *testing.T) *harness {
+	t.Helper()
+	h := issueDraft(t)
+	h.gh.addIssue(testFork, 10, "bug(web): another draft", "Another body.", testAgent)
+	h.gh.failWith("POST", forkDraftComments, fakeFailure{Status: http.StatusBadGateway, Times: 1})
+	pollTimes(h, 1)
+	restart(h)
+	return h
+}
+
+func TestOnlyOwnerRecordsTakeAPost(t *testing.T) {
+	h := lostRecordAfterRestart(t)
+	h.gh.comment(testFork, 10, testAgent, issueMarker+"\n"+upstreamIssueURL(43))
+	pollTimes(h, 2)
+	if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+		t.Fatalf("upstream writes = %v, want the forged record ignored", writeSummary(up))
+	}
+	if draftState(h).state != "closed" {
+		t.Fatal("the draft was not recorded")
+	}
+}
+
+func TestRecoveryWaitsForEveryRead(t *testing.T) {
+	for name, path := range map[string]string{"fork comments": forkIssues + "/comments", "upstream renames": upstreamIssues + "/43/events"} {
+		t.Run(name, func(t *testing.T) {
+			h := lostRecordAfterRestart(t)
+			h.gh.rename(testUpstream, 43, "bug(web): retitled by a maintainer", "maintainer")
+			h.gh.fail("GET", path, http.StatusBadGateway)
+			before := len(h.gh.writes())
+			pollTimes(h, 2)
+			wantNothingWritten(t, h, before)
+			h.gh.fail("GET", path, 0)
+			pollTimes(h, 1)
+			if up := upstreamWrites(h.gh.writes()); len(up) != 1 || draftState(h).state != "closed" {
+				t.Fatalf("upstream writes = %v, want the post recovered once reads work", writeSummary(up))
 			}
 		})
 	}

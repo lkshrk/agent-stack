@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (g *fakeGitHub) routeTable() []fakeRoute {
@@ -33,6 +34,7 @@ func (g *fakeGitHub) routeTable() []fakeRoute {
 		{"PATCH", repo + `/issues/(?P<n>\d+)`, g.patchIssue},
 		{"GET", repo + `/issues/(?P<n>\d+)/events`, g.listEvents},
 		{"GET", repo + `/issues/(?P<n>\d+)/timeline`, g.listTimeline},
+		{"GET", repo + `/issues/comments`, g.listRepoComments},
 		{"GET", repo + `/issues/(?P<n>\d+)/comments`, g.listComments},
 		{"POST", repo + `/issues/(?P<n>\d+)/comments`, g.createComment},
 		{"POST", repo + `/issues/(?P<n>\d+)/labels`, g.addLabels},
@@ -431,6 +433,41 @@ func (g *fakeGitHub) listComments(c *fakeReq) {
 	items := []any{}
 	for _, cm := range is.comments {
 		items = append(items, g.commentJSON(r, is, cm))
+	}
+	c.list(items)
+}
+
+// listRepoComments lists every issue comment in the repository, oldest first; since filters on updated_at like GitHub.
+func (g *fakeGitHub) listRepoComments(c *fakeReq) {
+	r := c.repo()
+	if r == nil {
+		return
+	}
+	var since time.Time
+	if v := c.query.Get("since"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			c.invalid("since must be an ISO 8601 timestamp")
+			return
+		}
+		since = t
+	}
+	type row struct {
+		is *fakeIssue
+		c  *fakeComment
+	}
+	var rows []row
+	for _, is := range r.issues {
+		for _, cm := range is.comments {
+			if !cm.updatedAt.Before(since) {
+				rows = append(rows, row{is, cm})
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].c.id < rows[j].c.id })
+	items := []any{}
+	for _, x := range rows {
+		items = append(items, g.commentJSON(r, x.is, x.c))
 	}
 	c.list(items)
 }

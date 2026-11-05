@@ -34,6 +34,7 @@ type issueItem struct {
 	State       string          `json:"state"`
 	Title       string          `json:"title"`
 	Body        string          `json:"body"`
+	IssueURL    string          `json:"issue_url"`
 	CreatedAt   *time.Time      `json:"created_at"`
 	UpdatedAt   *time.Time      `json:"updated_at"`
 	User        *ghUser         `json:"user"`
@@ -110,12 +111,6 @@ func (o draftOutcome) String() string {
 	return [...]string{"nothing", "retry", "refused", "published", "recorded", "waiting"}[o]
 }
 
-type draftKey struct {
-	fork     string
-	number   int
-	approval int64
-}
-
 type draftPost struct {
 	link    string
 	comment bool
@@ -179,7 +174,7 @@ func (g *githubClient) issueEvents(ctx context.Context, cfg forkConfig, number i
 	return all, err
 }
 
-func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number int, ledger map[draftKey]draftPost) draftDecision {
+func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number int, ledger map[prKey]draftPost) draftDecision {
 	d := draftDecision{number: number}
 	var is issueItem
 	if err := g.get(ctx, fmt.Sprintf("/repos/%s/issues/%d", cfg.Fork, number), nil, &is); err != nil {
@@ -217,7 +212,7 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		d.verdict, d.recorded = verdictPublish, true
 		return d
 	}
-	if post, ok := ledger[draftKey{cfg.Fork, number, d.approval}]; ok {
+	if post, ok := ledger[prKey{fork: cfg.Fork, number: number}]; ok {
 		d.verdict, d.posted, d.comment = verdictPublish, post.link, post.comment
 		return d
 	}
@@ -353,13 +348,15 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 	case d.posted != "":
 		return p.settleDraft(ctx, cfg, res, d.posted)
 	}
-	link, found, err := p.gh.findPublished(ctx, cfg, d)
+	link, found, err := p.findPublished(ctx, cfg, d)
 	if err == nil && !found {
 		post := p.gh.fileIssue
 		if d.comment {
 			post = p.gh.postComment
 		}
-		link, err = post(ctx, cfg, d)
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
+		link, err = post(wctx, cfg, d)
+		cancel()
 	}
 	if err != nil {
 		v, reason := classify(err)
@@ -369,24 +366,38 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 		}
 		return res
 	}
-	return p.settleDraft(ctx, cfg, p.ledger(cfg, res, link), link)
+	p.remember(ctx, cfg, d, link)
+	return p.settleDraft(ctx, cfg, res, link)
 }
 
-func (p *poller) ledger(cfg forkConfig, res draftResult, link string) draftResult {
-	d := res.decision
-	p.posted[draftKey{cfg.Fork, d.number, d.approval}] = draftPost{link: link, comment: d.comment}
-	return res
+// remember keeps the link until the record is written and tells the owner before anything else can fail.
+func (p *poller) remember(ctx context.Context, cfg forkConfig, d draftDecision, link string) {
+	k := prKey{fork: cfg.Fork, number: d.number}
+	p.posted[k] = draftPost{link: link, comment: d.comment}
+	p.tellOnce(ctx, k, postedKey(link), publishedText(cfg, d, link))
 }
 
-// refuseDraft spends a hard refusal unless this approval's post is already upstream, which is recorded instead.
+func postedKey(link string) string { return "draft\x00posted\x00" + link }
+
+func doneKey(approval int64) string { return fmt.Sprintf("draft\x00done\x00%d", approval) }
+
+func publishedText(cfg forkConfig, d draftDecision, link string) string {
+	text := fmt.Sprintf("Filed the draft %s#%d upstream as an issue", cfg.Fork, d.number)
+	if d.comment {
+		text = fmt.Sprintf("Posted the draft %s#%d upstream as a comment", cfg.Fork, d.number)
+	}
+	return withLink(text, ownDraftURL(cfg, link))
+}
+
+// refuseDraft spends a hard refusal; a post of this approval found upstream is named, never taken as the publish.
 func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResult) draftResult {
 	if !res.decision.searchable {
 		return p.gh.spendDraft(ctx, cfg, res)
 	}
-	link, found, err := p.gh.findPublished(ctx, cfg, res.decision)
+	link, found, err := p.findPublished(ctx, cfg, res.decision)
 	switch {
 	case err == nil && found:
-		return p.settleDraft(ctx, cfg, p.ledger(cfg, res, link), link)
+		res.url = link
 	case err != nil:
 		if v, _ := classify(err); v != verdictHard {
 			res.outcome = draftWaiting
@@ -398,9 +409,10 @@ func (p *poller) refuseDraft(ctx context.Context, cfg forkConfig, res draftResul
 
 // settleDraft records link, if any, and spends the approval before closing, on its own deadline so an expired evaluation cannot strand a post.
 func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResult, link string) draftResult {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.settleTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
 	defer cancel()
 	d := res.decision
+	k := prKey{fork: cfg.Fork, number: d.number}
 	if link != "" {
 		marker := issueMarker
 		if d.comment {
@@ -413,10 +425,35 @@ func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResul
 		}
 		res.outcome, res.url = draftPublished, link
 	}
+	delete(p.posted, k)
 	if res.unlabeled = p.gh.unlabelApproval(ctx, cfg, d.number); res.unlabeled {
 		res.closed = p.gh.closeDraft(ctx, cfg, d.number) == nil
 	}
 	return res
+}
+
+// takenLinks names the upstream posts that belong to other drafts: their ledger entries and their records since this approval.
+func (p *poller) takenLinks(ctx context.Context, cfg forkConfig, d draftDecision) (map[string]bool, error) {
+	taken := map[string]bool{}
+	for k, post := range p.posted {
+		if k.fork == cfg.Fork && k.number != d.number {
+			taken[post.link] = true
+		}
+	}
+	self := fmt.Sprintf("/repos/%s/issues/%d", cfg.Fork, d.number)
+	q := url.Values{"since": {d.approvedAt.UTC().Format(time.RFC3339)}}
+	_, err := listAll(ctx, p.gh, "/repos/"+cfg.Fork+"/issues/comments", q, "fork comments since the approval", func(c issueItem) bool {
+		if !c.by(cfg.Owner) || strings.HasSuffix(c.IssueURL, self) {
+			return false
+		}
+		for _, marker := range []string{issueMarker, commentMarker} {
+			if rest, ok := strings.CutPrefix(c.Body, marker+"\n"); ok {
+				taken[strings.TrimSpace(rest)] = true
+			}
+		}
+		return false
+	})
+	return taken, err
 }
 
 // since: only a post created at or after this approval can be its publish.
@@ -424,25 +461,48 @@ func (d draftDecision) since(c issueItem) bool {
 	return c.CreatedAt != nil && !c.CreatedAt.Before(d.approvedAt)
 }
 
-// findPublished ignores issue titles because maintainers retitle.
-func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (string, bool, error) {
+// findPublished matches an issue whose title differs only if it was renamed upstream, since maintainers retitle.
+func (p *poller) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (string, bool, error) {
+	taken, err := p.takenLinks(ctx, cfg, d)
+	if err != nil {
+		return "", false, err
+	}
 	if d.comment {
-		found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target), nil, "upstream comments to search", func(c issueItem) bool {
-			return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0 && d.since(c)
+		found, err := listAll(ctx, p.gh, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target), nil, "upstream comments to search", func(c issueItem) bool {
+			return c.by(cfg.Owner) && c.Body == d.body && c.ID > 0 && d.since(c) && !taken[commentURL(cfg, d.target, c.ID)]
 		})
 		if err := rejected(err, "the upstream issue to comment on cannot be found"); err != nil || found == nil {
 			return "", false, err
 		}
 		return commentURL(cfg, d.target, found.ID), true, nil
 	}
+	var renameErr error
 	q := url.Values{"creator": {cfg.Owner}, "state": {"all"}}
-	found, err := listAll(ctx, g, "/repos/"+cfg.Upstream+"/issues", q, "upstream issues to search", func(c issueItem) bool {
-		return !c.isPull() && c.by(cfg.Owner) && c.Body == d.body && c.Number > 0 && d.since(c)
+	found, err := listAll(ctx, p.gh, "/repos/"+cfg.Upstream+"/issues", q, "upstream issues to search", func(c issueItem) bool {
+		if c.isPull() || !c.by(cfg.Owner) || c.Body != d.body || c.Number <= 0 || !d.since(c) || taken[issueURL(cfg, c.Number)] {
+			return false
+		}
+		if c.Title == d.title {
+			return true
+		}
+		var renamed bool
+		renamed, renameErr = p.gh.renamedUpstream(ctx, cfg, c.Number)
+		return renamed || renameErr != nil
 	})
+	if err == nil {
+		err = renameErr
+	}
 	if err != nil || found == nil {
 		return "", false, err
 	}
 	return issueURL(cfg, found.Number), true, nil
+}
+
+func (g *githubClient) renamedUpstream(ctx context.Context, cfg forkConfig, number int) (bool, error) {
+	found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/events", cfg.Upstream, number), nil, "events on the upstream issue", func(e issueEvent) bool {
+		return e.Event == "renamed"
+	})
+	return found != nil, err
 }
 
 func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
@@ -526,23 +586,21 @@ func (p *poller) pollDrafts(ctx context.Context, cfg forkConfig) error {
 	if err != nil {
 		return err
 	}
-	live := map[prKey]bool{}
+	known := p.knownDrafts[cfg.Fork]
+	if known == nil {
+		known = map[prKey]bool{}
+		p.knownDrafts[cfg.Fork] = known
+	}
 	for _, it := range items {
-		k := prKey{fork: cfg.Fork, number: it.Number}
-		live[k] = true
 		if it.isPull() {
 			continue
 		}
+		k := prKey{fork: cfg.Fork, number: it.Number}
+		known[k] = true
 		dctx, cancel := context.WithTimeout(ctx, p.draftTimeout)
 		res := p.publishDraft(dctx, cfg, it.Number)
 		p.reportDraft(dctx, cfg, k, res)
 		cancel()
-	}
-	p.liveDrafts[cfg.Fork] = live
-	for k := range p.posted {
-		if k.fork == cfg.Fork && !live[prKey{fork: k.fork, number: k.number}] {
-			delete(p.posted, k)
-		}
 	}
 	return nil
 }
@@ -552,14 +610,11 @@ func (p *poller) reportDraft(ctx context.Context, cfg forkConfig, k prKey, res d
 	d := res.decision
 	name := fmt.Sprintf("the draft %s#%d", cfg.Fork, k.number)
 	p.logOnce(k, fmt.Sprintf("draft\x00%s\x00%d\x00%s\x00%v", res.outcome, d.approval, res.reason, res.closed), "contribution-approver: draft %s#%d: %s %s (closed: %v)", cfg.Fork, k.number, res.outcome, res.reason, res.closed)
-	done := fmt.Sprintf("draft\x00done\x00%d", d.approval)
+	done := doneKey(d.approval)
 	switch res.outcome {
 	case draftPublished:
-		text := "Filed " + name + " upstream as an issue"
-		if d.comment {
-			text = "Posted " + name + " upstream as a comment"
-		}
-		p.tellOnce(ctx, k, done, withLink(text, ownDraftURL(cfg, res.url)))
+		p.tellOnce(ctx, k, postedKey(res.url), publishedText(cfg, d, res.url))
+		p.mark(k, done)
 	case draftRecorded:
 		p.tellOnce(ctx, k, done, fmt.Sprintf("The draft %s#%d already has a publish record, so it was not published again.", cfg.Fork, k.number))
 	case draftWaiting:
@@ -568,6 +623,9 @@ func (p *poller) reportDraft(ctx context.Context, cfg forkConfig, k prKey, res d
 		note := "The approval label was removed; add it again to publish."
 		if !res.unlabeled {
 			note = "The approval label could not be removed yet; the approver keeps trying."
+		}
+		if link := ownDraftURL(cfg, res.url); link != "" {
+			note = "It may already be upstream: " + link + ". " + note
 		}
 		p.tellOnce(ctx, k, fmt.Sprintf("draft\x00%d\x00%s", d.approval, res.reason), "Not publishing "+name+": "+res.reason+". "+note)
 	}

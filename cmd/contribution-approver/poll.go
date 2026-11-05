@@ -21,35 +21,36 @@ const (
 
 // poller is driven by one goroutine, run; only links and kick are shared with the decision handler.
 type poller struct {
-	gh            *githubClient
-	forks         []forkConfig
-	codes         *codeStore
-	notify        notifier
-	login         string
-	refused       map[prKey]string
-	forkTimeout   time.Duration
-	kick          chan struct{}
-	links         *upstreamLinks
-	settled       map[prKey]string
-	retried       map[prKey]string
-	told          map[prKey]map[string]bool
-	unsent        map[prKey][]notice
-	prTimeout     time.Duration
-	draftTimeout  time.Duration
-	settleTimeout time.Duration
-	// posted: upstream links written by this process, so a retry of the same approval never writes upstream again.
-	posted     map[draftKey]draftPost
-	livePulls  map[string]map[prKey]bool
-	liveDrafts map[string]map[prKey]bool
+	gh           *githubClient
+	forks        []forkConfig
+	codes        *codeStore
+	notify       notifier
+	login        string
+	refused      map[prKey]string
+	forkTimeout  time.Duration
+	kick         chan struct{}
+	links        *upstreamLinks
+	settled      map[prKey]string
+	retried      map[prKey]string
+	told         map[prKey]map[string]bool
+	unsent       map[prKey][]notice
+	prTimeout    time.Duration
+	draftTimeout time.Duration
+	writeTimeout time.Duration
+	// posted: upstream links written by this process whose record is not written yet; any later approval only records them.
+	posted    map[prKey]draftPost
+	livePulls map[string]map[prKey]bool
+	// knownDrafts: every draft ever polled, so its notices survive the draft leaving the list.
+	knownDrafts map[string]map[prKey]bool
 	// started separates reviews a restart may already have reported from reviews this process must report.
 	started time.Time
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, settleTimeout: prTimeout, posted: map[draftKey]draftPost{}, started: codes.now(),
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, writeTimeout: prTimeout, posted: map[prKey]draftPost{}, started: codes.now(),
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
-		livePulls: map[string]map[prKey]bool{}, liveDrafts: map[string]map[prKey]bool{},
+		livePulls: map[string]map[prKey]bool{}, knownDrafts: map[string]map[prKey]bool{},
 		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},
 	}
 }
@@ -102,7 +103,7 @@ func (p *poller) poll(ctx context.Context) {
 		if live == nil {
 			live = map[prKey]bool{}
 		}
-		maps.Copy(live, p.liveDrafts[cfg.Fork])
+		maps.Copy(live, p.knownDrafts[cfg.Fork])
 		p.keepOnly(cfg.Fork, live)
 	}
 }
