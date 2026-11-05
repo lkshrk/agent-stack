@@ -264,6 +264,8 @@ func (g *githubClient) review(ctx context.Context, fork string, number int, sha,
 type compareFile struct {
 	Filename         string `json:"filename"`
 	PreviousFilename string `json:"previous_filename"`
+	Status           string `json:"status"`
+	SHA              string `json:"sha"`
 }
 
 // compare must stay in step with _require_clean_diff in templates/contribution-fork/publish/gate.py.

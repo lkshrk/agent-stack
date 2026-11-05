@@ -284,7 +284,7 @@ func (g *fakeGitHub) editsConnection(is *fakeIssue, a map[string]string) (map[st
 	nodes := []any{}
 	for i := start; i < end; i++ {
 		e := newest[i]
-		var diff any = "diff"
+		var diff any = e.body
 		if e.deletedAt != nil {
 			diff = nil
 		}

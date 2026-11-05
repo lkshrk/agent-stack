@@ -95,7 +95,7 @@ type fakeComment struct {
 
 type fakeEdit struct {
 	id                  int64
-	editor              string
+	editor, body        string
 	editedAt, createdAt time.Time
 	deletedAt           *time.Time
 	deletedBy           string
@@ -367,9 +367,9 @@ func (g *fakeGitHub) rewrite(is *fakeIssue, body, actor string) {
 	}
 	at := g.now()
 	if len(is.edits) == 0 {
-		is.edits = append(is.edits, &fakeEdit{id: g.id(), editor: is.user, editedAt: is.createdAt, createdAt: at})
+		is.edits = append(is.edits, &fakeEdit{id: g.id(), editor: is.user, body: is.body, editedAt: is.createdAt, createdAt: at})
 	}
-	is.edits = append(is.edits, &fakeEdit{id: g.id(), editor: actor, editedAt: at, createdAt: at})
+	is.edits = append(is.edits, &fakeEdit{id: g.id(), editor: actor, body: body, editedAt: at, createdAt: at})
 	is.body, is.lastEditedAt, is.updatedAt = body, &at, at
 }
 
