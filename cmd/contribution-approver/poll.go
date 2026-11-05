@@ -48,7 +48,7 @@ type poller struct {
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
 	return &poller{
-		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, writeTimeout: prTimeout, posted: map[prKey]draftPost{}, started: codes.now(),
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, writeTimeout: draftWriteTimeout, posted: map[prKey]draftPost{}, started: codes.now(),
 		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
 		livePulls: map[string]map[prKey]bool{}, knownDrafts: map[string]map[prKey]bool{},
 		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},

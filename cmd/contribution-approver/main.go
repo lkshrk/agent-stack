@@ -13,12 +13,15 @@ import (
 )
 
 const (
-	codeTTL        = 30 * time.Minute
-	pollInterval   = 60 * time.Second
-	pollTimeout    = 45 * time.Second
-	prTimeout      = 20 * time.Second
-	minSharedToken = 32
-	defaultGitHub  = "https://api.github.com"
+	codeTTL      = 30 * time.Minute
+	pollInterval = 60 * time.Second
+	pollTimeout  = 45 * time.Second
+	prTimeout    = 20 * time.Second
+	// draftWriteTimeout bounds each upstream write, notice and settle so a draft in flight finishes inside the 30 s termination grace.
+	draftWriteTimeout = 8 * time.Second
+	shutdownGrace     = 25 * time.Second
+	minSharedToken    = 32
+	defaultGitHub     = "https://api.github.com"
 )
 
 func main() {
@@ -61,7 +64,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	go p.run(ctx, pollInterval)
+	runDone := make(chan struct{})
+	go func() {
+		p.run(ctx, pollInterval)
+		close(runDone)
+	}()
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
@@ -75,9 +82,21 @@ func main() {
 		log.Fatal(err)
 	case <-ctx.Done():
 	}
-	sctx, cancel := context.WithTimeout(context.Background(), reviewTimeout+5*time.Second)
+	shutdown(srv, runDone, shutdownGrace)
+}
+
+// shutdown stops the server and waits for the poll loop, which finishes the draft in flight, for at most grace.
+func shutdown(srv *http.Server, runDone <-chan struct{}, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Shutdown(ctx) }()
+	select {
+	case <-runDone:
+	case <-ctx.Done():
+		log.Printf("contribution-approver: the poll loop did not finish within %s", grace)
+	}
+	if err := <-stopped; err != nil {
 		log.Printf("contribution-approver: shutdown: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -180,17 +181,19 @@ type notice struct{ key, text string }
 
 // tellOnce marks key only once Signal accepts the text; a failed send waits in unsent for the next poll.
 func (p *poller) tellOnce(ctx context.Context, k prKey, key, text string) {
-	if p.told[k][key] {
+	if p.pending(k, key) {
 		return
-	}
-	for _, n := range p.unsent[k] {
-		if n.key == key {
-			return
-		}
 	}
 	if !p.deliver(ctx, k, notice{key, text}, false) {
 		p.unsent[k] = append(p.unsent[k], notice{key, text})
 	}
+}
+
+func (p *poller) pending(k prKey, key string) bool {
+	if p.told[k][key] {
+		return true
+	}
+	return slices.ContainsFunc(p.unsent[k], func(n notice) bool { return n.key == key })
 }
 
 func (p *poller) deliver(ctx context.Context, k prKey, n notice, retry bool) bool {
