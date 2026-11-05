@@ -91,26 +91,40 @@ func TestPollRefusesWhenTheTokenIsNotTheForkOwner(t *testing.T) {
 	}
 }
 
-func TestPollRefusesAMalformedForkConfig(t *testing.T) {
-	for name, config := range map[string]string{
-		"other fork":   strings.Replace(contribConfig, `"fork":"lkshrk/omnigent"`, `"fork":"lkshrk/other"`, 1),
-		"extra key":    strings.Replace(contribConfig, `{`, `{"extra":"x",`, 1),
-		"missing key":  strings.Replace(contribConfig, `,"ci_workflow":"contribution-ci.yml"`, ``, 1),
-		"owner":        strings.Replace(contribConfig, `"owner":"lkshrk"`, `"owner":"someone"`, 1),
-		"not json":     "nope",
-		"title format": strings.Replace(contribConfig, `"conventional-scoped"`, `"anything"`, 1),
-	} {
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			h.gh.config = config
-			h.gh.readyPR(7, shaA)
+func TestPollRefusesAForkWhoseParentIsNotTheRegistryUpstream(t *testing.T) {
+	h := newHarness(t)
+	h.gh.parent = "someone-else/omnigent"
+	h.gh.readyPR(7, shaA)
 
-			h.poller.poll(context.Background())
+	h.poller.poll(context.Background())
 
-			if msgs := h.signal.messages(); len(msgs) != 0 {
-				t.Fatalf("announced %q", msgs)
-			}
-		})
+	if msgs := h.signal.messages(); len(msgs) != 0 {
+		t.Fatalf("announced %q", msgs)
+	}
+}
+
+func TestPollRefusesAForkNotOwnedByTheRegistryOwner(t *testing.T) {
+	h := newHarness(t)
+	h.gh.repoOwner = "someone"
+	h.gh.readyPR(7, shaA)
+
+	h.poller.poll(context.Background())
+
+	if msgs := h.signal.messages(); len(msgs) != 0 {
+		t.Fatalf("announced %q", msgs)
+	}
+}
+
+func TestPollNoLongerReadsAConfigFromTheFork(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+
+	h.poller.poll(context.Background())
+
+	for _, req := range h.gh.requests {
+		if strings.Contains(req, "/contents/") {
+			t.Fatalf("read %s", req)
+		}
 	}
 }
 

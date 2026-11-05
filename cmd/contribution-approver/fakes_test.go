@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	testPAT       = "fake-owner-pat-for-tests"
-	testShared    = "shared-token-0123456789abcdef0123456789"
-	testBot       = "+4915550000"
-	testGroup     = "group.R3JvdXBJbnRlcm5hbElkMDEyMzQ1Njc4OWFiY2RlZg=="
-	testFork      = "lkshrk/omnigent"
-	shaA          = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	shaB          = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	contribConfig = `{"upstream":"omnigent-ai/omnigent","fork":"lkshrk/omnigent","owner":"lkshrk","default_branch":"main","title_format":"conventional-scoped","ci_workflow":"contribution-ci.yml"}`
+	testPAT    = "fake-owner-pat-for-tests"
+	testShared = "shared-token-0123456789abcdef0123456789"
+	testBot    = "+4915550000"
+	testGroup  = "group.R3JvdXBJbnRlcm5hbElkMDEyMzQ1Njc4OWFiY2RlZg=="
+	testFork   = "lkshrk/omnigent"
+	shaA       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	shaB       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	forksJSON  = `[{"upstream":"omnigent-ai/omnigent","fork":"lkshrk/omnigent","owner":"lkshrk","default_branch":"main","title_format":"conventional-scoped","ci_workflow":"contribution-ci.yml"}]`
 )
 
 type fakePR struct {
@@ -48,21 +48,22 @@ type review struct {
 }
 
 type fakeGitHub struct {
-	mu       sync.Mutex
-	t        *testing.T
-	login    string
-	config   string
-	prs      map[int]*fakePR
-	runs     map[string][]fakeRun
-	reviews  []review
-	existing map[int][]map[string]any
-	failPost bool
-	requests []string
-	srv      *httptest.Server
+	mu        sync.Mutex
+	t         *testing.T
+	login     string
+	parent    string
+	repoOwner string
+	prs       map[int]*fakePR
+	runs      map[string][]fakeRun
+	reviews   []review
+	existing  map[int][]map[string]any
+	failPost  bool
+	requests  []string
+	srv       *httptest.Server
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
-	g := &fakeGitHub{t: t, login: "lkshrk", config: contribConfig, prs: map[int]*fakePR{}, runs: map[string][]fakeRun{}, existing: map[int][]map[string]any{}}
+	g := &fakeGitHub{t: t, login: "lkshrk", parent: "omnigent-ai/omnigent", repoOwner: "lkshrk", prs: map[int]*fakePR{}, runs: map[string][]fakeRun{}, existing: map[int][]map[string]any{}}
 	g.srv = httptest.NewServer(http.HandlerFunc(g.serve))
 	t.Cleanup(g.srv.Close)
 	return g
@@ -120,12 +121,8 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet && path == "/user":
 		write(map[string]any{"login": g.login})
-	case r.Method == http.MethodGet && path == "/repos/"+testFork+"/contents/publish/contribution.json":
-		if r.Header.Get("Accept") != "application/vnd.github.raw+json" {
-			http.Error(w, "want raw", http.StatusNotAcceptable)
-			return
-		}
-		_, _ = io.WriteString(w, g.config)
+	case r.Method == http.MethodGet && path == "/repos/"+testFork:
+		write(map[string]any{"full_name": testFork, "owner": map[string]any{"login": g.repoOwner}, "parent": map[string]any{"full_name": g.parent}})
 	case r.Method == http.MethodGet && path == "/repos/"+testFork+"/pulls":
 		q := r.URL.Query()
 		if q.Get("state") != "open" || q.Get("base") != "main" {
@@ -268,7 +265,11 @@ func newHarness(t *testing.T) *harness {
 	gh := &githubClient{base: h.gh.srv.URL, token: testPAT, http: h.gh.srv.Client()}
 	notify := &signalNotifier{base: h.signal.srv.URL, number: testBot, recipient: testGroup, http: h.signal.srv.Client()}
 	h.codes = newCodeStore(codeTTL, h.clock.now)
-	h.poller = &poller{gh: gh, forks: []string{testFork}, codes: h.codes, notify: notify}
+	forks, err := loadForks([]byte(forksJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.poller = &poller{gh: gh, forks: forks, codes: h.codes, notify: notify}
 	h.api = (&decider{token: testShared, codes: h.codes, gh: gh, notify: notify}).routes()
 	t.Cleanup(func() {
 		out := h.logs()

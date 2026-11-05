@@ -157,37 +157,25 @@ func (g *githubClient) login(ctx context.Context) (string, error) {
 	return user.Login, nil
 }
 
-func (g *githubClient) config(ctx context.Context, fork string) (forkConfig, error) {
-	var raw []byte
-	if err := g.do(ctx, http.MethodGet, "/repos/"+fork+"/contents/publish/contribution.json", nil, nil, "application/vnd.github.raw+json", &raw); err != nil {
-		return forkConfig{}, err
+func (g *githubClient) verifyFork(ctx context.Context, cfg forkConfig) error {
+	var repo struct {
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Parent *struct {
+			FullName string `json:"full_name"`
+		} `json:"parent"`
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return forkConfig{}, fmt.Errorf("%s contribution.json is not JSON", fork)
+	if err := g.get(ctx, "/repos/"+cfg.Fork, nil, &repo); err != nil {
+		return err
 	}
-	want := []string{"upstream", "fork", "owner", "default_branch", "title_format", "ci_workflow"}
-	if len(fields) != len(want) {
-		return forkConfig{}, fmt.Errorf("%s contribution.json must hold exactly %v", fork, want)
+	if repo.Owner.Login != cfg.Owner {
+		return fmt.Errorf("%s is owned by %s, not %s", cfg.Fork, repo.Owner.Login, cfg.Owner)
 	}
-	for _, k := range want {
-		if s, ok := fields[k].(string); !ok || s == "" {
-			return forkConfig{}, fmt.Errorf("%s contribution.json must hold exactly %v as strings", fork, want)
-		}
+	if repo.Parent == nil || repo.Parent.FullName != cfg.Upstream {
+		return fmt.Errorf("%s is not a fork of %s", cfg.Fork, cfg.Upstream)
 	}
-	var cfg forkConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return forkConfig{}, fmt.Errorf("%s contribution.json is malformed", fork)
-	}
-	switch {
-	case cfg.Fork != fork:
-		return forkConfig{}, fmt.Errorf("%s contribution.json names the fork %s", fork, cfg.Fork)
-	case !slug.MatchString(cfg.Upstream) || strings.SplitN(fork, "/", 2)[0] != cfg.Owner:
-		return forkConfig{}, fmt.Errorf("%s contribution.json upstream or owner is invalid", fork)
-	case titleFormats[cfg.TitleFormat] == nil || !branchName.MatchString(cfg.DefaultBranch):
-		return forkConfig{}, fmt.Errorf("%s contribution.json title_format or default_branch is invalid", fork)
-	}
-	return cfg, nil
+	return nil
 }
 
 func (g *githubClient) openPulls(ctx context.Context, cfg forkConfig) ([]pullRequest, error) {

@@ -25,14 +25,9 @@ func main() {
 	if len(shared) < minSharedToken {
 		log.Fatalf("contribution-approver: APPROVER_TOKEN must be at least %d characters", minSharedToken)
 	}
-	var forks []string
-	for _, f := range strings.Split(mustEnv("CONTRIBUTION_FORKS"), ",") {
-		if f = strings.TrimSpace(f); f != "" {
-			if !slug.MatchString(f) {
-				log.Fatalf("contribution-approver: CONTRIBUTION_FORKS entry %q is not owner/name", f)
-			}
-			forks = append(forks, f)
-		}
+	forks, err := loadForks(embeddedForks)
+	if err != nil {
+		log.Fatalf("contribution-approver: %v", err)
 	}
 	base := os.Getenv("GITHUB_API_URL")
 	if base == "" {
@@ -80,7 +75,11 @@ func main() {
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
-	log.Printf("contribution-approver: listening on %s, watching %s", listen, strings.Join(forks, ", "))
+	names := make([]string, len(forks))
+	for i, f := range forks {
+		names[i] = f.Fork
+	}
+	log.Printf("contribution-approver: listening on %s, watching %s", listen, strings.Join(names, ", "))
 	select {
 	case err := <-serveErr:
 		log.Fatal(err)

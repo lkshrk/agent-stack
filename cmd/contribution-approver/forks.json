@@ -1,0 +1,10 @@
+[
+  {
+    "upstream": "omnigent-ai/omnigent",
+    "fork": "lkshrk/omnigent",
+    "owner": "lkshrk",
+    "default_branch": "main",
+    "title_format": "conventional-scoped",
+    "ci_workflow": "contribution-ci.yml"
+  }
+]

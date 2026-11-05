@@ -18,7 +18,7 @@ const (
 
 type poller struct {
 	gh      *githubClient
-	forks   []string
+	forks   []forkConfig
 	codes   *codeStore
 	notify  notifier
 	login   string
@@ -32,18 +32,15 @@ func contentDigest(title, body string) string {
 }
 
 func (p *poller) poll(ctx context.Context) {
-	for _, fork := range p.forks {
-		if err := p.pollFork(ctx, fork); err != nil {
-			log.Printf("contribution-approver: poll %s: %v", fork, err)
+	for _, cfg := range p.forks {
+		if err := p.pollFork(ctx, cfg); err != nil {
+			log.Printf("contribution-approver: poll %s: %v", cfg.Fork, err)
 		}
 	}
 }
 
-func (p *poller) pollFork(ctx context.Context, fork string) error {
-	cfg, err := p.gh.config(ctx, fork)
-	if err != nil {
-		return err
-	}
+func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
+	fork := cfg.Fork
 	if p.login == "" {
 		login, err := p.gh.login(ctx)
 		if err != nil {
@@ -53,6 +50,9 @@ func (p *poller) pollFork(ctx context.Context, fork string) error {
 	}
 	if p.login != cfg.Owner {
 		return fmt.Errorf("the GitHub token belongs to %s, not the fork owner %s", p.login, cfg.Owner)
+	}
+	if err := p.gh.verifyFork(ctx, cfg); err != nil {
+		return err
 	}
 	pulls, err := p.gh.openPulls(ctx, cfg)
 	if err != nil {
