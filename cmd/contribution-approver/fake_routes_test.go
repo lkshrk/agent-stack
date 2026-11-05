@@ -532,10 +532,17 @@ func (g *fakeGitHub) updateRef(c *fakeReq) {
 		c.invalid("sha is invalid")
 		return
 	}
-	fastForward := old == sha || g.isAncestor(old, sha)
-	if !force && !fastForward {
+	if !g.moveRef(r, branch, old, sha, force, g.login) {
 		c.invalid("Update is not a fast forward")
 		return
+	}
+	c.send(http.StatusOK, fakeRefJSON(r, branch, sha))
+}
+
+func (g *fakeGitHub) moveRef(r *fakeRepo, branch, old, sha string, force bool, actor string) bool {
+	fastForward := old == sha || g.isAncestor(old, sha)
+	if !force && !fastForward {
+		return false
 	}
 	r.refs[branch] = sha
 	for _, rr := range g.repos {
@@ -543,12 +550,26 @@ func (g *fakeGitHub) updateRef(c *fakeReq) {
 			if pr.state == "open" && strings.EqualFold(pr.headRepo, r.fullName) && pr.headRef == branch && pr.sha != sha {
 				pr.sha, pr.heads = sha, append(pr.heads, sha)
 				if !fastForward {
-					g.event(pr.fakeIssue, &fakeEvent{event: "head_ref_force_pushed", actor: g.login})
+					g.event(pr.fakeIssue, &fakeEvent{event: "head_ref_force_pushed", actor: actor})
 				}
 			}
 		}
 	}
-	c.send(http.StatusOK, fakeRefJSON(r, branch, sha))
+	return true
+}
+
+// push moves an existing branch as a git push by actor would, updating every open PR on it.
+func (g *fakeGitHub) push(repo, branch, sha string, force bool, actor string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	r := g.mustRepo(repo)
+	old, ok := r.refs[branch]
+	if !ok {
+		g.t.Fatalf("%s has no branch %s", repo, branch)
+	}
+	if !g.moveRef(r, branch, old, sha, force, actor) {
+		g.t.Fatalf("pushing %s to %s:%s is not a fast forward", sha, repo, branch)
+	}
 }
 
 func (g *fakeGitHub) deleteRef(c *fakeReq) {

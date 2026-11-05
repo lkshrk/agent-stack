@@ -26,6 +26,10 @@ type poller struct {
 	refused map[prKey]string
 }
 
+func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
+	return &poller{gh: gh, forks: forks, codes: codes, notify: notify}
+}
+
 func contentDigest(title, body string) string {
 	raw, _ := json.Marshal([]string{title, body})
 	sum := sha256.Sum256(raw)

@@ -40,9 +40,23 @@ type upstreamPullRequest struct {
 	Number   int        `json:"number"`
 	State    string     `json:"state"`
 	ClosedAt *time.Time `json:"closed_at"`
-	Head     struct {
+	User     *struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
 		Label string `json:"label"`
+		SHA   string `json:"sha"`
+		Repo  *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"head"`
+}
+
+// ours rejects third-party pull requests, which anyone may open from the owner's public branch.
+func (pr upstreamPullRequest) ours(cfg forkConfig, head string) bool {
+	return strings.EqualFold(pr.Head.Label, head) &&
+		pr.User != nil && strings.EqualFold(pr.User.Login, cfg.Owner) &&
+		pr.Head.Repo != nil && strings.EqualFold(pr.Head.Repo.FullName, cfg.Fork)
 }
 
 func (pr upstreamPullRequest) closedAt() (time.Time, bool) {
@@ -106,12 +120,16 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	}
 	var open []upstreamPullRequest
 	var closed *upstreamPullRequest
+	var carried *upstreamPullRequest
 	var closedAt time.Time
 	undated := false
 	for i, pr := range pulls {
 		if pr.State == "open" {
 			open = append(open, pr)
 			continue
+		}
+		if pr.Head.SHA == d.sha && carried == nil {
+			carried = &pulls[i]
 		}
 		at, known := pr.closedAt()
 		if !undated && (closed == nil || !known || at.After(closedAt)) {
@@ -125,17 +143,23 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	if err != nil {
 		return err
 	}
+	if len(open) == 1 && exists && current == d.sha {
+		res.upstream, res.upstreamURL = open[0].Number, upstreamURL(cfg, open[0].Number)
+		res.outcome = outcomeCurrent
+		return nil
+	}
+	if carried != nil {
+		res.upstream, res.upstreamURL = carried.Number, upstreamURL(cfg, carried.Number)
+		res.outcome, res.reason = outcomeClosedUpstream, "a closed or merged upstream pull request already carried "+d.sha
+		return nil
+	}
 	if len(open) == 1 {
 		res.upstream, res.upstreamURL = open[0].Number, upstreamURL(cfg, open[0].Number)
-		if exists && current == d.sha {
-			res.outcome = outcomeCurrent
-			return nil
+		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
+			return err
 		}
 		text := map[string]any{"title": d.title, "body": d.body}
 		if err := g.do(ctx, http.MethodPatch, fmt.Sprintf("/repos/%s/pulls/%d", cfg.Upstream, open[0].Number), nil, text, "application/vnd.github+json", nil); err != nil {
-			return err
-		}
-		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
 			return err
 		}
 		res.outcome = outcomePublished
@@ -153,7 +177,12 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	}
 	var created upstreamPullRequest
 	payload := map[string]any{"title": d.title, "body": d.body, "head": head, "base": cfg.DefaultBranch, "maintainer_can_modify": false}
-	if err := g.do(ctx, http.MethodPost, "/repos/"+cfg.Upstream+"/pulls", nil, payload, "application/vnd.github+json", &created); err != nil {
+	err = g.do(ctx, http.MethodPost, "/repos/"+cfg.Upstream+"/pulls", nil, payload, "application/vnd.github+json", &created)
+	var api *apiError
+	if errors.As(err, &api) && api.status == http.StatusUnprocessableEntity {
+		return hard("GitHub refused to open the upstream pull request")
+	}
+	if err != nil {
 		return err
 	}
 	res.upstream, res.upstreamURL = created.Number, upstreamURL(cfg, created.Number)
@@ -165,7 +194,6 @@ func upstreamURL(cfg forkConfig, number int) string {
 	return fmt.Sprintf("https://github.com/%s/pull/%d", cfg.Upstream, number)
 }
 
-// upstreamPulls drops items whose head is not ours in case GitHub ever ignores the head filter.
 func (g *githubClient) upstreamPulls(ctx context.Context, cfg forkConfig, head string) ([]upstreamPullRequest, error) {
 	var all []upstreamPullRequest
 	for page := 1; ; page++ {
@@ -178,7 +206,7 @@ func (g *githubClient) upstreamPulls(ctx context.Context, cfg forkConfig, head s
 			return nil, err
 		}
 		for _, pr := range batch {
-			if strings.EqualFold(pr.Head.Label, head) {
+			if pr.ours(cfg, head) {
 				all = append(all, pr)
 			}
 		}

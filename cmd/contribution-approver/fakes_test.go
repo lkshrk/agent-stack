@@ -107,7 +107,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.poller = &poller{gh: gh, forks: forks, codes: h.codes, notify: notify}
+	h.poller = newPoller(gh, forks, h.codes, notify)
 	h.api = (&decider{token: testShared, codes: h.codes, gh: gh, forks: forks, notify: notify}).routes()
 	t.Cleanup(func() {
 		out := h.logs()

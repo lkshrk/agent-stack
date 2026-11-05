@@ -89,18 +89,14 @@ func wantRef(t *testing.T, h *harness, sha string) {
 }
 
 func moveHead(h *harness, sha string) {
-	h.gh.update(func() {
-		pr := h.gh.fork.pulls[prNumber]
-		pr.sha, pr.heads = sha, append(pr.heads, sha)
-		h.gh.fork.refs[pr.headRef] = sha
-	})
+	h.gh.push(testFork, h.gh.pullOf(testFork, prNumber).headRef, sha, true, testAgent)
 	greenCI(h, sha)
 	h.clock.advance(time.Minute)
 }
 
 func restart(h *harness) {
 	h.codes = newCodeStore(codeTTL, h.clock.now)
-	h.poller = &poller{gh: h.poller.gh, forks: h.poller.forks, codes: h.codes, notify: h.poller.notify}
+	h.poller = newPoller(h.poller.gh, h.poller.forks, h.codes, h.poller.notify)
 }
 
 func writeSummary(calls []fakeCall) []string {
@@ -184,7 +180,7 @@ func TestPublishRecoversFromAWriteThatFailed(t *testing.T) {
 		"ref not created":                 {"POST", forkRefs, fakeFailure{Status: 502}, outcomePublished},
 		"pull request opened, then error": {"POST", upPulls, fakeFailure{Status: 502, After: true}, outcomeCurrent},
 		"pull request opened, then drop":  {"POST", upPulls, fakeFailure{Status: fakeDrop, After: true}, outcomeCurrent},
-		"pull request not opened":         {"POST", upPulls, fakeFailure{Status: 422}, outcomePublished},
+		"pull request not opened":         {"POST", upPulls, fakeFailure{Status: 502}, outcomePublished},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -230,14 +226,14 @@ func TestPublishMovesTheBranchAndUpdatesTheTextForANewApproval(t *testing.T) {
 	wantOutcome(t, r, outcomePublished)
 	w := h.gh.writes()[before:]
 	upPatch := upPulls + "/" + itoa(first.upstream)
-	if got := writeSummary(w); strings.Join(got, ",") != "PATCH "+upPatch+",PATCH "+forkPublishRef {
-		t.Fatalf("writes = %v, want the text, then the branch", got)
+	if got := writeSummary(w); strings.Join(got, ",") != "PATCH "+forkPublishRef+",PATCH "+upPatch {
+		t.Fatalf("writes = %v, want the branch, then the text", got)
 	}
-	if w[0].Body["title"] != newTitle || w[0].Body["body"] != prBody || len(w[0].Body) != 2 {
-		t.Fatalf("PATCH body = %v, want exactly the approved title and body", w[0].Body)
+	if w[1].Body["title"] != newTitle || w[1].Body["body"] != prBody || len(w[1].Body) != 2 {
+		t.Fatalf("PATCH body = %v, want exactly the approved title and body", w[1].Body)
 	}
-	if w[1].Body["sha"] != shaB || w[1].Body["force"] != true {
-		t.Fatalf("ref PATCH = %v", w[1].Body)
+	if w[0].Body["sha"] != shaB || w[0].Body["force"] != true {
+		t.Fatalf("ref PATCH = %v", w[0].Body)
 	}
 	up := onlyUpstream(t, h)
 	wantRef(t, h, shaB)
@@ -249,41 +245,50 @@ func TestPublishMovesTheBranchAndUpdatesTheTextForANewApproval(t *testing.T) {
 	wantNoWritesSince(t, h, before)
 }
 
-func TestPublishLeavesTheBranchWhenTheUpstreamEditFails(t *testing.T) {
+func TestPublishNeverRepeatsTheTextPatch(t *testing.T) {
+	const maintainerTitle = "feat(web): maintainer wording"
+	t.Run("the branch move keeps failing", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		first := publishedOnce(t, h)
+		approveNewHead(h, shaB, "feat(web): add the better thing")
+		upPatch := upPulls + "/" + itoa(first.upstream)
+		h.gh.fail("PATCH", forkPublishRef, 502)
+		wantOutcome(t, publishPR(t, h), outcomeRetry)
+		h.gh.rename(testUpstream, first.upstream, maintainerTitle, maintainer)
+		wantOutcome(t, publishPR(t, h), outcomeRetry)
+		if n := h.gh.callCount("PATCH", upPatch); n != 0 {
+			t.Fatalf("the text was patched %d times before the branch moved", n)
+		}
+		wantRef(t, h, shaA)
+		if up := onlyUpstream(t, h); up.title != maintainerTitle {
+			t.Fatalf("upstream title = %q, want the maintainer's", up.title)
+		}
+	})
 	for name, f := range map[string]fakeFailure{
 		"rejected":         {Status: 502},
 		"applied, errored": {Status: 502, After: true},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run("the text patch "+name, func(t *testing.T) {
 			h := publishable(t, shaA, nil)
 			first := publishedOnce(t, h)
-			approveNewHead(h, shaB, "")
+			approveNewHead(h, shaB, "feat(web): add the better thing")
 			upPatch := upPulls + "/" + itoa(first.upstream)
 			h.gh.failWith("PATCH", upPatch, f)
 			wantOutcome(t, publishPR(t, h), outcomeRetry)
-			wantRef(t, h, shaA)
-			if h.gh.callCount("PATCH", forkPublishRef) != 0 {
-				t.Fatal("the branch moved after the upstream edit failed")
-			}
-			h.gh.fail("PATCH", upPatch, 0)
-			wantOutcome(t, publishPR(t, h), outcomePublished)
 			wantRef(t, h, shaB)
+			h.gh.fail("PATCH", upPatch, 0)
+			h.gh.rename(testUpstream, first.upstream, maintainerTitle, maintainer)
+			before := len(h.gh.writes())
 			wantOutcome(t, publishPR(t, h), outcomeCurrent)
-			onlyUpstream(t, h)
+			wantNoWritesSince(t, h, before)
+			if n := h.gh.callCount("PATCH", upPatch); n != 1 {
+				t.Fatalf("the text was patched %d times, want once", n)
+			}
+			if up := onlyUpstream(t, h); up.title != maintainerTitle {
+				t.Fatalf("upstream title = %q, want the maintainer's", up.title)
+			}
 		})
 	}
-	t.Run("branch moved, then an error", func(t *testing.T) {
-		h := publishable(t, shaA, nil)
-		publishedOnce(t, h)
-		approveNewHead(h, shaB, "")
-		h.gh.failWith("PATCH", forkPublishRef, fakeFailure{Status: 502, After: true})
-		wantOutcome(t, publishPR(t, h), outcomeRetry)
-		h.gh.fail("PATCH", forkPublishRef, 0)
-		before := len(h.gh.writes())
-		wantOutcome(t, publishPR(t, h), outcomeCurrent)
-		wantNoWritesSince(t, h, before)
-		wantRef(t, h, shaB)
-	})
 }
 
 func TestPublishDoesNotRevertAMaintainerRetitle(t *testing.T) {
@@ -366,18 +371,29 @@ func TestPublishDoesNotReopenAClosedUpstreamPullRequest(t *testing.T) {
 		wantOutcome(t, publishPR(t, h), outcomeClosedUpstream)
 		wantNoWritesSince(t, h, before)
 	})
-	t.Run("a newer approval opens a new pull request", func(t *testing.T) {
+	t.Run("a newer approval of the same commit", func(t *testing.T) {
 		h, first := setup(t)
-		h.clock.advance(time.Second)
+		h.clock.advance(time.Minute)
 		approve(h, shaA)
 		before := len(h.gh.writes())
 		r := publishPR(t, h)
+		wantOutcome(t, r, outcomeClosedUpstream)
+		wantNoWritesSince(t, h, before)
+		if r.upstream != first.upstream {
+			t.Fatalf("result names #%d, want #%d", r.upstream, first.upstream)
+		}
+	})
+	t.Run("a new commit with a newer approval opens a new pull request", func(t *testing.T) {
+		h, first := setup(t)
+		approveNewHead(h, shaB, "")
+		before := len(h.gh.writes())
+		r := publishPR(t, h)
 		wantOutcome(t, r, outcomePublished)
-		if got := writeSummary(h.gh.writes()[before:]); len(got) != 1 || got[0] != "POST "+upPulls {
-			t.Fatalf("writes = %v, want one new pull request and no ref move", got)
+		if got := writeSummary(h.gh.writes()[before:]); strings.Join(got, ",") != "PATCH "+forkPublishRef+",POST "+upPulls {
+			t.Fatalf("writes = %v, want the branch moved and one new pull request", got)
 		}
 		pulls := upstreamPulls(h)
-		if len(pulls) != 2 || pulls[0].state != "closed" || pulls[1].state != "open" || r.upstream != pulls[1].number || r.upstream == first.upstream {
+		if len(pulls) != 2 || pulls[0].state != "closed" || pulls[1].state != "open" || pulls[1].sha != shaB || r.upstream != pulls[1].number || r.upstream == first.upstream {
 			t.Fatalf("upstream = %+v, result #%d", pulls, r.upstream)
 		}
 		before = len(h.gh.writes())
@@ -395,6 +411,19 @@ func TestPublishDoesNotRepublishAMergedUpstreamPullRequest(t *testing.T) {
 		before := len(h.gh.writes())
 		wantOutcome(t, publishPR(t, h), outcomeClosedUpstream)
 		wantNoWritesSince(t, h, before)
+	})
+	t.Run("a restart and a fresh approval of the merged commit", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		publishedOnce(t, h)
+		h.clock.advance(time.Minute)
+		h.gh.merge(testUpstream, onlyUpstream(t, h).number, maintainer)
+		restart(h)
+		h.clock.advance(time.Minute)
+		approve(h, shaA)
+		before := len(h.gh.writes())
+		wantOutcome(t, publishPR(t, h), outcomeClosedUpstream)
+		wantNoWritesSince(t, h, before)
+		onlyUpstream(t, h)
 	})
 	t.Run("a new head approved before the merge", func(t *testing.T) {
 		h := publishable(t, shaA, nil)
@@ -460,12 +489,11 @@ func TestPublishNeverDismissesOnATransientRefusal(t *testing.T) {
 		"CI running": func(h *harness) {
 			setCI(h, shaA, []fakeRun{{status: "in_progress", path: ciPath}}, ciCheck("test", "in_progress", ""))
 		},
-		"decision read fails":    func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/pulls/7", 502) },
-		"upstream lookup fails":  func(h *harness) { h.gh.fail("GET", upPulls, 502) },
-		"upstream lookup drops":  func(h *harness) { h.gh.fail("GET", upPulls, fakeDrop) },
-		"branch read fails":      func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/git/ref/heads/upstream/pr-7", 502) },
-		"branch read is a 403":   func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/git/ref/heads/upstream/pr-7", 403) },
-		"pull request POST 422s": func(h *harness) { h.gh.fail("POST", upPulls, 422) },
+		"decision read fails":   func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/pulls/7", 502) },
+		"upstream lookup fails": func(h *harness) { h.gh.fail("GET", upPulls, 502) },
+		"upstream lookup drops": func(h *harness) { h.gh.fail("GET", upPulls, fakeDrop) },
+		"branch read fails":     func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/git/ref/heads/upstream/pr-7", 502) },
+		"branch read is a 403":  func(h *harness) { h.gh.fail("GET", "/repos/lkshrk/omnigent/git/ref/heads/upstream/pr-7", 403) },
 	}
 	for name, setup := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -594,13 +622,24 @@ func (lt *listTamper) RoundTrip(r *http.Request) (*http.Response, error) {
 	return res, nil
 }
 
+func decoyPull(number int, state, label, repo string) map[string]any {
+	head := map[string]any{"label": label, "sha": shaA, "repo": nil}
+	if repo != "" {
+		head["repo"] = map[string]any{"full_name": repo}
+	}
+	return map[string]any{"number": number, "state": state, "closed_at": "2030-01-01T00:00:00Z", "user": map[string]any{"login": testOwner}, "head": head}
+}
+
 func TestPublishIgnoresUpstreamPullRequestsFromAnotherHead(t *testing.T) {
 	for name, c := range map[string]struct {
 		existing bool
 		decoy    map[string]any
 	}{
-		"open":   {true, map[string]any{"number": 900, "state": "open", "head": map[string]any{"label": "someone:upstream/pr-7"}}},
-		"closed": {false, map[string]any{"number": 901, "state": "closed", "closed_at": "2030-01-01T00:00:00Z", "head": map[string]any{"label": "lkshrk:upstream/pr-70"}}},
+		"open, another label":   {true, decoyPull(900, "open", "someone:upstream/pr-7", testFork)},
+		"closed, another label": {false, decoyPull(901, "closed", "lkshrk:upstream/pr-70", testFork)},
+		"open, another repo":    {true, decoyPull(902, "open", publishHead, "someone/omnigent")},
+		"closed, another repo":  {false, decoyPull(903, "closed", publishHead, "someone/omnigent")},
+		"closed, no repo":       {false, decoyPull(904, "closed", publishHead, "")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := publishable(t, shaA, nil)
@@ -628,7 +667,8 @@ func TestPublishTreatsAnUndatedCloseAsAfterTheApproval(t *testing.T) {
 			h.clock.advance(time.Minute)
 			approve(h, shaA)
 			gh := h.poller.gh
-			undated := map[string]any{"number": 902, "state": "closed", "closed_at": nil, "head": map[string]any{"label": publishHead}}
+			undated := map[string]any{"number": 902, "state": "closed", "closed_at": nil, "user": map[string]any{"login": testOwner},
+				"head": map[string]any{"label": publishHead, "sha": shaB, "repo": map[string]any{"full_name": testFork}}}
 			gh.http = &http.Client{Transport: &listTamper{base: gh.http.Transport, path: upPulls, add: undated}}
 			before := len(h.gh.writes())
 			r := publishPR(t, h)
@@ -661,4 +701,96 @@ func TestPublishRetriesOnAnUnexpectedBranchRead(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPublishRefusesAnUpstreamPullRequestGitHubRejects(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	rv := approve(h, shaA)
+	h.gh.fail("POST", upPulls, 422)
+	r := publishPR(t, h)
+	wantOutcome(t, r, outcomeRefused)
+	if !r.dismissed || r.reason != "GitHub refused to open the upstream pull request" {
+		t.Fatalf("result = %+v", r)
+	}
+	if h.gh.callCount("PUT", "/repos/lkshrk/omnigent/pulls/7/reviews/"+itoa(int(rv.id))+"/dismissals") != 1 {
+		t.Fatal("the approval was not dismissed")
+	}
+}
+
+func thirdPartyPull(h *harness, base string) fakePR {
+	return h.gh.addPull(testUpstream, fakePR{fakeIssue: &fakeIssue{title: "feat(web): not ours", user: "mallory"}, headRepo: testFork, headRef: publishRef, base: base, sha: shaB})
+}
+
+func TestPublishIgnoresThirdPartyPullRequestsOnOurHead(t *testing.T) {
+	cases := map[string]func(h *harness){
+		"one open": func(h *harness) { thirdPartyPull(h, "next") },
+		"two open": func(h *harness) {
+			thirdPartyPull(h, "next")
+			h.gh.setRef(testUpstream, "other", shaUpMain)
+			thirdPartyPull(h, "other")
+		},
+		"closed after the approval": func(h *harness) {
+			pr := thirdPartyPull(h, "next")
+			h.clock.advance(2 * time.Minute)
+			h.gh.closeIssue(testUpstream, pr.number, maintainer)
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			h.gh.setRef(testUpstream, "next", shaUpMain)
+			approve(h, shaA)
+			setup(h)
+			r := publishPR(t, h)
+			wantOutcome(t, r, outcomePublished)
+			for _, c := range h.gh.writes() {
+				if c.Method == "PATCH" && strings.HasPrefix(c.Path, upPulls+"/") || c.Method == "PUT" {
+					t.Fatalf("unexpected write %s %s", c.Method, c.Path)
+				}
+			}
+			var ours []fakePR
+			for _, pr := range upstreamPulls(h) {
+				if pr.user == "mallory" && pr.title != "feat(web): not ours" {
+					t.Fatalf("a third-party PR was edited: %+v", pr)
+				}
+				if pr.user == testOwner {
+					ours = append(ours, pr)
+				}
+			}
+			if len(ours) != 1 || r.upstream != ours[0].number || ours[0].state != "open" {
+				t.Fatalf("our upstream PRs = %+v, result #%d", ours, r.upstream)
+			}
+		})
+	}
+	t.Run("an approval after a third-party close of the same commit", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		h.gh.setRef(testUpstream, "next", shaUpMain)
+		pr := h.gh.addPull(testUpstream, fakePR{fakeIssue: &fakeIssue{title: "feat(web): not ours", user: "mallory"}, headRepo: testFork, headRef: publishRef, base: "next", sha: shaA})
+		h.clock.advance(time.Minute)
+		h.gh.closeIssue(testUpstream, pr.number, maintainer)
+		approve(h, shaA)
+		wantOutcome(t, publishPR(t, h), outcomePublished)
+	})
+}
+
+func TestPublishLeavesABranchThatAlreadyHoldsTheCommit(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.gh.setRef(testFork, publishRef, shaA)
+	approve(h, shaA)
+	wantOutcome(t, publishPR(t, h), outcomePublished)
+	if got := writeSummary(h.gh.writes()); len(got) != 1 || got[0] != "POST "+upPulls {
+		t.Fatalf("writes = %v, want only the pull request", got)
+	}
+}
+
+func TestPublishBlocksANewCommitApprovedInTheSecondOfTheClose(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	first := publishedOnce(t, h)
+	moveHead(h, shaB)
+	h.gh.closeIssue(testUpstream, first.upstream, maintainer)
+	approve(h, shaB)
+	before := len(h.gh.writes())
+	wantOutcome(t, publishPR(t, h), outcomeClosedUpstream)
+	wantNoWritesSince(t, h, before)
+	wantRef(t, h, shaA)
 }
