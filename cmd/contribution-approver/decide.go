@@ -97,7 +97,7 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "expired code for a changed head", http.StatusGone)
 		return
 	}
-	if changed, head, err := d.changedSinceAnnouncement(ctx, p); err != nil || changed {
+	if changed, err := d.changedSinceAnnouncement(ctx, p); err != nil || changed {
 		d.codes.forget(p.pr)
 		if err != nil {
 			log.Printf("contribution-approver: %s %s#%d: re-reading the pull request failed: %v", req.Action, p.pr.fork, p.pr.number, err)
@@ -106,11 +106,7 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("contribution-approver: %s %s#%d refused: the pull request changed since the announcement", req.Action, p.pr.fork, p.pr.number)
-		text := fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label). Nothing was submitted; if it is still ready, a new code follows within a minute.", p.pr.fork, p.pr.number, readyLabel)
-		if d.codes.held(p.pr, head) {
-			text = fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label); %s", p.pr.fork, p.pr.number, readyLabel, heldPromise)
-		}
-		d.tell(ctx, text)
+		d.tell(ctx, fmt.Sprintf("%s#%d changed since the announcement (head, title, body or %s label). Nothing was submitted; if it is still ready, a new code follows within a minute.", p.pr.fork, p.pr.number, readyLabel))
 		http.Error(w, "pull request changed", http.StatusConflict)
 		return
 	}
@@ -154,13 +150,13 @@ func (d *decider) tell(ctx context.Context, text string) {
 	}
 }
 
-func (d *decider) changedSinceAnnouncement(ctx context.Context, p pending) (bool, string, error) {
+func (d *decider) changedSinceAnnouncement(ctx context.Context, p pending) (bool, error) {
 	pr, err := d.gh.pull(ctx, p.pr.fork, p.pr.number)
 	if err != nil {
-		return false, "", err
+		return false, err
 	}
 	a, ok := d.codes.announcementOf(p.pr, p.sha)
-	return !ok || pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != a.digest, pr.Head.SHA, nil
+	return !ok || pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != a.digest, nil
 }
 
 func (d *decider) verifyFork(ctx context.Context, fork string) error {

@@ -211,6 +211,8 @@ func (s *codeStore) forget(k prKey) {
 	defer s.mu.Unlock()
 	s.dropLive(k)
 	delete(s.announced, k)
+	delete(s.holdUntil, k)
+	delete(s.heldSHA, k)
 }
 
 func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {

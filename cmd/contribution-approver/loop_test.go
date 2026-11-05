@@ -918,15 +918,23 @@ func TestRepliesPromiseANewCodeTruthfully(t *testing.T) {
 			t.Fatalf("reply = %q, want the minute promise", done)
 		}
 	})
-	t.Run("changed, held", func(t *testing.T) {
+	t.Run("changed during a hold", func(t *testing.T) {
 		h := publishable(t, shaA, nil)
 		failBindListing(h)
 		pollTimes(h, 2)
+		if !h.codes.held(prK, shaA) {
+			t.Fatal("want a hold before the reply")
+		}
 		h.gh.editBody(testFork, prNumber, "Adds the thing, edited.", testAgent)
 		approveWith(h, lastCode(t, h))
 		msgs := h.signal.messages()
-		if done := msgs[len(msgs)-1]; !strings.Contains(done, "changed since the announcement") || !strings.HasSuffix(done, heldPromise) || strings.Contains(done, minute) {
-			t.Fatalf("reply = %q, want the held promise", done)
+		if done := msgs[len(msgs)-1]; !strings.Contains(done, "changed since the announcement") || !strings.Contains(done, minute) || strings.Contains(done, heldPromise) {
+			t.Fatalf("reply = %q, want the minute promise", done)
+		}
+		announced := readyMessages(h)
+		pollTimes(h, 1)
+		if readyMessages(h) != announced+1 || countContaining(h.signal.messages(), "Body: Adds the thing, edited.") != 1 {
+			t.Fatalf("messages = %q, want the new code within a minute", h.signal.messages())
 		}
 	})
 	t.Run("changed, not held", func(t *testing.T) {
