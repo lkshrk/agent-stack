@@ -81,7 +81,7 @@ func (p *poller) publish(ctx context.Context, cfg forkConfig, number int) publis
 	case verdictHard:
 		return p.gh.spend(ctx, cfg, res)
 	}
-	if err := p.gh.publishUpstream(ctx, cfg, d, &res); err != nil {
+	if err := p.gh.publishUpstream(ctx, cfg, d, &res, true); err != nil {
 		res = res.withError(err)
 		if res.outcome == outcomeRefused {
 			return p.gh.spend(ctx, cfg, res)
@@ -112,7 +112,16 @@ func (g *githubClient) spend(ctx context.Context, cfg forkConfig, res publishRes
 	return res
 }
 
-func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d publishDecision, res *publishResult) error {
+// settledUpstream reports, without writing, whether d's approval is already Current or blocked by a closed upstream pull request.
+func (g *githubClient) settledUpstream(ctx context.Context, cfg forkConfig, d publishDecision) (publishResult, bool) {
+	res := publishResult{decision: d, outcome: outcomeNothing}
+	if err := g.publishUpstream(ctx, cfg, d, &res, false); err != nil {
+		return res, false
+	}
+	return res, res.outcome == outcomeCurrent || res.outcome == outcomeClosedUpstream
+}
+
+func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d publishDecision, res *publishResult, write bool) error {
 	branch := publishBranch(d.number)
 	head := cfg.Owner + ":" + branch
 	pulls, err := g.upstreamPulls(ctx, cfg, head)
@@ -155,6 +164,9 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 		return nil
 	}
 	if len(open) == 1 {
+		if !write {
+			return nil
+		}
 		res.upstream, res.upstreamURL = open[0].Number, upstreamURL(cfg, open[0].Number)
 		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
 			return err
@@ -171,6 +183,9 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 		res.outcome, res.reason = outcomeClosedUpstream, "the upstream pull request was closed or merged after the approval"
 		return nil
 	}
+	if !write {
+		return nil
+	}
 	if !exists || current != d.sha {
 		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
 			return err
@@ -182,7 +197,7 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 	var api *apiError
 	if errors.As(err, &api) && api.status == http.StatusUnprocessableEntity {
 		if headTaken(api.body) {
-			return &refusal{verdictTransient, "the upstream head is taken or not visible yet, so opening the pull request waits"}
+			return &refusal{verdictTransient, headTakenReason}
 		}
 		return hard("GitHub refused to open the upstream pull request")
 	}

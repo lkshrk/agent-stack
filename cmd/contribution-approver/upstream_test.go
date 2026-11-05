@@ -603,10 +603,16 @@ type listTamper struct {
 }
 
 func (lt *listTamper) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path != lt.path || r.Method != http.MethodGet {
+		return lt.base.RoundTrip(r)
+	}
+	r = r.Clone(r.Context())
+	r.Header.Del("If-None-Match")
 	res, err := lt.base.RoundTrip(r)
-	if err != nil || r.URL.Path != lt.path || r.Method != http.MethodGet {
+	if err != nil {
 		return res, err
 	}
+	res.Header.Del("ETag")
 	raw, err := io.ReadAll(res.Body)
 	_ = res.Body.Close()
 	if err != nil {
@@ -812,8 +818,6 @@ func beforeUpstreamPOST(h *harness, run func()) {
 	gh := h.poller.gh
 	gh.http = &http.Client{Transport: &beforeTransport{base: gh.http.Transport, method: "POST", path: upPulls, run: run}}
 }
-
-const headTakenReason = "the upstream head is taken or not visible yet, so opening the pull request waits"
 
 func TestPublishWaitsWhenGitHubSaysTheHeadIsTaken(t *testing.T) {
 	cases := map[string]func(h *harness){

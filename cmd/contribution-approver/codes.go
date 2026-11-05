@@ -11,6 +11,7 @@ import (
 const (
 	codeDigits   = 8
 	tombstoneTTL = 24 * time.Hour
+	maxBindHold  = 24 * time.Hour
 )
 
 var codeSpace = big.NewInt(100_000_000)
@@ -55,13 +56,17 @@ type codeStore struct {
 	byCode    map[string]pending
 	announced map[prKey]headState
 	sent      map[prKey]map[string]sentAnnouncement
-	resend    map[prKey]bool
+	// resend maps a pull request that must be announced again to the review ID its next record must exceed.
+	resend    map[prKey]int64
+	unbound   map[prKey]int
+	holdUntil map[prKey]time.Time
 }
 
 func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
 	return &codeStore{
 		ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{},
-		sent: map[prKey]map[string]sentAnnouncement{}, resend: map[prKey]bool{},
+		sent: map[prKey]map[string]sentAnnouncement{}, resend: map[prKey]int64{},
+		unbound: map[prKey]int{}, holdUntil: map[prKey]time.Time{},
 	}
 }
 
@@ -71,8 +76,10 @@ func (s *codeStore) recordAnnouncement(k prKey, sha, digest string, lastReview i
 	if s.sent[k] == nil {
 		s.sent[k] = map[string]sentAnnouncement{}
 	}
-	s.sent[k][sha] = sentAnnouncement{digest: digest, lastReview: lastReview}
+	s.sent[k][sha] = sentAnnouncement{digest: digest, lastReview: max(lastReview, s.resend[k])}
 	delete(s.resend, k)
+	delete(s.unbound, k)
+	delete(s.holdUntil, k)
 }
 
 func (s *codeStore) announcementOf(k prKey, sha string) (sentAnnouncement, bool) {
@@ -82,23 +89,45 @@ func (s *codeStore) announcementOf(k prKey, sha string) (sentAnnouncement, bool)
 	return a, ok
 }
 
-func (s *codeStore) requestReannouncement(k prKey) {
+func (s *codeStore) requestReannouncement(k prKey, floor int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.resend[k] = true
+	s.resend[k] = max(s.resend[k], floor)
+}
+
+func (s *codeStore) cancelReannouncement(k prKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.resend, k)
 }
 
 func (s *codeStore) reannouncing(k prKey) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.resend[k]
+	_, ok := s.resend[k]
+	return ok
+}
+
+// bindFailed asks for a re-announcement; after the first consecutive failure it holds off, doubling up to a day.
+func (s *codeStore) bindFailed(k prKey) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resend[k] = max(s.resend[k], 0)
+	s.unbound[k]++
+	if n := s.unbound[k]; n > 1 {
+		s.holdUntil[k] = s.now().Add(min(s.ttl<<min(n-2, 10), maxBindHold))
+	}
 }
 
 func (s *codeStore) needsAnnouncement(k prKey, sha string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.now().Before(s.holdUntil[k]) {
+		return false
+	}
 	a, ok := s.announced[k]
-	return s.resend[k] || !ok || a.sha != sha || (a.expired && !a.consumed)
+	_, resend := s.resend[k]
+	return resend || !ok || a.sha != sha || (a.expired && !a.consumed)
 }
 
 func (s *codeStore) issue(k prKey, sha string) (string, error) {
@@ -183,7 +212,17 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 	for k := range s.sent {
 		if k.fork == fork && !ready[k] {
 			delete(s.sent, k)
+		}
+	}
+	for k := range s.resend {
+		if k.fork == fork && !ready[k] {
 			delete(s.resend, k)
+		}
+	}
+	for k := range s.unbound {
+		if k.fork == fork && !ready[k] {
+			delete(s.unbound, k)
+			delete(s.holdUntil, k)
 		}
 	}
 }

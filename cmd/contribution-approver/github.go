@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 	pageSize        = 100
 	maxPages        = 10
 	maxRespBytes    = 4 << 20
+	maxETagBytes    = 32 << 20
 )
 
 var (
@@ -35,7 +37,20 @@ var (
 type githubClient struct {
 	base, token string
 	http        *http.Client
+
+	mu        sync.Mutex
+	etags     map[string]etagged
+	etagBytes int
 }
+
+type etagged struct {
+	etag string
+	body []byte
+}
+
+type forkMismatch struct{ detail string }
+
+func (e *forkMismatch) Error() string { return e.detail }
 
 type forkConfig struct {
 	Upstream      string `json:"upstream"`
@@ -115,6 +130,11 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 	}
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", accept)
+	cacheKey := accept + " " + u
+	cached, revalidate := g.cachedETag(method, cacheKey)
+	if revalidate {
+		req.Header.Set("If-None-Match", cached.etag)
+	}
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -128,8 +148,13 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 	if err != nil {
 		return fmt.Errorf("GitHub %s %s: read failed", method, path)
 	}
-	if res.StatusCode/100 != 2 {
+	switch {
+	case res.StatusCode == http.StatusNotModified && revalidate:
+		raw = cached.body
+	case res.StatusCode/100 != 2:
 		return &apiError{method: method, path: path, status: res.StatusCode, body: raw}
+	case method == http.MethodGet && res.Header.Get("ETag") != "":
+		g.storeETag(cacheKey, res.Header.Get("ETag"), raw)
 	}
 	if b, ok := out.(*[]byte); ok {
 		*b = raw
@@ -142,6 +167,30 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 		return fmt.Errorf("GitHub %s %s: undecodable response", method, path)
 	}
 	return nil
+}
+
+func (g *githubClient) cachedETag(method, key string) (etagged, bool) {
+	if method != http.MethodGet {
+		return etagged{}, false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	e, ok := g.etags[key]
+	return e, ok
+}
+
+// storeETag keeps GET bodies for If-None-Match; GitHub does not bill a 304 against the PAT's hourly limit.
+func (g *githubClient) storeETag(key, etag string, raw []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.etags == nil || g.etagBytes+len(raw) > maxETagBytes {
+		g.etags, g.etagBytes = map[string]etagged{}, 0
+	}
+	if old, ok := g.etags[key]; ok {
+		g.etagBytes -= len(old.body)
+	}
+	g.etags[key] = etagged{etag: etag, body: bytes.Clone(raw)}
+	g.etagBytes += len(raw)
 }
 
 func (g *githubClient) get(ctx context.Context, path string, query url.Values, out any) error {
@@ -171,10 +220,10 @@ func (g *githubClient) verifyFork(ctx context.Context, cfg forkConfig) error {
 		return err
 	}
 	if repo.Owner.Login != cfg.Owner {
-		return fmt.Errorf("%s is owned by %s, not %s", cfg.Fork, repo.Owner.Login, cfg.Owner)
+		return &forkMismatch{fmt.Sprintf("%s is owned by %s, not %s", cfg.Fork, repo.Owner.Login, cfg.Owner)}
 	}
 	if repo.Parent == nil || repo.Parent.FullName != cfg.Upstream {
-		return fmt.Errorf("%s is not a fork of %s", cfg.Fork, cfg.Upstream)
+		return &forkMismatch{fmt.Sprintf("%s is not a fork of %s", cfg.Fork, cfg.Upstream)}
 	}
 	return nil
 }

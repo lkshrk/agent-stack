@@ -74,7 +74,7 @@ func TestApproveReviewsTheAnnouncedHeadOnce(t *testing.T) {
 		t.Fatalf("review = %+v, want APPROVE on %s", r, shaA)
 	}
 	msgs := h.signal.messages()
-	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[1], "https://github.com/lkshrk/omnigent/actions/workflows/publish-upstream.yml") || !strings.Contains(msgs[2], "unknown or already used") {
+	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[1], "Publishing upstream follows") || !strings.Contains(msgs[2], "unknown or already used") {
 		t.Fatalf("confirmations = %q", msgs)
 	}
 }

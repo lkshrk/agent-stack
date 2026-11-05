@@ -41,6 +41,9 @@ type publishDecision struct {
 	title, body  string
 	lastEditedAt *time.Time
 	reannounce   bool
+	// unannounced: the only binding failure is that no announcement of sha is known, as after a restart.
+	unannounced bool
+	pull        string
 }
 
 type announcementLog interface {
@@ -89,7 +92,7 @@ type ownerReview struct {
 func (p *poller) decidePublish(ctx context.Context, cfg forkConfig, number int) publishDecision {
 	d := p.gh.evaluatePublish(ctx, cfg, number, p.codes)
 	if d.reannounce && (d.verdict == verdictHard || d.verdict == verdictTransient) {
-		p.codes.requestReannouncement(prKey{fork: cfg.Fork, number: number})
+		p.codes.requestReannouncement(prKey{fork: cfg.Fork, number: number}, d.reviewID)
 	}
 	return d
 }
@@ -98,8 +101,12 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 	d := publishDecision{number: number}
 	if err := g.verifyFork(ctx, cfg); err != nil {
 		var api *apiError
-		if !errors.As(err, &api) {
+		var mismatch *forkMismatch
+		switch {
+		case errors.As(err, &mismatch):
 			err = &refusal{verdictTransient, "the fork does not match the registry"}
+		case !errors.As(err, &api):
+			err = &refusal{verdictTransient, "could not check the fork"}
 		}
 		return d.refuse(err)
 	}
@@ -126,7 +133,7 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 	if err := checkPull(cfg, pr); err != nil {
 		return d.refuse(err)
 	}
-	d.title, d.body = pr.Title, pr.Body
+	d.title, d.body, d.pull = pr.Title, pr.Body, pullFingerprint(pr)
 	k, digest := prKey{fork: cfg.Fork, number: number}, contentDigest(pr.Title, pr.Body)
 	if head, ok := sent.announcementOf(k, pr.Head.SHA); !ok || head.digest != digest {
 		d.reannounce = true
@@ -138,6 +145,8 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 		return d.refuse(err)
 	}
 	if err := checkAnnounced(sent, k, d.sha, digest, d.reviewID); err != nil {
+		_, known := sent.announcementOf(k, d.sha)
+		d.unannounced = !known
 		return d.refuse(err)
 	}
 	if err := g.checkCI(ctx, cfg, d.sha); err != nil {
@@ -148,6 +157,13 @@ func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, numb
 	}
 	d.verdict = verdictPublish
 	return d
+}
+
+// pullFingerprint covers every pull request field the decision reads, so an unchanged fingerprint needs no new decision.
+func pullFingerprint(pr pullRequest) string {
+	return contentDigest(pr.Title, strings.Join([]string{
+		pr.Body, pr.State, pr.Head.SHA, pr.Head.Ref, pr.Head.repo(), pr.Base.Ref, pr.Base.repo(), strconv.FormatBool(pr.hasLabel(readyLabel)),
+	}, "\x00"))
 }
 
 func (g *githubClient) decidingReview(ctx context.Context, cfg forkConfig, number int) (*ownerReview, error) {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -17,17 +18,51 @@ const (
 	maxBodyRunes  = 300
 )
 
+// poller is driven by one goroutine, run; only links and kick are shared with the decision handler.
 type poller struct {
-	gh      *githubClient
-	forks   []forkConfig
-	codes   *codeStore
-	notify  notifier
-	login   string
-	refused map[prKey]string
+	gh          *githubClient
+	forks       []forkConfig
+	codes       *codeStore
+	notify      notifier
+	login       string
+	refused     map[prKey]string
+	forkTimeout time.Duration
+	kick        chan struct{}
+	links       *upstreamLinks
+	settled     map[prKey]string
+	retried     map[prKey]string
+	told        map[prKey]map[string]bool
+	unsent      map[prKey][]string
 }
 
 func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
-	return &poller{gh: gh, forks: forks, codes: codes, notify: notify}
+	return &poller{
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout,
+		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
+		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]string{},
+	}
+}
+
+func (p *poller) run(ctx context.Context, interval time.Duration) {
+	for {
+		p.poll(ctx)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		case <-p.kick:
+			timer.Stop()
+		}
+	}
+}
+
+func (p *poller) wake() {
+	select {
+	case p.kick <- struct{}{}:
+	default:
+	}
 }
 
 func contentDigest(title, body string) string {
@@ -38,7 +73,10 @@ func contentDigest(title, body string) string {
 
 func (p *poller) poll(ctx context.Context) {
 	for _, cfg := range p.forks {
-		if err := p.pollFork(ctx, cfg); err != nil {
+		fctx, cancel := context.WithTimeout(ctx, p.forkTimeout)
+		err := p.pollFork(fctx, cfg)
+		cancel()
+		if err != nil {
 			log.Printf("contribution-approver: poll %s: %v", cfg.Fork, err)
 		}
 	}
@@ -70,6 +108,7 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 		}
 		k := prKey{fork: fork, number: pr.Number}
 		ready[k] = true
+		p.maybePublish(ctx, cfg, k)
 		if !p.codes.needsAnnouncement(k, pr.Head.SHA) {
 			continue
 		}
@@ -78,6 +117,7 @@ func (p *poller) pollFork(ctx context.Context, cfg forkConfig) error {
 		}
 	}
 	p.codes.keepOnly(fork, ready)
+	p.keepOnly(fork, ready)
 	return nil
 }
 
@@ -134,7 +174,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 	}
 	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
 	if err != nil {
-		p.codes.requestReannouncement(k)
+		p.codes.bindFailed(k)
 		return fmt.Errorf("announced, but listing reviews to bind it failed: %w", err)
 	}
 	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body), last)

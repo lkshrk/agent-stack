@@ -19,7 +19,7 @@ const reviewTimeout = 20 * time.Second
 var codeFormat = regexp.MustCompile(`^[0-9]{8}$`)
 
 var reviewEvents = map[string]struct{ event, body, done string }{
-	"approve": {"APPROVE", "Approved over Signal.", "Approved %s#%d at %s. Watch the publish-upstream run for the result: https://github.com/%[1]s/actions/workflows/publish-upstream.yml"},
+	"approve": {"APPROVE", "Approved over Signal.", "Approved %s#%d at %s. Publishing upstream follows; the result comes here."},
 	"reject":  {"REQUEST_CHANGES", "Changes requested over Signal.", "Requested changes on %s#%d at %s."},
 }
 
@@ -29,6 +29,8 @@ type decider struct {
 	gh     *githubClient
 	forks  []forkConfig
 	notify notifier
+	kick   func()
+	links  *upstreamLinks
 }
 
 func (d *decider) routes() http.Handler {
@@ -117,9 +119,23 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("contribution-approver: %s %s#%d at %s submitted", req.Action, p.pr.fork, p.pr.number, p.sha)
-	d.tell(ctx, fmt.Sprintf(review.done, p.pr.fork, p.pr.number, p.sha))
+	if d.kick != nil {
+		d.kick()
+	}
+	done := fmt.Sprintf(review.done, p.pr.fork, p.pr.number, p.sha)
+	if link := d.knownUpstream(p.pr); link != "" && req.Action == "approve" {
+		done = fmt.Sprintf("Approved %s#%d at %s. Publishing upstream follows on %s; the result comes here.", p.pr.fork, p.pr.number, p.sha, link)
+	}
+	d.tell(ctx, done)
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = fmt.Fprintf(w, `{"result":%q}`, req.Action)
+}
+
+func (d *decider) knownUpstream(k prKey) string {
+	if d.links == nil {
+		return ""
+	}
+	return d.links.get(k)
 }
 
 func (d *decider) tell(ctx context.Context, text string) {

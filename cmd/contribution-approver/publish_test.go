@@ -881,10 +881,16 @@ type tamperTransport struct {
 }
 
 func (tt *tamperTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.URL.Path != tt.path {
+		return tt.base.RoundTrip(r)
+	}
+	r = r.Clone(r.Context())
+	r.Header.Del("If-None-Match")
 	res, err := tt.base.RoundTrip(r)
-	if err != nil || r.URL.Path != tt.path {
+	if err != nil {
 		return res, err
 	}
+	res.Header.Del("ETag")
 	raw, err := io.ReadAll(res.Body)
 	_ = res.Body.Close()
 	if err != nil {
@@ -986,7 +992,7 @@ func TestPublishDecisionBindsByReviewIDNotClock(t *testing.T) {
 
 func TestAnAnnouncementWhoseReviewsCannotBeListedIsNotRecorded(t *testing.T) {
 	h := publishable(t, shaA, nil)
-	h.gh.failWith(http.MethodGet, "/repos/lkshrk/omnigent/pulls/7/reviews", fakeFailure{Status: http.StatusBadGateway, Skip: 1, Times: 1})
+	h.gh.failWith(http.MethodGet, "/repos/lkshrk/omnigent/pulls/7/reviews", fakeFailure{Status: http.StatusBadGateway, Skip: 2, Times: 1})
 	h.poller.poll(context.Background())
 	if _, ok := h.codes.announcementOf(prK, shaA); ok || !h.codes.reannouncing(prK) || readyMessages(h) != 1 {
 		t.Fatalf("recorded = %v, reannouncing = %v, messages = %q", ok, h.codes.reannouncing(prK), h.signal.messages())

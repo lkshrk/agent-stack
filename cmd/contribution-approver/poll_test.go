@@ -229,11 +229,11 @@ func TestPollSkipsAHeadTheOwnerAlreadyReviewed(t *testing.T) {
 		login, state, sha string
 		announce          bool
 	}{
-		"approved":            {"lkshrk", "APPROVED", shaA, false},
-		"changes requested":   {"lkshrk", "CHANGES_REQUESTED", shaA, false},
-		"approved older head": {"lkshrk", "APPROVED", shaB, true},
-		"commented":           {"lkshrk", "COMMENTED", shaA, true},
-		"someone else":        {"npa-bot", "APPROVED", shaA, true},
+		"approved without an announcement": {"lkshrk", "APPROVED", shaA, true},
+		"changes requested":                {"lkshrk", "CHANGES_REQUESTED", shaA, false},
+		"approved older head":              {"lkshrk", "APPROVED", shaB, true},
+		"commented":                        {"lkshrk", "COMMENTED", shaA, true},
+		"someone else":                     {"npa-bot", "APPROVED", shaA, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)

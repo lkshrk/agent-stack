@@ -43,7 +43,7 @@ func main() {
 	}
 	codes := newCodeStore(codeTTL, time.Now)
 	p := newPoller(gh, forks, codes, notify)
-	d := &decider{token: shared, codes: codes, gh: gh, forks: forks, notify: notify}
+	d := &decider{token: shared, codes: codes, gh: gh, forks: forks, notify: notify, kick: p.wake, links: p.links}
 
 	listen := os.Getenv("LISTEN_ADDR")
 	if listen == "" {
@@ -60,18 +60,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	go func() {
-		for {
-			pctx, cancel := context.WithTimeout(ctx, pollTimeout)
-			p.poll(pctx)
-			cancel()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pollInterval):
-			}
-		}
-	}()
+	go p.run(ctx, pollInterval)
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
