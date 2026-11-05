@@ -267,32 +267,3 @@ type compareFile struct {
 	Status           string `json:"status"`
 	SHA              string `json:"sha"`
 }
-
-// compare must stay in step with _require_clean_diff in templates/contribution-fork/publish/gate.py.
-func (g *githubClient) compare(ctx context.Context, cfg forkConfig, sha string) (string, error) {
-	var res struct {
-		Status  string         `json:"status"`
-		AheadBy int            `json:"ahead_by"`
-		Files   *[]compareFile `json:"files"`
-	}
-	upstreamOwner := strings.SplitN(cfg.Upstream, "/", 2)[0]
-	if err := g.get(ctx, "/repos/"+cfg.Fork+"/compare/"+upstreamOwner+":"+cfg.DefaultBranch+"..."+sha, nil, &res); err != nil {
-		return "", err
-	}
-	if (res.Status != "ahead" && res.Status != "diverged") || res.AheadBy <= 0 {
-		return fmt.Sprintf("it is not ahead of the upstream %s", cfg.DefaultBranch), nil
-	}
-	if res.Files == nil || len(*res.Files) == 0 || len(*res.Files) >= maxCompareFiles {
-		return "the upstream diff is empty or too large to inspect", nil
-	}
-	for _, f := range *res.Files {
-		for _, name := range []string{f.Filename, f.PreviousFilename} {
-			for _, prefix := range protectedPrefixes {
-				if strings.HasPrefix(name, prefix) {
-					return "the upstream diff changes " + name + "; .github/ and publish/ never go upstream", nil
-				}
-			}
-		}
-	}
-	return "", nil
-}

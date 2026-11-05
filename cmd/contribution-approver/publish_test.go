@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -63,10 +66,18 @@ func setBothCompares(h *harness, sha, status string, ahead int, files ...map[str
 
 func announceText(h *harness, sha string) {
 	pr := h.gh.pullOf(testFork, prNumber)
-	h.codes.recordAnnouncement(prKey{fork: testFork, number: prNumber}, sha, contentDigest(pr.title, pr.body))
+	h.codes.recordAnnouncement(prKey{fork: testFork, number: prNumber}, sha, contentDigest(pr.title, pr.body), lastReview(h))
 }
 
 // approve is an owner approval given after seeing the current text announced at sha.
+func lastReview(h *harness) int64 {
+	var last int64
+	for _, rv := range h.gh.reviewsOf(prNumber) {
+		last = max(last, rv.id)
+	}
+	return last
+}
+
 func approve(h *harness, sha string) fakeReview {
 	announceText(h, sha)
 	return h.gh.addReview(prNumber, testOwner, "APPROVED", sha)
@@ -81,7 +92,7 @@ func decidePR(t *testing.T, h *harness) publishDecision {
 	if w := h.gh.writes(); len(w) != before {
 		t.Errorf("the publish decision wrote to GitHub: %+v", w[before:])
 	}
-	for _, secret := range []string{testPAT, "Adds the thing", "Tested with the web suite"} {
+	for _, secret := range []string{testPAT, "Adds the thing", "Tested with the web suite", "@", "://", "evil"} {
 		if strings.Contains(d.reason, secret) {
 			t.Errorf("reason %q leaks %q", d.reason, secret)
 		}
@@ -778,7 +789,7 @@ func TestASignalApprovalIsBoundToTheRecordedAnnouncement(t *testing.T) {
 	t.Run("refuses a code whose recorded text differs", func(t *testing.T) {
 		h := newHarness(t)
 		code := announce(t, h, prNumber, shaA)
-		h.codes.recordAnnouncement(prK, shaA, contentDigest("feat(web): other", "other"))
+		h.codes.recordAnnouncement(prK, shaA, contentDigest("feat(web): other", "other"), 0)
 		if rec := approveWith(h, code); rec.Code != http.StatusConflict {
 			t.Fatalf("approve answered %d %s, want 409", rec.Code, rec.Body)
 		}
@@ -806,5 +817,207 @@ func TestAnAnnouncedHeadWhoseTextChangedIsAnnouncedAgainOnce(t *testing.T) {
 	}
 	if a, ok := h.codes.announcementOf(prK, shaA); !ok || a.digest != contentDigest(prTitle, "Adds the thing, reworded.") {
 		t.Fatalf("announcement = %+v, %v; want the reworded text", a, ok)
+	}
+}
+
+const hostile = "@lkshrk [click](https://evil.example) **evil**"
+
+func TestPublishDecisionReasonsCarryNoAttackerText(t *testing.T) {
+	cases := map[string]func(h *harness){
+		"a protected filename": func(h *harness) {
+			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": ".github/" + hostile})
+		},
+		"a protected previous filename": func(h *harness) {
+			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": "web/x", "previous_filename": "publish/" + hostile})
+		},
+		"a mismatched filename": func(h *harness) {
+			h.gh.setCompare(testFork, upCompare+shaA, "ahead", 1, 0, map[string]any{"filename": "web/" + hostile})
+		},
+		"a failing check name": func(h *harness) {
+			setCI(h, shaA, []fakeRun{{status: "completed", conclusion: "success", path: ciPath}}, ciCheck(hostile, "completed", "failure"))
+		},
+		"an unknown conclusion": func(h *harness) {
+			setCI(h, shaA, []fakeRun{{status: "completed", conclusion: hostile, path: ciPath}}, ciCheck("test", "completed", "success"))
+		},
+		"a run event": func(h *harness) {
+			setCI(h, shaA, []fakeRun{{status: "completed", conclusion: "success", path: ciPath, event: hostile}}, ciCheck("test", "completed", "success"))
+		},
+		"a suite event": func(h *harness) {
+			setCI(h, shaA, []fakeRun{{status: "completed", conclusion: "success", path: ciPath}}, fakeCheckRun{name: "test", status: "completed", conclusion: "success", path: ciPath, event: hostile})
+		},
+		"a fork owner":  func(h *harness) { h.gh.update(func() { h.gh.fork.owner = "evil" }) },
+		"a fork parent": func(h *harness) { h.gh.update(func() { h.gh.fork.parent = "evil/omnigent" }) },
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			approve(h, shaA)
+			setup(h)
+			if d := decidePR(t, h); d.verdict == verdictPublish || d.reason == "" {
+				t.Fatalf("decision = %v %q, want a refusal", d.verdict, d.reason)
+			}
+		})
+	}
+	for name, mutate := range map[string]func(*fakePR){
+		"a title":       func(p *fakePR) { p.title = hostile },
+		"a head branch": func(p *fakePR) { p.headRef = "upstream/" + hostile },
+		"a base branch": func(p *fakePR) { p.base = hostile },
+		"a label":       func(p *fakePR) { p.labels = []string{hostile} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, mutate)
+			approve(h, shaA)
+			if d := decidePR(t, h); d.verdict == verdictPublish {
+				t.Fatalf("published with %s", name)
+			}
+		})
+	}
+}
+
+type tamperTransport struct {
+	base http.RoundTripper
+	path string
+	edit func(map[string]any)
+}
+
+func (tt *tamperTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	res, err := tt.base.RoundTrip(r)
+	if err != nil || r.URL.Path != tt.path {
+		return res, err
+	}
+	raw, err := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	var v map[string]any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	tt.edit(v)
+	out, _ := json.Marshal(v)
+	res.Body, res.ContentLength = io.NopCloser(bytes.NewReader(out)), int64(len(out))
+	res.Header.Del("Content-Length")
+	return res, nil
+}
+
+func tamper(h *harness, path string, edit func(map[string]any)) {
+	gh := h.poller.gh
+	gh.http = &http.Client{Transport: &tamperTransport{base: gh.http.Transport, path: path, edit: edit}}
+}
+
+func gqlPull(v map[string]any) map[string]any {
+	return v["data"].(map[string]any)["repository"].(map[string]any)["pullRequest"].(map[string]any)
+}
+
+func TestPublishDecisionRefusesInconsistentReads(t *testing.T) {
+	checks := "/repos/lkshrk/omnigent/commits/" + shaA + "/check-runs"
+	cases := []struct {
+		name   string
+		setup  func(h *harness)
+		want   verdict
+		reason string
+	}{
+		{"a fork-relative diff with an extra file", func(h *harness) {
+			h.gh.setCompare(testFork, fkCompare+shaA, "ahead", 2, 0, map[string]any{"filename": "web/src/thing.ts"}, map[string]any{"filename": "web/src/extra.ts"})
+		}, verdictHard, "differ"},
+		{"GraphQL and REST titles differ", func(h *harness) {
+			tamper(h, "/graphql", func(v map[string]any) { gqlPull(v)["title"] = "feat(web): other" })
+		}, verdictTransient, "changed while it was read"},
+		{"GraphQL and REST bodies differ", func(h *harness) {
+			tamper(h, "/graphql", func(v map[string]any) { gqlPull(v)["body"] = "other" })
+		}, verdictTransient, "changed while it was read"},
+		{"edit nodes short of totalCount", func(h *harness) {
+			h.gh.editBody(testFork, prNumber, prBody+" ", testAgent)
+			h.gh.editBody(testFork, prNumber, prBody, testAgent)
+			h.clock.advance(time.Second)
+			approve(h, shaA)
+			tamper(h, "/graphql", func(v map[string]any) {
+				e := gqlPull(v)["userContentEdits"].(map[string]any)
+				e["totalCount"] = e["totalCount"].(float64) + 1
+			})
+		}, verdictTransient, "edit history changed"},
+		{"a short page below total_count", func(h *harness) {
+			tamper(h, checks, func(v map[string]any) { v["total_count"] = v["total_count"].(float64) + 1 })
+		}, verdictTransient, "changed while they were read"},
+		{"more check runs than total_count", func(h *harness) {
+			tamper(h, checks, func(v map[string]any) { v["total_count"] = v["total_count"].(float64) - 1 })
+		}, verdictTransient, "changed while they were read"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			approve(h, shaA)
+			c.setup(h)
+			wantVerdict(t, decidePR(t, h), c.want, c.reason)
+		})
+	}
+}
+
+func TestPublishDecisionBindsByReviewIDNotClock(t *testing.T) {
+	t.Run("a review with the recorded ID does not bind", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		rv := h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		h.codes.recordAnnouncement(prK, shaA, contentDigest(prTitle, prBody), rv.id)
+		wantVerdict(t, decidePR(t, h), verdictTransient, "predates")
+	})
+	t.Run("a review with a higher ID binds", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		rv := h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+		h.codes.recordAnnouncement(prK, shaA, contentDigest(prTitle, prBody), rv.id-1)
+		wantVerdict(t, decidePR(t, h), verdictPublish, "")
+	})
+	for name, skew := range map[string]time.Duration{"cluster clock ahead": time.Hour, "cluster clock behind": -time.Hour} {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			h.codes.now = func() time.Time { return h.clock.now().Add(skew) }
+			early := h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+			wantVerdict(t, decidePR(t, h), verdictTransient, "no announcement")
+			h.poller.poll(context.Background())
+			if a, ok := h.codes.announcementOf(prK, shaA); !ok || a.lastReview != early.id {
+				t.Fatalf("announcement = %+v, %v; want the last review %d", a, ok, early.id)
+			}
+			wantVerdict(t, decidePR(t, h), verdictTransient, "predates")
+			h.gh.addReview(prNumber, testOwner, "APPROVED", shaA)
+			wantVerdict(t, decidePR(t, h), verdictPublish, "")
+		})
+	}
+}
+
+func TestAnAnnouncementWhoseReviewsCannotBeListedIsNotRecorded(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	h.gh.failWith(http.MethodGet, "/repos/lkshrk/omnigent/pulls/7/reviews", fakeFailure{Status: http.StatusBadGateway, Skip: 1, Times: 1})
+	h.poller.poll(context.Background())
+	if _, ok := h.codes.announcementOf(prK, shaA); ok || !h.codes.reannouncing(prK) || readyMessages(h) != 1 {
+		t.Fatalf("recorded = %v, reannouncing = %v, messages = %q", ok, h.codes.reannouncing(prK), h.signal.messages())
+	}
+	h.poller.poll(context.Background())
+	if _, ok := h.codes.announcementOf(prK, shaA); !ok || readyMessages(h) != 2 {
+		t.Fatalf("recorded = %v, messages = %q", ok, h.signal.messages())
+	}
+}
+
+func TestPollDoesNotAnnounceWhatThePublisherWouldRefuse(t *testing.T) {
+	for name, setup := range map[string]func(h *harness){
+		"a base change": func(h *harness) {
+			h.gh.changeBase(prNumber, "staging", testAgent)
+			h.gh.changeBase(prNumber, "main", testAgent)
+		},
+		"a fork-relative diff mismatch": func(h *harness) {
+			h.gh.setCompare(testFork, fkCompare+shaA, "ahead", 1, 0, map[string]any{"filename": "web/src/thing.ts", "sha": shaC})
+		},
+		"a fork-relative diff that is not ahead": func(h *harness) { h.gh.setCompare(testFork, fkCompare+shaA, "identical", 0, 0) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			setup(h)
+			h.poller.poll(context.Background())
+			if n := readyMessages(h); n != 0 {
+				t.Fatalf("announced %q", h.signal.messages())
+			}
+			if !strings.Contains(h.logs(), "not announced") {
+				t.Fatalf("no refusal logged:\n%s", h.logs())
+			}
+		})
 	}
 }

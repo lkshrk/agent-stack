@@ -27,8 +27,9 @@ type pending struct {
 }
 
 type sentAnnouncement struct {
-	at     time.Time
 	digest string
+	// lastReview is the highest review ID seen after the announcement went out; only higher IDs bind to it.
+	lastReview int64
 }
 
 type headState struct {
@@ -64,14 +65,13 @@ func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
 	}
 }
 
-// recordAnnouncement runs only after the owner was sent the text, so a review can be bound to what they saw.
-func (s *codeStore) recordAnnouncement(k prKey, sha, digest string) {
+func (s *codeStore) recordAnnouncement(k prKey, sha, digest string, lastReview int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.sent[k] == nil {
 		s.sent[k] = map[string]sentAnnouncement{}
 	}
-	s.sent[k][sha] = sentAnnouncement{at: s.now(), digest: digest}
+	s.sent[k][sha] = sentAnnouncement{digest: digest, lastReview: lastReview}
 	delete(s.resend, k)
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -127,7 +128,12 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		p.codes.forget(k)
 		return err
 	}
-	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body))
+	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
+	if err != nil {
+		p.codes.requestReannouncement(k)
+		return fmt.Errorf("announced, but listing reviews to bind it failed: %w", err)
+	}
+	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body), last)
 	log.Printf("contribution-approver: announced %s#%d at %s", cfg.Fork, k.number, sha)
 	return nil
 }
@@ -136,7 +142,23 @@ func (p *poller) gateRefusal(ctx context.Context, cfg forkConfig, pr pullRequest
 	if !titleFormats[cfg.TitleFormat].MatchString(pr.Title) {
 		return "the title does not follow " + cfg.TitleFormat, nil
 	}
-	return p.gh.compare(ctx, cfg, sha)
+	for _, check := range []func() error{
+		func() error { return p.gh.checkTimeline(ctx, cfg, pr.Number, nil) },
+		func() error { return p.gh.checkDiff(ctx, cfg, sha) },
+	} {
+		if err := check(); err != nil {
+			var r *refusal
+			var capped *pageCapError
+			switch {
+			case errors.As(err, &r):
+				return r.reason, nil
+			case errors.As(err, &capped):
+				return capped.what, nil
+			}
+			return "", err
+		}
+	}
+	return "", nil
 }
 
 func announcement(cfg forkConfig, pr pullRequest, sha string, runs int, code string) string {

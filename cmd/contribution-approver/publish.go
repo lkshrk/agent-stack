@@ -87,16 +87,20 @@ type ownerReview struct {
 }
 
 func (p *poller) decidePublish(ctx context.Context, cfg forkConfig, number int) publishDecision {
-	d := p.gh.decidePublish(ctx, cfg, number, p.codes)
+	d := p.gh.evaluatePublish(ctx, cfg, number, p.codes)
 	if d.reannounce && (d.verdict == verdictHard || d.verdict == verdictTransient) {
 		p.codes.requestReannouncement(prKey{fork: cfg.Fork, number: number})
 	}
 	return d
 }
 
-func (g *githubClient) decidePublish(ctx context.Context, cfg forkConfig, number int, sent announcementLog) publishDecision {
+func (g *githubClient) evaluatePublish(ctx context.Context, cfg forkConfig, number int, sent announcementLog) publishDecision {
 	d := publishDecision{number: number}
 	if err := g.verifyFork(ctx, cfg); err != nil {
+		var api *apiError
+		if !errors.As(err, &api) {
+			err = &refusal{verdictTransient, "the fork does not match the registry"}
+		}
 		return d.refuse(err)
 	}
 	rv, err := g.decidingReview(ctx, cfg, number)
@@ -130,10 +134,10 @@ func (g *githubClient) decidePublish(ctx context.Context, cfg forkConfig, number
 	if d.lastEditedAt, err = g.checkEdits(ctx, cfg, number, pr, d.reviewedAt); err != nil {
 		return d.refuse(err)
 	}
-	if err := g.checkTimeline(ctx, cfg, number, d.reviewedAt); err != nil {
+	if err := g.checkTimeline(ctx, cfg, number, &d.reviewedAt); err != nil {
 		return d.refuse(err)
 	}
-	if err := checkAnnounced(sent, k, d.sha, digest, d.reviewedAt); err != nil {
+	if err := checkAnnounced(sent, k, d.sha, digest, d.reviewID); err != nil {
 		return d.refuse(err)
 	}
 	if err := g.checkCI(ctx, cfg, d.sha); err != nil {
@@ -173,14 +177,14 @@ func (g *githubClient) decidingReview(ctx context.Context, cfg forkConfig, numbe
 	}
 }
 
-func checkAnnounced(sent announcementLog, k prKey, sha, digest string, reviewed time.Time) error {
+func checkAnnounced(sent announcementLog, k prKey, sha, digest string, reviewID int64) error {
 	a, ok := sent.announcementOf(k, sha)
 	switch {
 	case !ok:
 		return &refusal{verdictTransient, fmt.Sprintf("no announcement of %s is known, so the owner must approve it again", sha)}
 	case a.digest != digest:
 		return &refusal{verdictTransient, fmt.Sprintf("the title or body changed since %s was announced", sha)}
-	case a.at.Truncate(time.Second).After(reviewed):
+	case reviewID <= a.lastReview:
 		return &refusal{verdictTransient, fmt.Sprintf("the approval predates the announcement of %s", sha)}
 	}
 	return nil
@@ -315,7 +319,7 @@ func sameTime(a, b *time.Time) bool {
 	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
 }
 
-func (g *githubClient) checkTimeline(ctx context.Context, cfg forkConfig, number int, reviewed time.Time) error {
+func (g *githubClient) checkTimeline(ctx context.Context, cfg forkConfig, number int, reviewed *time.Time) error {
 	for page := 1; ; page++ {
 		if page > maxPages {
 			return &pageCapError{fmt.Sprintf("%s#%d has more than %d timeline items", cfg.Fork, number, maxPages*pageSize)}
@@ -329,7 +333,7 @@ func (g *githubClient) checkTimeline(ctx context.Context, cfg forkConfig, number
 			return err
 		}
 		for _, e := range batch {
-			after := e.CreatedAt == nil || !e.CreatedAt.Before(reviewed)
+			after := reviewed != nil && (e.CreatedAt == nil || !e.CreatedAt.Before(*reviewed))
 			switch {
 			case e.Event == "base_ref_changed":
 				return hard("the pull request base was changed")
@@ -343,6 +347,38 @@ func (g *githubClient) checkTimeline(ctx context.Context, cfg forkConfig, number
 			return nil
 		}
 	}
+}
+
+var conclusions = map[string]bool{
+	"action_required": true, "cancelled": true, "failure": true, "neutral": true,
+	"skipped": true, "stale": true, "startup_failure": true, "timed_out": true,
+}
+
+func conclusionName(c string) string {
+	if conclusions[c] {
+		return c
+	}
+	return "unsuccessfully"
+}
+
+func (g *githubClient) lastReviewID(ctx context.Context, fork string, number int) (int64, error) {
+	var last int64
+	for page := 1; page <= maxPages; page++ {
+		var batch []struct {
+			ID int64 `json:"id"`
+		}
+		q := url.Values{"per_page": {strconv.Itoa(pageSize)}, "page": {strconv.Itoa(page)}}
+		if err := g.get(ctx, fmt.Sprintf("/repos/%s/pulls/%d/reviews", fork, number), q, &batch); err != nil {
+			return 0, err
+		}
+		for _, r := range batch {
+			last = max(last, r.ID)
+		}
+		if len(batch) < pageSize {
+			return last, nil
+		}
+	}
+	return 0, fmt.Errorf("%s#%d has more than %d reviews", fork, number, maxPages*pageSize)
 }
 
 type workflowRun struct {
@@ -387,9 +423,6 @@ func listCounted[T any](ctx context.Context, g *githubClient, path string, query
 			return nil, fmt.Errorf("GitHub GET %s: undecodable %s", path, what)
 		}
 		all = append(all, batch...)
-		if len(all) > total {
-			return nil, fmt.Errorf("the %s changed while they were read", what)
-		}
 		if len(all) == total {
 			return all, nil
 		}
@@ -418,11 +451,11 @@ func (g *githubClient) checkCI(ctx context.Context, cfg forkConfig, sha string) 
 		suites[r.CheckSuiteID] = 0
 		switch {
 		case r.Event != ciEvent:
-			return hard("a %s CI run for %s came from the %s event", cfg.CIWorkflow, sha, r.Event)
+			return hard("a %s CI run for %s came from an event other than %s", cfg.CIWorkflow, sha, ciEvent)
 		case r.Status != "completed":
 			pending = true
 		case r.Conclusion != "success":
-			return hard("CI for %s concluded %s", sha, r.Conclusion)
+			return hard("CI for %s concluded %s", sha, conclusionName(r.Conclusion))
 		}
 	}
 	if len(suites) == 0 {
@@ -437,11 +470,11 @@ func (g *githubClient) checkCI(ctx context.Context, cfg forkConfig, sha string) 
 		case c.App == nil || c.App.Slug != ciApp:
 			return hard("a CI check run for %s comes from an app other than %s", sha, ciApp)
 		case c.CheckSuite.Event != "" && c.CheckSuite.Event != ciEvent:
-			return hard("a CI check suite for %s came from the %s event", sha, c.CheckSuite.Event)
+			return hard("a CI check suite for %s came from an event other than %s", sha, ciEvent)
 		case c.Status != "completed":
 			pending = true
 		case c.Conclusion != "success":
-			return hard("CI check %s for %s concluded %s", c.Name, sha, c.Conclusion)
+			return hard("a CI check for %s concluded %s", sha, conclusionName(c.Conclusion))
 		}
 	}
 	for _, n := range suites {
@@ -475,7 +508,7 @@ func (g *githubClient) diffFiles(ctx context.Context, cfg forkConfig, base, sha 
 		for _, name := range []string{f.Filename, f.PreviousFilename} {
 			for _, prefix := range protectedPrefixes {
 				if strings.HasPrefix(name, prefix) {
-					return nil, hard("the diff changes %s; .github/ and publish/ never go upstream", name)
+					return nil, hard("the diff changes a file under .github/ or publish/, which never go upstream")
 				}
 			}
 		}
@@ -499,7 +532,7 @@ func (g *githubClient) checkDiff(ctx context.Context, cfg forkConfig, sha string
 	}
 	for name, f := range upstream {
 		if other, ok := fork[name]; !ok || other != f {
-			return hard("the fork-relative and upstream-relative diffs differ at %s", name)
+			return hard("the fork-relative and upstream-relative diffs differ")
 		}
 	}
 	return nil
