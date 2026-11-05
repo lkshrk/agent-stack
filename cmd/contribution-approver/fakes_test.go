@@ -270,7 +270,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	h.poller = &poller{gh: gh, forks: forks, codes: h.codes, notify: notify}
-	h.api = (&decider{token: testShared, codes: h.codes, gh: gh, notify: notify}).routes()
+	h.api = (&decider{token: testShared, codes: h.codes, gh: gh, forks: forks, notify: notify}).routes()
 	t.Cleanup(func() {
 		out := h.logs()
 		for _, secret := range []string{testPAT, testShared, testBot, testGroup, "R3JvdXBJbnRlcm5hbElk"} {

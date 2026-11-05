@@ -43,7 +43,7 @@ func main() {
 	}
 	codes := newCodeStore(codeTTL, time.Now)
 	p := &poller{gh: gh, forks: forks, codes: codes, notify: notify}
-	d := &decider{token: shared, codes: codes, gh: gh, notify: notify}
+	d := &decider{token: shared, codes: codes, gh: gh, forks: forks, notify: notify}
 
 	listen := os.Getenv("LISTEN_ADDR")
 	if listen == "" {

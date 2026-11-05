@@ -25,6 +25,8 @@ func TestLoadForksRefusesMalformedConfig(t *testing.T) {
 		"missing key":  strings.Replace(forksJSON, `,"ci_workflow":"contribution-ci.yml"`, ``, 1),
 		"owner":        strings.Replace(forksJSON, `"owner":"lkshrk"`, `"owner":"someone"`, 1),
 		"fork slug":    strings.Replace(forksJSON, `"fork":"lkshrk/omnigent"`, `"fork":"omnigent"`, 1),
+		"dot fork":     strings.Replace(forksJSON, `"fork":"lkshrk/omnigent"`, `"fork":"lkshrk/.."`, 1),
+		"dot upstream": strings.Replace(forksJSON, `"upstream":"omnigent-ai/omnigent"`, `"upstream":"../omnigent"`, 1),
 		"upstream":     strings.Replace(forksJSON, `"upstream":"omnigent-ai/omnigent"`, `"upstream":"omnigent"`, 1),
 		"title format": strings.Replace(forksJSON, `"conventional-scoped"`, `"anything"`, 1),
 		"branch":       strings.Replace(forksJSON, `"default_branch":"main"`, `"default_branch":"../x"`, 1),

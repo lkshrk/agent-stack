@@ -347,3 +347,23 @@ func TestADecisionIsRefusedWhenThePullRequestChangedSinceTheAnnouncement(t *test
 		}
 	}
 }
+
+func TestADecisionIsRefusedWhenTheForkNoLongerMatchesTheRegistry(t *testing.T) {
+	for name, change := range map[string]func(g *fakeGitHub){
+		"parent": func(g *fakeGitHub) { g.parent = "someone-else/omnigent" },
+		"owner":  func(g *fakeGitHub) { g.repoOwner = "someone" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			code := announce(t, h, 7, shaA)
+			h.gh.update(func() { change(h.gh) })
+
+			if rec := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`); rec.Code != http.StatusBadGateway {
+				t.Fatalf("answer = %d, want 502", rec.Code)
+			}
+			if calls := h.gh.reviewCalls(); len(calls) != 0 {
+				t.Fatalf("submitted %v", calls)
+			}
+		})
+	}
+}

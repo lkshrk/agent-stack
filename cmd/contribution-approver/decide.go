@@ -27,6 +27,7 @@ type decider struct {
 	token  string
 	codes  *codeStore
 	gh     *githubClient
+	forks  []forkConfig
 	notify notifier
 }
 
@@ -101,6 +102,13 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "pull request changed", http.StatusConflict)
 		return
 	}
+	if err := d.verifyFork(ctx, p.pr.fork); err != nil {
+		d.codes.forget(p.pr)
+		log.Printf("contribution-approver: %s %s#%d refused: %v", req.Action, p.pr.fork, p.pr.number, err)
+		d.tell(ctx, fmt.Sprintf("Could not verify the fork %s against the registry. Nothing was submitted; it will be announced again with a new code once it checks out.", p.pr.fork))
+		http.Error(w, "fork check failed", http.StatusBadGateway)
+		return
+	}
 	if err := d.gh.review(ctx, p.pr.fork, p.pr.number, p.sha, review.event, review.body); err != nil {
 		d.codes.forget(p.pr)
 		log.Printf("contribution-approver: %s %s#%d at %s failed: %v", req.Action, p.pr.fork, p.pr.number, p.sha, err)
@@ -126,4 +134,13 @@ func (d *decider) changedSinceAnnouncement(ctx context.Context, p pending) (bool
 		return false, err
 	}
 	return pr.State != "open" || pr.Head.SHA != p.sha || !pr.hasLabel(readyLabel) || contentDigest(pr.Title, pr.Body) != p.digest, nil
+}
+
+func (d *decider) verifyFork(ctx context.Context, fork string) error {
+	for _, cfg := range d.forks {
+		if cfg.Fork == fork {
+			return d.gh.verifyFork(ctx, cfg)
+		}
+	}
+	return fmt.Errorf("%s is not in the registry", fork)
 }

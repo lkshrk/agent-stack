@@ -41,9 +41,9 @@ func (c forkConfig) validate() error {
 		return fmt.Errorf("forks.json entry %q must set every field", c.Fork)
 	}
 	switch {
-	case !slug.MatchString(c.Fork):
+	case !validSlug(c.Fork):
 		return fmt.Errorf("forks.json fork %q is not owner/name", c.Fork)
-	case !slug.MatchString(c.Upstream) || strings.SplitN(c.Fork, "/", 2)[0] != c.Owner:
+	case !validSlug(c.Upstream) || strings.SplitN(c.Fork, "/", 2)[0] != c.Owner:
 		return fmt.Errorf("%s upstream or owner is invalid", c.Fork)
 	case titleFormats[c.TitleFormat] == nil || !branchName.MatchString(c.DefaultBranch) || strings.Contains(c.DefaultBranch, ".."):
 		return fmt.Errorf("%s title_format or default_branch is invalid", c.Fork)
@@ -51,4 +51,16 @@ func (c forkConfig) validate() error {
 		return fmt.Errorf("%s ci_workflow is invalid", c.Fork)
 	}
 	return nil
+}
+
+func validSlug(s string) bool {
+	if !slug.MatchString(s) {
+		return false
+	}
+	for _, part := range strings.Split(s, "/") {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
