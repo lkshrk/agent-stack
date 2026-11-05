@@ -93,7 +93,7 @@ func TestPollRefusesWhenTheTokenIsNotTheForkOwner(t *testing.T) {
 
 func TestPollRefusesAForkWhoseParentIsNotTheRegistryUpstream(t *testing.T) {
 	h := newHarness(t)
-	h.gh.parent = "someone-else/omnigent"
+	h.gh.fork.parent = "someone-else/omnigent"
 	h.gh.readyPR(7, shaA)
 
 	h.poller.poll(context.Background())
@@ -105,7 +105,7 @@ func TestPollRefusesAForkWhoseParentIsNotTheRegistryUpstream(t *testing.T) {
 
 func TestPollRefusesAForkNotOwnedByTheRegistryOwner(t *testing.T) {
 	h := newHarness(t)
-	h.gh.repoOwner = "someone"
+	h.gh.fork.owner = "someone"
 	h.gh.readyPR(7, shaA)
 
 	h.poller.poll(context.Background())
@@ -238,9 +238,7 @@ func TestPollSkipsAHeadTheOwnerAlreadyReviewed(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			h.gh.readyPR(7, shaA)
-			h.gh.update(func() {
-				h.gh.existing[7] = []map[string]any{{"user": map[string]any{"login": tc.login}, "state": tc.state, "commit_id": tc.sha}}
-			})
+			h.gh.addReview(7, tc.login, tc.state, tc.sha)
 
 			h.poller.poll(context.Background())
 			h.poller.poll(context.Background())

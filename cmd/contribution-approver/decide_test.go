@@ -350,8 +350,8 @@ func TestADecisionIsRefusedWhenThePullRequestChangedSinceTheAnnouncement(t *test
 
 func TestADecisionIsRefusedWhenTheForkNoLongerMatchesTheRegistry(t *testing.T) {
 	for name, change := range map[string]func(g *fakeGitHub){
-		"parent": func(g *fakeGitHub) { g.parent = "someone-else/omnigent" },
-		"owner":  func(g *fakeGitHub) { g.repoOwner = "someone" },
+		"parent": func(g *fakeGitHub) { g.fork.parent = "someone-else/omnigent" },
+		"owner":  func(g *fakeGitHub) { g.fork.owner = "someone" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)

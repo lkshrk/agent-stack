@@ -3,13 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -26,167 +24,6 @@ const (
 	shaB       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	forksJSON  = `[{"upstream":"omnigent-ai/omnigent","fork":"lkshrk/omnigent","owner":"lkshrk","default_branch":"main","title_format":"conventional-scoped","ci_workflow":"contribution-ci.yml"}]`
 )
-
-type fakePR struct {
-	number          int
-	title, headRef  string
-	body            string
-	headRepo, base  string
-	sha             string
-	labels          []string
-	additions, dels int
-	files           int
-	changes         []map[string]any
-	compareStatus   string
-}
-
-type fakeRun struct{ status, conclusion, path string }
-
-type review struct {
-	number int
-	body   map[string]any
-}
-
-type fakeGitHub struct {
-	mu        sync.Mutex
-	t         *testing.T
-	login     string
-	parent    string
-	repoOwner string
-	prs       map[int]*fakePR
-	runs      map[string][]fakeRun
-	reviews   []review
-	existing  map[int][]map[string]any
-	failPost  bool
-	requests  []string
-	srv       *httptest.Server
-}
-
-func newFakeGitHub(t *testing.T) *fakeGitHub {
-	g := &fakeGitHub{t: t, login: "lkshrk", parent: "omnigent-ai/omnigent", repoOwner: "lkshrk", prs: map[int]*fakePR{}, runs: map[string][]fakeRun{}, existing: map[int][]map[string]any{}}
-	g.srv = httptest.NewServer(http.HandlerFunc(g.serve))
-	t.Cleanup(g.srv.Close)
-	return g
-}
-
-func (g *fakeGitHub) readyPR(number int, sha string) *fakePR {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	pr := &fakePR{
-		number: number, title: "feat(web): add the thing", body: "Adds the thing.\n\nTested with the web suite.", headRef: "feature-" + strconv.Itoa(number),
-		headRepo: testFork, base: "main", sha: sha, labels: []string{"upstream-ready"}, additions: 40, dels: 2, files: 3,
-		changes: []map[string]any{{"filename": "web/src/thing.ts"}}, compareStatus: "ahead",
-	}
-	g.prs[number] = pr
-	g.runs[sha] = []fakeRun{{"completed", "success", ".github/workflows/contribution-ci.yml"}}
-	return pr
-}
-
-func (g *fakeGitHub) update(f func()) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	f()
-}
-
-func (g *fakeGitHub) reviewCalls() []review {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return append([]review(nil), g.reviews...)
-}
-
-func (g *fakeGitHub) prJSON(pr *fakePR) map[string]any {
-	labels := []any{}
-	for _, l := range pr.labels {
-		labels = append(labels, map[string]any{"name": l})
-	}
-	return map[string]any{
-		"number": pr.number, "state": "open", "title": pr.title, "body": pr.body, "labels": labels,
-		"html_url":  fmt.Sprintf("https://github.com/%s/pull/%d", testFork, pr.number),
-		"head":      map[string]any{"ref": pr.headRef, "sha": pr.sha, "repo": map[string]any{"full_name": pr.headRepo}},
-		"base":      map[string]any{"ref": pr.base, "repo": map[string]any{"full_name": testFork}},
-		"additions": pr.additions, "deletions": pr.dels, "changed_files": pr.files,
-	}
-}
-
-func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.requests = append(g.requests, r.Method+" "+r.URL.Path)
-	if r.Header.Get("Authorization") != "Bearer "+testPAT {
-		http.Error(w, "bad credentials", http.StatusUnauthorized)
-		return
-	}
-	path := r.URL.Path
-	write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
-	switch {
-	case r.Method == http.MethodGet && path == "/user":
-		write(map[string]any{"login": g.login})
-	case r.Method == http.MethodGet && path == "/repos/"+testFork:
-		write(map[string]any{"full_name": testFork, "owner": map[string]any{"login": g.repoOwner}, "parent": map[string]any{"full_name": g.parent}})
-	case r.Method == http.MethodGet && path == "/repos/"+testFork+"/pulls":
-		q := r.URL.Query()
-		if q.Get("state") != "open" || q.Get("base") != "main" {
-			g.t.Errorf("pulls query = %v", q)
-		}
-		list := []any{}
-		if q.Get("page") == "1" {
-			for n := 1; n <= 100; n++ {
-				if pr, ok := g.prs[n]; ok {
-					list = append(list, g.prJSON(pr))
-				}
-			}
-		}
-		write(list)
-	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/pulls/") && strings.HasSuffix(path, "/reviews"):
-		n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(path, "/repos/"+testFork+"/pulls/"), "/reviews"))
-		list := []any{}
-		if r.URL.Query().Get("page") == "1" {
-			for _, rv := range g.existing[n] {
-				list = append(list, rv)
-			}
-		}
-		write(list)
-	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/pulls/"):
-		n, _ := strconv.Atoi(strings.TrimPrefix(path, "/repos/"+testFork+"/pulls/"))
-		pr, ok := g.prs[n]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		write(g.prJSON(pr))
-	case r.Method == http.MethodGet && strings.HasPrefix(path, "/repos/"+testFork+"/compare/omnigent-ai:main..."):
-		sha := strings.TrimPrefix(path, "/repos/"+testFork+"/compare/omnigent-ai:main...")
-		for _, pr := range g.prs {
-			if pr.sha == sha {
-				write(map[string]any{"status": pr.compareStatus, "ahead_by": 1, "files": pr.changes})
-				return
-			}
-		}
-		http.NotFound(w, r)
-	case r.Method == http.MethodGet && path == "/repos/"+testFork+"/actions/workflows/contribution-ci.yml/runs":
-		sha := r.URL.Query().Get("head_sha")
-		runs := []any{}
-		for _, run := range g.runs[sha] {
-			runs = append(runs, map[string]any{"head_sha": sha, "path": run.path, "status": run.status, "conclusion": run.conclusion})
-		}
-		write(map[string]any{"total_count": len(runs), "workflow_runs": runs})
-	case r.Method == http.MethodPost && strings.HasPrefix(path, "/repos/"+testFork+"/pulls/") && strings.HasSuffix(path, "/reviews"):
-		n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(path, "/repos/"+testFork+"/pulls/"), "/reviews"))
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		g.reviews = append(g.reviews, review{number: n, body: body})
-		if g.failPost {
-			http.Error(w, "unprocessable", http.StatusUnprocessableEntity)
-			return
-		}
-		state := map[any]string{"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}[body["event"]]
-		g.existing[n] = append(g.existing[n], map[string]any{"user": map[string]any{"login": g.login}, "state": state, "commit_id": body["commit_id"]})
-		write(map[string]any{"id": 1})
-	default:
-		g.t.Errorf("unexpected GitHub call %s %s", r.Method, r.URL)
-		http.NotFound(w, r)
-	}
-}
 
 type fakeSignal struct {
 	mu   sync.Mutex
@@ -260,7 +97,8 @@ func newHarness(t *testing.T) *harness {
 	log.SetOutput(writerFunc(func(p []byte) (int, error) { mu.Lock(); defer mu.Unlock(); return buf.Write(p) }))
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
-	h := &harness{gh: newFakeGitHub(t), signal: newFakeSignal(t), clock: &clock{t: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)}}
+	h := &harness{gh: newFakeGitHub(t), signal: newFakeSignal(t)}
+	h.clock = h.gh.clock
 	h.logs = func() string { mu.Lock(); defer mu.Unlock(); return buf.String() }
 	gh := &githubClient{base: h.gh.srv.URL, token: testPAT, http: h.gh.srv.Client()}
 	notify := &signalNotifier{base: h.signal.srv.URL, number: testBot, recipient: testGroup, http: h.signal.srv.Client()}
