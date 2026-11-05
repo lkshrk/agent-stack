@@ -8,6 +8,7 @@ from pathlib import Path
 
 from agent_stack_policies._shell import STATEMENT_LIMIT, WORD_LIMIT
 
+from . import HAS_YAML
 from .scaling import CEILING, GROWTH_LIMIT, growth
 
 IN_IMAGE = os.environ.get("AGENT_STACK_IN_IMAGE") == "1"
@@ -559,6 +560,11 @@ CASES: list[Case] = [
     Case("polly", "tool_call", "sys_os_shell", {"command": "echo '{}' > .polly/registry.json"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "sed -i s/a/b/ AGENTS.md"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:feat/x"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git diff --unified --output=/tmp/pwn"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git log --pretty --output=/tmp/pwn"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git log --upload-pac=touch"}, "DENY"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git diff -U3"}, "ALLOW"),
+    Case("documenter", "tool_call", "sys_os_shell", {"command": "git status -sb"}, "ALLOW"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "git push --force origin HEAD:feat/x"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "git push origin HEAD:main"}, "DENY"),
     Case("documenter", "tool_call", "sys_os_shell", {"command": "gh pr merge 5"}, "DENY"),
@@ -1158,6 +1164,330 @@ class StatementAndWrapperTest(unittest.TestCase):
                     self.assertLess(growth(measure, 100), GROWTH_LIMIT)
 
 
+class PublicContributionEngineTest(unittest.TestCase):
+    def test_raw_commands_are_denied_unless_one_literal_helper_command(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from unittest.mock import patch
+
+        from agent_stack_policies import public_contributions
+
+        agent = BUNDLES / "polly/agents/claude_code"
+        root = "/home/omnigent/work/omnigent"
+        with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
+            for command in (
+                f"git clone https://github.com/omnigent-ai/omnigent.git {root}",
+                f"git worktree add {root}",
+                f"git -C {root} fetch origin",
+                "git clone https://github.com/omnigent-ai/omnigent.git /home/omnigent/work/./omnigent",
+                "/opt/agent/bin/agent-stack-contribute publish omnigent",
+                "bash -c '/opt/agent/bin/agent-stack-contribute prepare omnigent'",
+                "agent-stack-contribute prepare omnigent && echo done",
+                "agent-stack-contribute validate omnigent web",
+                "agent-stack-contribute preflight omnigent",
+            ):
+                with self.subTest(command=command):
+                    out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+            for command in ("/opt/agent/bin/agent-stack-contribute prepare omnigent", "agent-stack-contribute prepare omnigent"):
+                with self.subTest(command=command):
+                    out = results(agent, Case("polly/agents/claude_code", "tool_call", "Bash", {"command": command}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "ALLOW")
+            out = results(
+                agent,
+                Case(
+                    "polly/agents/claude_code",
+                    "tool_call",
+                    "Bash",
+                    {"command": ["agent-stack-contribute", "prepare", "omnigent"]},
+                    "",
+                ),
+            )
+        self.assertEqual(out["public_contributions"].action.name, "ALLOW")
+
+    def test_native_bundles_deny_direct_public_writes_in_registered_context(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from unittest.mock import patch
+
+        from agent_stack_policies import public_contributions
+
+        root = "/home/omnigent/work/omnigent"
+        commands = (
+            ["git", "push", "origin", "HEAD:contribution/fix"],
+            ["git", "remote", "add", "fork", "https://github.com/example/fork.git"],
+            ["git", "remote", "set-url", "origin", "https://github.com/example/fork.git"],
+            ["git", "tag", "v1.2.3"],
+            ["git", "push", "origin", "v1.2.3"],
+            ["gh", "issue", "create", "--title", "fix"],
+            ["gh", "pr", "create", "--title", "fix"],
+            ["gh", "pr", "comment", "1", "--body", "note"],
+            ["gh", "api", "-X", "POST", "repos/example/project/issues"],
+            ["bash", "-lc", "git push origin HEAD:contribution/fix"],
+            ["env", "git", "push", "origin", "HEAD:contribution/fix"],
+            ["sh", "-c", "gh issue create --title fix"],
+            ["zsh", "-c", "git status"],
+            ["command", "git", "status"],
+            ["builtin", "echo", "x"],
+            ["nice", "git", "status"],
+            ["nohup", "git", "status"],
+            "bash -lc 'git push origin HEAD:contribution/fix'",
+            "env git push origin HEAD:contribution/fix",
+            "sh -c 'gh issue create --title fix'",
+        )
+        with patch.object(public_contributions, "RUNTIME_REGISTRY", REPO / "config/public-contributions.yaml"):
+            for agent in ("polly/agents/claude_code", "polly/agents/codex"):
+                for command in commands:
+                    with self.subTest(agent=agent, command=command):
+                        out = results(
+                            BUNDLES / agent,
+                            Case(agent, "tool_call", "Bash", {"command": command, "cwd": root}, ""),
+                        )
+                        self.assertIn("public_contributions", out)
+                        self.assertEqual(out["public_contributions"].action.name, "DENY")
+                with self.subTest(agent=agent, control="unregistered internal push"):
+                    out = results(
+                        BUNDLES / agent,
+                        Case(
+                            agent,
+                            "tool_call",
+                            "Bash",
+                            {"command": ["git", "push", "origin", "HEAD:feature/internal"], "cwd": "/home/omnigent/work/agent-stack"},
+                            "",
+                        ),
+                    )
+                    self.assertIn("public_contributions", out)
+                    self.assertNotEqual(out["public_contributions"].action.name, "DENY")
+
+    def test_native_bundles_allow_only_fork_staging_in_registered_context(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from .fork_checkout import FORK, commit, fork_checkout
+
+        allowed = (
+            ["git", "push", "fork", "HEAD:feat/x"],
+            ["git", "push", "-u", "fork", "HEAD:feat/x"],
+            ["gh", "pr", "create", "--repo", FORK, "--base", "main", "--head", "feat/x", "--title", "fix(web): a", "--body", "b"],
+            ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-ready"],
+            ["gh", "issue", "create", "--repo", FORK, "--title", "bug", "--body", "b"],
+            ["git", "add", "web/a.ts"],
+            ["git", "commit", "-m", "fix(web): a"],
+            ["git", "switch", "-c", "feat/x"],
+            ["git", "fetch", "origin"],
+            'git commit -m "fix(web): x"',
+            "git push fork HEAD:fix/x",
+            f'gh pr create --repo {FORK} --head fix/x --title "fix(web): x" --body "Tested."',
+        )
+        denied = (
+            "git push fork HEAD:x && echo",
+            'git commit -m "$(id)"',
+            "git commit -m `id`",
+            "git -c core.hooksPath=/tmp push fork HEAD:x",
+            "env git push fork HEAD:x",
+            "git log > /tmp/out",
+            "git add *.ts",
+            ["git", "config", "core.hooksPath", "/tmp/hooks"],
+            ["git", "remote", "set-url", "fork", "https://github.com/omnigent-ai/omnigent.git"],
+            ["git", "tag", "v1.0.0"],
+            ["git", "push", "origin", "HEAD:feat/x"],
+            ["git", "push", "fork", "HEAD:main"],
+            ["git", "push", "--force", "fork", "HEAD:feat/x"],
+            ["git", "push", "--tags", "fork", "HEAD:feat/x"],
+            ["git", "push", "--mirror", "fork"],
+            ["git", "push", "fork", ":feat/x"],
+            ["gh", "pr", "create", "--head", "feat/x", "--title", "t"],
+            ["gh", "pr", "create", "--repo", "omnigent-ai/omnigent", "--head", "feat/x", "--title", "t"],
+            ["gh", "pr", "merge", "7", "--repo", FORK],
+            ["gh", "release", "create", "v1", "--repo", FORK],
+            ["gh", "workflow", "run", "ci.yml", "--repo", FORK],
+            ["gh", "api", "-X", "POST", f"repos/{FORK}/pulls"],
+            ["bash", "-lc", "git push fork HEAD:feat/x"],
+        )
+        for agent in ("polly/agents/claude_code", "polly/agents/codex"):
+            with fork_checkout() as tree:
+                for command, want in [(c, "ALLOW") for c in allowed] + [(c, "DENY") for c in denied]:
+                    with self.subTest(agent=agent, command=command):
+                        out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": str(tree)}, ""))
+                        self.assertIn("public_contributions", out)
+                        self.assertEqual(out["public_contributions"].action.name, want)
+                commit(tree, ".github/workflows/release.yml", "on: push\n", "ci: add release")
+                with self.subTest(agent=agent, command="push touching workflows"):
+                    out = results(
+                        BUNDLES / agent,
+                        Case(agent, "tool_call", "Bash", {"command": ["git", "push", "fork", "HEAD:feat/x"], "cwd": str(tree)}, ""),
+                    )
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+
+
+@unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
+class ContributionPromptTest(unittest.TestCase):
+    def prompt(self, bundle):
+        import yaml
+
+        return " ".join(yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["prompt"].split())
+
+    def test_writer_prompts_stage_contributions_in_the_fork(self):
+        implementer = self.prompt("polly/agents/claude_code")
+        for phrase in (
+            "agent-stack-contribute prepare <repo>",
+            "remote `fork`",
+            "git fetch fork <default branch>",
+            "git push -u fork HEAD:<branch>",
+            "fork's `contribution-ci` workflow",
+            "wait for that run to go green",
+            "gh pr create --repo <fork> --base <default branch> --head <branch>",
+            "upstream-ready",
+            "only once the fork's CI is green",
+            "approved-upstream",
+            "upstream's own conventions",
+            "`title_format`",
+            "`'it'\"'\"'s'`",
+            "--label upstream-issue",
+            "--label upstream-comment",
+            "titled exactly `Comment on #<N>`",
+            "Only the owner's `approved-upstream` label publishes a draft",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, implementer)
+        self.assertIn("`upstream-comment`", self.prompt("polly"))
+        self.assertIn("agent-stack-contribute prepare <repo>", self.prompt("polly"))
+        for bundle in ("polly", "polly/agents/claude_code", "documenter", "planner"):
+            with self.subTest(bundle=bundle):
+                self.assertNotIn("publish request", self.prompt(bundle))
+                self.assertIn("fork", self.prompt(bundle))
+
+    def test_writer_prompts_use_semantic_release_commits_and_never_tag(self):
+        for bundle in ("polly", "polly/agents/claude_code"):
+            prompt = self.prompt(bundle)
+            for phrase in ("semantic-release", "`fix:`", "`feat:`", "`BREAKING CHANGE:`", "never create tags or releases"):
+                with self.subTest(bundle=bundle, phrase=phrase):
+                    self.assertIn(phrase, prompt)
+
+
+@unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
+class GitDirPathGuardTest(unittest.TestCase):
+    def test_every_writer_path_guard_denies_git_internals(self):
+        import yaml
+
+        for bundle in ("polly", "polly/agents/claude_code", "documenter"):
+            with self.subTest(bundle=bundle):
+                policies = yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["guardrails"]["policies"]
+                guards = [p for p in policies.values() if p.get("function", {}).get("path") == "agent_stack_policies.paths.path_guard"]
+                self.assertTrue(guards)
+                for guard in guards:
+                    self.assertIn("**/.git/**", guard["function"]["arguments"]["deny"])
+
+    def test_every_writer_path_guard_denies_global_git_config(self):
+        import yaml
+
+        from agent_stack_policies.paths import path_guard
+
+        from . import tool_call_event
+
+        targets = (
+            "/home/omnigent/.gitconfig",
+            "~/.gitconfig",
+            "/home/omnigent/.gitattributes",
+            "/home/omnigent/.config/git/config",
+            "~/.config/git/config",
+            "/home/omnigent/.config/git/attributes",
+            "/home/omnigent/.config/git/ignore",
+            "/home/omnigent/.config/git/hooks/pre-commit",
+        )
+        for bundle in ("polly", "polly/agents/claude_code", "documenter"):
+            policies = yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["guardrails"]["policies"]
+            guards = [p for p in policies.values() if p.get("function", {}).get("path") == "agent_stack_policies.paths.path_guard"]
+            for guard in guards:
+                policy = path_guard(**guard["function"]["arguments"])
+                for target in targets:
+                    with self.subTest(bundle=bundle, target=target):
+                        decision = policy(tool_call_event("Write", {"file_path": target, "content": "[core]\n\tfsmonitor = /tmp/x\n"}))
+                        self.assertEqual(decision["result"], "DENY", decision)
+        policies = yaml.safe_load((BUNDLES / "polly/agents/claude_code" / "config.yaml").read_text())["guardrails"]["policies"]
+        policy = path_guard(**policies["path_guard"]["function"]["arguments"])
+        for command in (
+            "printf '[core]\\n\\tfsmonitor=/tmp/x\\n' >> ~/.gitconfig",
+            "cp /tmp/x /home/omnigent/.config/git/config",
+            "tee $HOME/.gitattributes",
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(policy(tool_call_event("Bash", {"command": command}))["result"], "DENY")
+        self.assertEqual(policy(tool_call_event("Write", {"file_path": "src/app.py", "content": "x"}))["result"], "ALLOW")
+        self.assertEqual(policy(tool_call_event("Bash", {"command": "git config --get user.name"}))["result"], "ALLOW")
+
+    def test_git_internals_are_denied_through_the_engine(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        agent = "polly/agents/claude_code"
+        for tool, data in (
+            ("Write", {"file_path": ".git/hooks/pre-commit", "content": "#!/bin/sh\nid\n"}),
+            ("Edit", {"file_path": "/home/omnigent/work/agent-stack/.git/config", "old_string": "a", "new_string": "b"}),
+            ("Bash", {"command": "cp /tmp/hook .git/hooks/pre-commit"}),
+            ("Write", {"file_path": "/home/omnigent/.gitconfig", "content": "[core]\n\tfsmonitor = /tmp/x\n"}),
+            ("Write", {"file_path": "/home/omnigent/.config/git/config", "content": "[core]\n\thooksPath = /tmp\n"}),
+            ("Write", {"file_path": "/home/omnigent/.config/git/attributes", "content": "* filter=x\n"}),
+            ("Bash", {"command": "printf x >> ~/.gitconfig"}),
+        ):
+            with self.subTest(tool=tool, data=data):
+                self.assertEqual(verdict(BUNDLES / agent, Case(agent, "tool_call", tool, data, "")), "DENY")
+        for command in (
+            "git config --global core.fsmonitor 'sh /tmp/x'",
+            "git config set --global core.hooksPath /tmp/h",
+            "git config --system core.pager /tmp/x",
+            "git config --global --edit",
+            "git config --glob core.fsmonitor /tmp/x",
+            "GIT_CONFIG=~/.gitconfig git config core.fsmonitor /tmp/x",
+        ):
+            for cwd in ("/home/omnigent/work/agent-stack", "/home/omnigent"):
+                with self.subTest(command=command, cwd=cwd):
+                    out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": cwd}, ""))
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+        for command in ("git config --global --get user.name", "git config --list", "git config user.email x@example.invalid"):
+            with self.subTest(control=command):
+                out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": "/home/omnigent/work/agent-stack"}, ""))
+                self.assertNotEqual(out["public_contributions"].action.name, "DENY")
+        for command in ("git status", "git diff --stat", "git log --oneline -3"):
+            with self.subTest(control=command):
+                out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": "/home/omnigent/work/agent-stack"}, ""))
+                self.assertNotEqual(out["path_guard"].action.name, "DENY")
+                self.assertNotEqual(out["public_contributions"].action.name, "DENY")
+
+    def test_review_probes_through_the_engine(self):
+        if not IN_IMAGE:
+            self.skipTest("needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
+        from .fork_checkout import fork_checkout
+
+        probes = (
+            ["git", "rebase", "--exe", "git push origin HEAD:main", "HEAD~1"],
+            ["git", "fetch", "--upload-pac=sh -c id", "."],
+            "git fetch '--upload-pac=sh -c id' .",
+            ["gh", "api", "-X", "GET", "-X", "POST", "repos/omnigent-ai/omnigent/issues", "-f", "title=x"],
+            "gh api -X GET -X POST repos/omnigent-ai/omnigent/issues -f title=x",
+            ["git", "st"],
+            "git st",
+            ["git", "difftool", "-x", "id"],
+            "git rebase -kx id HEAD~1",
+            ["gh", "pr", "edit", "1", "--repo", "lkshrk/omnigent", "--add-label", "Approved-Upstream"],
+            ["git", "fetch", ".", "HEAD:refs/remotes/origin/forged"],
+            "git push fork HEAD:feat/x\x00",
+            ["git", "push", "fork", "HEAD:HEAD"],
+            "gh auth status --show-token",
+        )
+        with fork_checkout() as tree:
+            for agent in ("polly/agents/claude_code", "polly/agents/codex"):
+                for command in probes:
+                    with self.subTest(agent=agent, command=command):
+                        out = results(BUNDLES / agent, Case(agent, "tool_call", "Bash", {"command": command, "cwd": str(tree)}, ""))
+                        self.assertEqual(out["public_contributions"].action.name, "DENY")
+                home = str(tree.parent.parent)
+                with self.subTest(agent=agent, command="cd escape"):
+                    out = results(
+                        BUNDLES / agent,
+                        Case(agent, "tool_call", "Bash", {"command": "cd ~/work/omnigent && git push origin HEAD:feat/x", "cwd": home}, ""),
+                    )
+                    self.assertEqual(out["public_contributions"].action.name, "DENY")
+
+
 @unittest.skipUnless(IN_IMAGE, "needs the Omnigent image (AGENT_STACK_IN_IMAGE=1)")
 class BundleVerdictTest(unittest.TestCase):
     def test_cases(self):
@@ -1373,6 +1703,7 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertIn("agent_stack_policies.readonly.read_only_shell", paths)
         self.assertNotIn("agent_stack_policies.result.result_contract", paths)
         planner_only = {
+            "agent_stack_policies.public_contributions.prepare_operation",
             "agent_stack_policies.result.result_contract",
             "agent_stack_policies.spawn.max_dispatches_per_session",
             "omnigent.policies.builtins.orchestration.spawn_bounds",

@@ -11,6 +11,8 @@ from agent_stack_policies import POLICY_REGISTRY
 from .test_bundles import BUNDLES, IN_IMAGE, agent_policies, server_policies
 
 INSTALL_ROOT = Path("/opt/agent-stack/policies")
+REGISTRY_PATH = Path("/opt/agent-stack/public-contributions.yaml")
+HELPER_PATH = Path("/opt/agent/bin/agent-stack-contribute")
 PACKAGE = "agent_stack_policies"
 
 
@@ -42,6 +44,26 @@ class InImageTest(unittest.TestCase):
             self.assertTrue(mode & stat.S_IROTH, path)
             if path.is_dir():
                 self.assertTrue(mode & stat.S_IXOTH, path)
+
+    def test_public_contribution_runtime_files_are_root_owned(self):
+        host = HELPER_PATH.parent.is_dir()
+        for path in [REGISTRY_PATH, INSTALL_ROOT / PACKAGE / "public_contributions.py", *([HELPER_PATH] if host else [])]:
+            with self.subTest(path=path):
+                mode = path.stat().st_mode
+                self.assertEqual(path.stat().st_uid, 0)
+                self.assertTrue(mode & stat.S_IROTH, path)
+                self.assertFalse(mode & stat.S_IWOTH, path)
+        if not host:
+            return
+
+        result = subprocess.run(
+            [str(HELPER_PATH), "list"],
+            cwd="/",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(result.stdout, '["omnigent"]\n')
 
     def test_registry_loads_in_omnigent(self):
         from omnigent.policies.registry import get_registry, load_registry

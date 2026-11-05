@@ -123,6 +123,7 @@ RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
  && chmod -R a+rX /opt/agent
 
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
+COPY config/public-contributions.yaml /opt/agent-stack/public-contributions.yaml
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
  && chmod -R a+rX /opt/agent-stack
 
@@ -136,13 +137,14 @@ FROM image AS test
 COPY policies/omnigent/ /src/policies/omnigent/
 COPY bundles/ /src/bundles/
 COPY config/omnigent/ /src/config/omnigent/
+COPY config/public-contributions.yaml /src/config/public-contributions.yaml
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 COPY images/omnigent-host/test/ /src/images/omnigent-host/test/
 COPY --from=upstream-env /upstream.env /src/upstream.env
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 RUN install -d -m 0777 /home/omnigent
-RUN fail=0; for t in removed-clis mise-cache; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
+RUN fail=0; for t in removed-clis mise-cache credentials; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
 USER 1000660000
 RUN \
     --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bashrc \

@@ -5,11 +5,18 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, tool_call
 from ._event import deny as _deny
 from ._shell import OpaqueCommand, DEFAULT_PROTECTED, OPAQUE_WORD, group_token, opaque, push_branch, resolve, shell_command, shell_shape_problem, substituted, walk
+from .contribution_vcs import GIT_OPTIONS, option_set, parse_options, rejected_option
 from .paths import SHELL_TOOLS, escapes, forbidden_matcher, matches_allowed
+from .tools import gh_api_mutates
 
 _VCS = frozenset({"git", "gh"})
 _GIT_READ = frozenset({"status", "diff", "log", "show", "rev-parse", "ls-files", "fetch", "merge-base"})
-_GIT_UNSAFE_FLAGS = ("--output", "--upload-pack", "--receive-pack", "--exec", "--ext-diff")
+GIT_READ_OPTIONS = {
+    **{verb: GIT_OPTIONS[verb] for verb in _GIT_READ - {"fetch"}},
+    "fetch": option_set("-q --quiet -v --verbose"),
+}
+_REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_FETCH_BRANCH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
 _BRANCH_LIST_FLAGS = frozenset(
     {"--show-current", "-a", "--all", "-r", "--remotes", "-l", "--list", "-v", "-vv", "--verbose"}
 )
@@ -90,6 +97,15 @@ def _check_push(args: list[str]) -> str | None:
     return None
 
 
+def check_fetch_positional(positional: list[str]) -> str | None:
+    if not positional:
+        return None
+    remote, refspecs = positional[0], positional[1:]
+    if not _REMOTE_NAME.fullmatch(remote) or any(not _FETCH_BRANCH.fullmatch(r) or ".." in r for r in refspecs):
+        return "git fetch takes only a remote name and source branches, never a URL, path or destination refspec"
+    return None
+
+
 def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
     if not rest:
         return None
@@ -103,10 +119,11 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
         return f"git --no-pager is allowed only with read verbs; {GIT_FORM}"
     if sub.startswith("-"):
         return f"git global options are not allowed; {GIT_FORM}"
-    if any(a.startswith(_GIT_UNSAFE_FLAGS) for a in args):
-        return f"git {sub} with an output or exec option is not allowed; {GIT_FORM}"
     if sub in _GIT_READ:
-        return None
+        parsed = parse_options(args, GIT_READ_OPTIONS[sub])
+        if parsed is None:
+            return f"git {sub} option {rejected_option(args, GIT_READ_OPTIONS[sub])} is outside its allowlist; {GIT_FORM}"
+        return check_fetch_positional(parsed.positional) if sub == "fetch" else None
     if sub == "branch":
         flags = [a for a in args if a.startswith("-")]
         listing = all(f in _BRANCH_LIST_FLAGS for f in flags) and (
@@ -125,19 +142,7 @@ def _check_git(rest: list[str], is_doc: Callable[[str], bool]) -> str | None:
 
 
 def _check_gh_api(args: list[str]) -> str | None:
-    for i, arg in enumerate(args):
-        if arg.startswith(_GH_API_WRITE_FLAGS):
-            return GH_FORM
-        method = None
-        if arg in ("-X", "--method"):
-            method = args[i + 1] if i + 1 < len(args) else ""
-        elif arg.startswith("--method="):
-            method = arg.split("=", 1)[1]
-        elif arg.startswith("-X"):
-            method = arg[2:]
-        if method is not None and method.upper() != "GET":
-            return GH_FORM
-    return None
+    return GH_FORM if gh_api_mutates(args) else None
 
 
 def _check_gh(rest: list[str]) -> str | None:

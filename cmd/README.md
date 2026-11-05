@@ -10,10 +10,13 @@ Serves the subset of signal-cli's HTTP daemon API that the Hermes Signal adapter
 
 Polls: `sendPollCreate` (`question`, `options`, a `groupId` or one `recipient`) and `sendPollTerminate` (`pollTimestamp`) map to `/v1/polls`. Without an `account`, the shim uses the only registered account. The adapter reads only a message's text, so the shim gives a vote on the event stream a text of its own: `🗳️ Poll "<question>": <options> (poll <timestamp>)`. It remembers the last 256 polls it created to name the options; after a restart it falls back to option numbers. Hermes sends polls with `signal-poll` (`images/hermes/bin/signal-poll`).
 
+Contribution approvals: when `APPROVER_URL` is set, a plain new message from `OWNER_NUMBER` whose whole text is `approve <code>` or `reject <code>` (8 digits, lowercase, single space, nothing else) goes to `contribution-approver` as `POST /v1/decisions` with the shared token (30 s timeout, above the approver's 20 s decision budget), and Hermes never sees it. If the approver is unreachable or refuses the call, the shim tells the sender in the same chat that nothing was submitted. Anything else, including edits, quotes, reactions, sync messages, attachments, mentions and other senders, reaches Hermes as before. The shim only receives while Hermes holds the event stream open.
+
 | Variable | Meaning |
 | --- | --- |
 | `SIGNAL_REST_URL` | signal-cli-rest-api base URL (required) |
 | `LISTEN_ADDR` | Listen address, default `127.0.0.1:8090` |
+| `APPROVER_URL`, `APPROVER_TOKEN`, `OWNER_NUMBER` | contribution-approver base URL, shared token (at least 32 characters) and the owner's E.164 number; set all three or none. If `OWNER_NUMBER` is not exactly one E.164 number (for example a list), approvals are disabled with a log line and everything still reaches Hermes |
 
 ## token-minter
 
@@ -47,3 +50,20 @@ Receives signed Linear webhooks at `POST /webhooks/linear` (`GET /healthz` for p
 | `LISTEN_ADDR` | Listen address, default `:8080` |
 
 All except `LISTEN_ADDR` are required.
+
+## contribution-approver
+
+Signal remote control for the contribution fork's publish gate (`docs/contribution-fork.md`). Every 60 s it reads `publish/contribution.json` from each fork's default branch, checks the token belongs to the fork owner, and lists open pull requests on the default branch. A pull request labelled `upstream-ready`, with its head in the fork and green CI on the head (the gate's rule), is announced once per head SHA to the Signal group: title, a body excerpt, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes. Before announcing it runs the gate's own refusals: a title that doesn't follow `title_format`, or an upstream diff (compare against the upstream default branch) that is empty, too large or touches `.github/` or `publish/`, is logged once per head and not announced. A new head SHA replaces the code; a pull request that stops being ready loses it. A head the owner already approved or requested changes on is not announced. Codes live in memory, so a restart announces again with new codes.
+
+`POST /v1/decisions` (`{"action":"approve"|"reject","code":"<8 digits>"}`, `Authorization: Bearer <APPROVER_TOKEN>`, compared in constant time) consumes the code, re-reads the pull request and refuses with 409 (announcing it again if it is still ready) when its head, title, body or `upstream-ready` label changed since the announcement, so the approval is bound to what the owner read. Otherwise it submits the owner's review pinned to the announced SHA: `APPROVE` for approve, which triggers the fork's `publish-upstream`, `REQUEST_CHANGES` for reject. Unknown, used or expired codes make no GitHub call. An expired code stays recognisable for 24 hours: replying with it once makes the next poll announce the pull request again with a fresh code, but only if it is still ready on the same head; otherwise the reply says it changed. Unknown and used codes trigger nothing, and a used code never brings the same head back. If GitHub refuses the review, the pull request is announced again with a new code. The result goes back to the Signal group; an approval links the fork's `publish-upstream` runs, where the gate's outcome shows. `GET /healthz` for probes. Logs never contain the token, the owner number or the group.
+
+| Variable | Meaning |
+| --- | --- |
+| `GITHUB_TOKEN` | The owner's classic PAT with only `public_repo`; reviews are submitted as its owner |
+| `CONTRIBUTION_FORKS` | Comma-separated forks, e.g. `lkshrk/omnigent` |
+| `APPROVER_TOKEN` | Shared token signal-shim sends, at least 32 characters |
+| `SIGNAL_REST_URL`, `SIGNAL_NUMBER`, `SIGNAL_RECIPIENT` | signal-cli-rest-api, the sender and the group (`group.<id>`) |
+| `GITHUB_API_URL` | Default `https://api.github.com` |
+| `LISTEN_ADDR` | Listen address, default `:8080` |
+
+All except `GITHUB_API_URL` and `LISTEN_ADDR` are required.

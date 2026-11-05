@@ -8,6 +8,7 @@ ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-r
     OMNIGENT_SEEDED_AGENTS=claude-native-ui,codex-native-ui
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/
+COPY config/public-contributions.yaml /opt/agent-stack/public-contributions.yaml
 RUN echo /opt/agent-stack/policies > "$(/opt/venv/bin/python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/agent_stack_policies.pth" \
  && chmod -R a+rX /opt/agent-stack
 
@@ -30,6 +31,7 @@ ARG AGENT_STACK_VERSION=""
 COPY policies/omnigent/ /src/policies/omnigent/
 COPY bundles/ /src/bundles/
 COPY config/omnigent/ /src/config/omnigent/
+COPY config/public-contributions.yaml /src/config/public-contributions.yaml
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v

@@ -28,6 +28,8 @@ policies:
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
+  - 'templates/**'
+  - 'config/public-contributions.yaml'
 omnigent-host:
   - *shared
   - 'policies/omnigent/agent_stack_policies/**'
@@ -35,12 +37,14 @@ omnigent-host:
   - '.claude-plugin/**'
   - '.agents/**'
   - 'plugins/**'
+  - 'config/public-contributions.yaml'
 omnigent-server:
   - *shared
   - 'policies/omnigent/**'
   - 'bundles/**'
   - 'config/omnigent/**'
   - 'images/omnigent-server/**'
+  - 'config/public-contributions.yaml'
 agent-tools:
   - *shared
   - 'images/agent-tools/**'
@@ -64,3 +68,8 @@ hermes-webui:
   - 'images/hermes/gitconfig'
   - 'config/hermes/config.yaml'
   - 'config/hermes/profiles/default/config.yaml'
+public-validator:
+  - *shared
+  - 'images/public-validator/**'
+  - 'policies/omnigent/agent_stack_policies/**'
+  - 'config/public-contributions.yaml'

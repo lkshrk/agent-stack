@@ -1,0 +1,90 @@
+#!/usr/bin/python3 -I
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+CALLS = Path("/var/log/validator-test/calls.jsonl")
+FAIL_ON = Path("/var/log/validator-test/fail-on")
+ATTACK = Path("/var/log/validator-test/attack")
+ATTACKER = """
+import os, signal, sys, time
+parent = os.getppid()
+me = os.getpid()
+sig = getattr(signal, "SIG" + sys.argv[1])
+os.write(1, b"r")
+os.close(1)
+end = time.monotonic() + 60
+while time.monotonic() < end:
+    spared = {me, parent} if os.getppid() == parent else {me}
+    for pid in [int(p) for p in os.listdir("/proc") if p.isdigit()]:
+        if pid not in spared:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+"""
+
+
+def readable(path):
+    try:
+        with open(path, "rb") as handle:
+            handle.read(1)
+        return True
+    except OSError:
+        return False
+
+
+home = os.environ.get("HOME", "")
+status = dict(line.split(":", 1) for line in Path("/proc/self/status").read_text().splitlines())
+parent = os.getppid()
+record = {
+    "argv": sys.argv,
+    "cwd": os.getcwd(),
+    "env": dict(os.environ),
+    "uid": os.getuid(),
+    "euid": os.geteuid(),
+    "gid": os.getgid(),
+    "groups": os.getgroups(),
+    "status": {name: status[name].strip() for name in ("NoNewPrivs", "CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")},
+    "parent_cmdline": Path(f"/proc/{parent}/cmdline").read_bytes().decode().split("\0")[:3],
+    "signing_key_readable": readable("/var/run/agent-stack/attestation/signing-key"),
+    "token_readable": readable(os.environ.get("AGENT_STACK_GITHUB_TOKEN_FILE", "/nonexistent")),
+    "existing": [
+        path
+        for path in (
+            "/var/run/secrets/kubernetes.io",
+            "/etc/gitconfig",
+            "/root/.gitconfig",
+            "/root/.config",
+            "/home/node",
+            "/opt/agent",
+            f"{home}/.gitconfig",
+            f"{home}/.config/gh",
+            f"{home}/.ssh",
+        )
+        if os.path.lexists(path)
+    ],
+    "root_listable": os.access("/root", os.R_OK | os.X_OK),
+}
+with CALLS.open("a") as calls:
+    calls.write(json.dumps(record) + "\n")
+
+if sys.argv[1:] == ["run", "lint"]:
+    attack = [sys.executable, "-I", "-c", ATTACKER, ATTACK.read_text().strip()] if ATTACK.exists() else None
+    if attack:
+        ready, signal_ready = os.pipe()
+        subprocess.Popen(attack, start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=signal_ready, stderr=subprocess.DEVNULL)
+        os.close(signal_ready)
+        if os.read(ready, 1) != b"r":
+            sys.exit("attacker did not start")
+    else:
+        subprocess.Popen(["sleep", "600"], start_new_session=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+if FAIL_ON.exists() and FAIL_ON.read_text().strip() == " ".join(sys.argv[1:]):
+    print("fake failure", file=sys.stderr)
+    sys.exit(3)
+print("fake attestation line {\"status\": \"passed\"}")

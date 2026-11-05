@@ -49,6 +49,12 @@ os_env:
 guardrails:
   ask_timeout: 300
   policies:
+    public_contributions:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.public_contributions.prepare_operation
+        arguments: {}
     read_only_shell:
       type: function
       on: [tool_call]

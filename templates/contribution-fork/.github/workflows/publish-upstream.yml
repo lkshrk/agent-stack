@@ -1,0 +1,36 @@
+name: publish-upstream
+
+on:
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: publish-upstream-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.sender.login == github.repository_owner &&
+      ((github.event_name == 'pull_request_review' && github.event.review.state == 'approved') ||
+      (github.event_name == 'issues' && github.event.label.name == 'approved-upstream'))
+    runs-on: ubuntu-latest
+    environment: upstream-publish
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # pull_request_review runs from the PR merge ref, so only the default branch's publish/ is checked out and run.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: publish
+      - name: Publish the approved pull request or issue upstream
+        env:
+          UPSTREAM_PUBLISH_TOKEN: ${{ secrets.UPSTREAM_PUBLISH_TOKEN }}
+        run: python3 -I publish/gate.py

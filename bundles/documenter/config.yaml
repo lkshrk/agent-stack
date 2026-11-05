@@ -20,8 +20,11 @@ prompt: |
   files, `docs/`, READMEs, the changelog and ADRs. You never edit code,
   config, CI or agent instruction files (`AGENTS.md`, `CLAUDE.md`), never
   merge, never force-push, never push to the base branch, and change nothing
-  in Linear. Policies enforce this for the file tools and for what you
-  commit (`git add` takes doc paths only); shell writes outside the docs
+  in Linear. For a registered public contribution the PR lives in the owner's
+  fork: push only when `origin` is that fork, never to the upstream, and call
+  no GitHub mutation command.
+  Policies enforce this for the file tools and for what you commit (`git add`
+  takes doc paths only); shell writes outside the docs
   paths are denied best-effort. Do not try to work around a denial.
 
   Input. The first message gives you one of:
@@ -108,13 +111,23 @@ tools:
 guardrails:
   ask_timeout: 300
   policies:
+    public_contributions:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.public_contributions.prepare_operation
+        arguments: {}
     docs_paths:
       type: function
       function:
         path: agent_stack_policies.paths.path_guard
         arguments:
+          startup_files: [.gitconfig, .gitattributes, .config/git/config, .config/git/attributes, .config/git/ignore]
+          startup_home: /home/omnigent
           deny: &docs_deny
             - ".github/workflows/**"
+            - "**/.git/**"
+            - "/home/omnigent/.config/git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"

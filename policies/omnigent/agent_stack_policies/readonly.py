@@ -6,7 +6,8 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, deny, tool_call
 from ._shell import OpaqueCommand, SHELLS, Command, shell_name, has_opaque_word, opaque, resolve, shell_command, shell_shape_problem, walk
 from .paths import SHELL_TOOLS
-from .vcs import _BRANCH_LIST_FLAGS, _GIT_UNSAFE_FLAGS
+from .contribution_vcs import option_set, parse_options, rejected_option
+from .vcs import _BRANCH_LIST_FLAGS, GIT_READ_OPTIONS, check_fetch_positional
 
 READ_COMMANDS = frozenset({
     "rg", "grep", "cat", "head", "tail", "wc", "ls", "find", "git", "jq", "diff", "sort", "uniq", "cut", "tr",
@@ -19,6 +20,28 @@ GIT_READ = frozenset({
 })
 _GIT_GLOBAL_FLAGS = frozenset({"--no-pager", "-P"})
 _GIT_WORKTREE = frozenset({"add", "remove", "list", "prune"})
+_GIT_OPTIONS = {
+    **GIT_READ_OPTIONS,
+    "ls-tree": option_set("-r -t -d -l --long --name-only --name-status -z --full-name --full-tree", optional="--abbrev"),
+    "cat-file": option_set("-p -t -s -e --allow-unknown-type", optional="--batch --batch-check"),
+    "blame": option_set("-l -w -s -e --show-email -f --show-name -n --show-number -p --porcelain --line-porcelain --incremental -b", "-L", optional="-M -C --abbrev", plain_values=True),
+    "grep": option_set(
+        "-n -i -I -w -l -L -c -v -h -H -F -E -P -a -q --cached --no-index --untracked --count --files-with-matches "
+        "--line-number --ignore-case --word-regexp --fixed-strings --extended-regexp --perl-regexp --invert-match",
+        "-e -A -B -C --max-depth",
+        optional="--color",
+    ),
+    "describe": option_set("--tags --always --long --all --contains --first-parent --exact-match", "--match --exclude --candidates", optional="--abbrev"),
+    "shortlog": option_set("-s -n -e --summary --numbered --email", "--since --until --after --before", plain_values=True),
+    "rev-list": option_set(
+        "--count --all --reverse --first-parent --no-merges --merges --abbrev-commit --left-right --parents --oneline",
+        "--max-count -n --since --until --after --before --author --grep --skip",
+        counts=True,
+        optional="--abbrev",
+        plain_values=True,
+    ),
+    "worktree": option_set("--detach -q --quiet -f --force --porcelain -n --dry-run -v --verbose --no-checkout", "-b -B"),
+}
 _GH_READ = {
     "pr": frozenset({"view", "diff", "checks", "list", "status"}),
     "issue": frozenset({"view", "list", "status"}),
@@ -53,14 +76,18 @@ def check_git(args: list[str], verbs: frozenset[str]) -> str | None:
     sub, rest = (args[0], args[1:]) if args else ("", [])
     if sub not in verbs:
         return f"git {sub or '(no verb)'} is not allowed here"
-    if any(a.startswith(_GIT_UNSAFE_FLAGS) for a in rest):
-        return f"git {sub} with an output or exec option is not allowed"
-    if sub == "grep" and any(a.startswith("--open") or (a[:1] == "-" and a[1:2] != "-" and "O" in a) for a in rest):
-        return "git grep -O runs a pager command"
-    if sub == "branch" and not all(a in _BRANCH_LIST_FLAGS for a in rest):
-        return "git branch may only list"
+    if sub == "branch":
+        return None if all(a in _BRANCH_LIST_FLAGS for a in rest) else "git branch may only list"
     if sub == "worktree" and rest[:1] and rest[0] not in _GIT_WORKTREE:
         return f"git worktree {rest[0]} is not allowed here"
+    spec = _GIT_OPTIONS.get(sub)
+    if spec is None:
+        return f"git {sub} is not allowed here"
+    parsed = parse_options(rest[1:] if sub == "worktree" and rest else rest, spec)
+    if parsed is None:
+        return f"git {sub} option {rejected_option(rest[1:] if sub == 'worktree' and rest else rest, spec)} is outside its allowlist"
+    if sub == "fetch":
+        return check_fetch_positional(parsed.positional)
     return None
 
 

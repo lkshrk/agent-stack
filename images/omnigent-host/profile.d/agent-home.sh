@@ -4,6 +4,7 @@ export MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/etc/mise MISE_GLOBAL_CONFIG_FILE
 export MISE_CACHE_DIR="${MISE_CACHE_DIR:-/tmp/mise-cache}"
 export GH_TOKEN_FILE="${GH_TOKEN_FILE:-/agent-secrets/github/code}"
 export KNOWLEDGE_TOKEN_FILE="${KNOWLEDGE_TOKEN_FILE:-/agent-secrets/github/knowledge}"
+export OMNIGENT_TOKEN_FILE="${OMNIGENT_TOKEN_FILE:-/agent-secrets/github/omnigent}"
 
 if [ -n "${LITELLM_BASE_URL:-}" ] && [ -n "${LITELLM_API_KEY:-}" ]; then
   export ANTHROPIC_BASE_URL="$LITELLM_BASE_URL"

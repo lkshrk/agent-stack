@@ -20,16 +20,60 @@ prompt: |
   - Stay strictly within the files/scope named in your task and acceptance
     contract.
   - Make the change, then drive it to green: run the relevant tests, lint, and
-    typecheck for the code you touched.
+    typecheck for the code you touched (in a registered public contribution,
+    through the fork's CI, below).
   - When you report test results, include the exact command and file set. If
     you mention counts, distinguish collected test cases from test functions.
   - Commit messages and PR texts carry no AI attribution: no Co-authored-by
     trailer, no session link, no note that the change was generated.
-  - When green, push your task branch with an explicit destination,
-    `git push -u origin HEAD:<task-branch>` (a bare `git push` or
-    `git push origin HEAD` is denied), and open a PR with `gh pr create` (clear
-    title, what changed, how you verified). Never push to a protected branch
-    (e.g. main) or force-push — open a PR and let it be reviewed/merged.
+  - In the owner's own repositories, commit messages and PR titles are
+    conventional commits that semantic-release reads: `fix:` for a patch,
+    `feat:` for a minor, a `BREAKING CHANGE:` footer for a major, and
+    `docs:`, `test:`, `refactor:`, `ci:` or `chore:` for no release. Pick the
+    type that matches the change. You never create tags or releases; CI cuts
+    them.
+  - A registered public contribution (an upstream listed by
+    `agent-stack-contribute list`) follows the upstream's own conventions for
+    commit messages and PR titles: the registry entry's `title_format`
+    (`conventional-scoped` means `type(scope): summary`) and contribution
+    rules, and the upstream's CONTRIBUTING (for Omnigent, a DCO sign-off
+    too).
+  - Get the contribution checkout with `agent-stack-contribute prepare <repo>`.
+    It clones the upstream's default branch into the registered checkout path
+    it prints (remote `origin`) and adds the owner's fork as remote `fork`.
+    Work only in that checkout. You never clone, add or change remotes, change
+    git config or tag yourself.
+  - Commit on a new branch (`git switch -c <branch>`, never the default
+    branch). Stage it in the owner's fork, never the upstream: first
+    `git fetch fork <default branch>` so the push can be checked against the
+    fork, then `git push -u fork HEAD:<branch>`, then open a PR inside the
+    fork with
+    `gh pr create --repo <fork> --base <default branch> --head <branch>`.
+  - Validation does not run in the contribution checkout: lint, typecheck,
+    test and build run in the fork's `contribution-ci` workflow on your PR.
+    Push the branch and wait for that run to go green; if it fails, fix,
+    commit and push again. Add the `upstream-ready` label with
+    `gh pr edit <number> --repo <fork> --add-label upstream-ready` only once
+    the fork's CI is green.
+  - The owner approves the upstream publish: never push to or open anything
+    on the upstream, never apply `approved-upstream`.
+  - Draft an upstream issue as a fork issue with
+    `gh issue create --repo <fork> --title '<title>' --body '<body>' --label upstream-issue`.
+    Draft a comment on upstream issue or PR `#<N>` as a fork issue titled
+    exactly `Comment on #<N>` whose body is the comment text, with
+    `--label upstream-comment`. Only the owner's `approved-upstream` label
+    publishes a draft, with its title and body unchanged since approval.
+  - In the contribution checkout every shell call is one literal `git`, `gh`
+    or `agent-stack-contribute` command: no `&&`, `;`, pipes, redirects, `$`,
+    backticks, globs, `~` or `VAR=` prefixes, and no wrapper. Put message and
+    body text in single quotes, writing a `'` inside it as `'"'"'` (for
+    example `'it'"'"'s'`). `--body-file` is denied.
+  - Anywhere else, when green, push your task branch with an explicit
+    destination, `git push -u origin HEAD:<task-branch>` (a bare `git push`
+    or `git push origin HEAD` is denied), and open a PR with `gh pr create`
+    (clear title, what changed, how you verified). Never push to a protected
+    branch (e.g. main) or force-push — open a PR and let it be
+    reviewed/merged.
   - Verify through the repository's own dev and test entry points (Makefile
     targets, package scripts, compose files, the CI workflow's steps). Run e2e
     tests only against loopback URLs (`localhost`, `127.0.0.1`). For a UI
@@ -76,6 +120,12 @@ os_env:
 guardrails:
   ask_timeout: 300
   policies:
+    public_contributions:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.public_contributions.prepare_operation
+        arguments: {}
     path_guard:
       type: function
       on: [tool_call]
@@ -84,6 +134,8 @@ guardrails:
         arguments:
           deny:
             - ".github/workflows/**"
+            - "**/.git/**"
+            - "/home/omnigent/.config/git/**"
             - "**/*.sops.yaml"
             - "**/.env"
             - "**/.env.*"
@@ -94,7 +146,7 @@ guardrails:
             - CLAUDE.md
             - "lefthook.y*ml"
             - CODEOWNERS
-          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc]
+          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc, .gitconfig, .gitattributes, .config/git/config, .config/git/attributes, .config/git/ignore]
           startup_home: /home/omnigent
           exempt: ["**/.env.example"]
     no_process_secrets:
