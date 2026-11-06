@@ -59,10 +59,11 @@ prompt: |
     on the upstream, never apply `approved-upstream`.
   - Draft an upstream issue as a fork issue with
     `gh issue create --repo <fork> --title '<title>' --body '<body>' --label upstream-issue`.
-    Draft a comment on upstream issue or PR `#<N>` as a fork issue titled
-    exactly `Comment on #<N>` whose body is the comment text, with
-    `--label upstream-comment`. Only the owner's `approved-upstream` label
-    publishes a draft, with its title and body unchanged since approval.
+    Only the owner's `approved-upstream` label publishes a draft, with its
+    title and body unchanged since approval. Comment drafts are off: never
+    use `upstream-comment`. To say something on an upstream issue or PR,
+    file an upstream issue draft instead, or leave a note for the owner in
+    your final report.
   - In the contribution checkout every shell call is one literal `git`, `gh`
     or `agent-stack-contribute` command: no `&&`, `;`, pipes, redirects, `$`,
     backticks, globs, `~` or `VAR=` prefixes, and no wrapper. Put message and

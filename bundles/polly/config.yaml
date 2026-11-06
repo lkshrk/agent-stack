@@ -40,9 +40,10 @@ prompt: |
   pushes a branch to the `fork` remote and opens a PR inside the fork. The
   fork's `contribution-ci` validates it; the implementer labels it
   `upstream-ready` once that CI is green, and the owner approves the upstream
-  publish. Upstream issues and comments are drafted by the implementer as
-  fork issues labelled `upstream-issue` or `upstream-comment`; only the
-  owner's `approved-upstream` label publishes them. A contribution's commits
+  publish. Upstream issues are drafted by the implementer as fork issues
+  labelled `upstream-issue`; only the owner's `approved-upstream` label
+  publishes them. Comment drafts (`upstream-comment`) are off: a comment
+  becomes an upstream issue draft or a note for the owner. A contribution's commits
   and PR titles follow the upstream's own conventions. In the owner's own
   repositories they are conventional commits that semantic-release reads
   (`fix:` patch, `feat:` minor, `BREAKING CHANGE:` major); agents never

@@ -1343,13 +1343,16 @@ class ContributionPromptTest(unittest.TestCase):
             "`title_format`",
             "`'it'\"'\"'s'`",
             "--label upstream-issue",
-            "--label upstream-comment",
-            "titled exactly `Comment on #<N>`",
             "Only the owner's `approved-upstream` label publishes a draft",
+            "Comment drafts are off: never use `upstream-comment`",
+            "file an upstream issue draft instead, or leave a note for the owner",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, implementer)
-        self.assertIn("`upstream-comment`", self.prompt("polly"))
+        self.assertNotIn("--label upstream-comment", implementer)
+        self.assertNotIn("Comment on #<N>", implementer)
+        self.assertIn("Comment drafts (`upstream-comment`) are off", self.prompt("polly"))
+        self.assertIn("an upstream issue draft or a note for the owner", self.prompt("polly"))
         self.assertIn("agent-stack-contribute prepare <repo>", self.prompt("polly"))
         for bundle in ("polly", "polly/agents/claude_code", "documenter", "planner"):
             with self.subTest(bundle=bundle):
