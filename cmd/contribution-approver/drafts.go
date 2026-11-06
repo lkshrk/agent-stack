@@ -22,8 +22,6 @@ const (
 	commentMarker = "<!-- contribution-fork:upstream-comment -->"
 )
 
-var commentTitle = regexp.MustCompile(`^Comment on #([1-9][0-9]*)$`)
-
 type ghUser struct {
 	Login string `json:"login"`
 }
@@ -67,9 +65,6 @@ type issueEvent struct {
 	Label     *struct {
 		Name string `json:"name"`
 	} `json:"label"`
-	Rename *struct {
-		From string `json:"from"`
-	} `json:"rename"`
 }
 
 func (e issueEvent) labelled(names ...string) bool {
@@ -87,14 +82,10 @@ type draftDecision struct {
 	// foreign: the newest approval label was applied by someone other than the owner.
 	foreign  bool
 	recorded bool
-	// targets: the upstream issues the draft named as a comment at the approval and now, searched for its marker.
-	targets []int
 	// posted: the ledger's upstream link for this draft; nothing is written upstream again.
 	posted string
 	// earlier: the post belongs to an earlier approval of different content.
 	earlier   bool
-	comment   bool
-	target    int
 	title     string
 	body      string
 	createdAt time.Time
@@ -123,7 +114,6 @@ func (o draftOutcome) String() string {
 
 type draftPost struct {
 	link        string
-	comment     bool
 	approval    int64
 	title, body string
 }
@@ -214,7 +204,7 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		return d
 	}
 	d.approval, d.approvedAt = events[at].ID, *events[at].CreatedAt
-	d.title, d.body, d.comment = is.Title, is.Body, is.hasLabel(commentLabel)
+	d.title, d.body = is.Title, is.Body
 	if is.CreatedAt != nil {
 		d.createdAt = *is.CreatedAt
 	}
@@ -234,22 +224,19 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		return d
 	}
 	if post, ok := ledger[prKey{fork: cfg.Fork, number: number}]; ok {
-		d.verdict, d.posted, d.comment = verdictPublish, post.link, post.comment
+		d.verdict, d.posted = verdictPublish, post.link
 		d.earlier = post.approval != d.approval && (post.title != d.title || post.body != d.body)
 		return d
 	}
-	oneKind := is.hasLabel(issueLabel) != is.hasLabel(commentLabel)
-	current, titled := commentTarget(is.Title)
-	if d.comment {
-		d.target = current
-	}
-	d.targets = targetsSince(events, cfg.Owner, is.Title)
 	blank := strings.TrimSpace(is.Body) == ""
 	if edited {
 		return d.refuse(hard("a publish record on the draft was edited; delete the edited publish record comment on the draft, then approve again"))
 	}
 	if strings.Contains(strings.ToLower(is.Title+"\n"+is.Body), "contribution-fork:") {
 		return d.refuse(hard("the draft contains reserved marker text"))
+	}
+	if is.hasLabel(commentLabel) || labelledAt(events, at, commentLabel) {
+		return d.refuse(hard("comment drafts are not published yet; file it as an issue draft or post it by hand"))
 	}
 	if err := checkDraftEvents(cfg, events, at); err != nil {
 		return d.refuse(err)
@@ -261,10 +248,8 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		return d.refuse(err)
 	}
 	switch {
-	case !oneKind:
-		return d.refuse(hard("the draft needs exactly one of %s or %s", issueLabel, commentLabel))
-	case d.comment && !titled:
-		return d.refuse(hard("a comment draft's title must be exactly Comment on #<number>"))
+	case !is.hasLabel(issueLabel):
+		return d.refuse(hard("the draft needs the %s label", issueLabel))
 	case blank:
 		return d.refuse(hard("the draft body is empty"))
 	}
@@ -280,38 +265,15 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 	return d
 }
 
-func commentTarget(title string) (int, bool) {
-	m := commentTitle.FindStringSubmatch(title)
-	if m == nil {
-		return 0, false
-	}
-	n, err := strconv.Atoi(m[1])
-	return n, err == nil
-}
-
-// targetsSince lists the comment targets of the title at every owner approval, recovered from the first rename after it, and of the current title.
-func targetsSince(events []issueEvent, owner, title string) []int {
-	var titles []string
-	for i, e := range events {
-		if e.Event != "labeled" || !e.labelled(approvedLabel) || !e.by(owner) {
-			continue
-		}
-		approved := title
-		for _, r := range events[i+1:] {
-			if r.Event == "renamed" && r.Rename != nil {
-				approved = r.Rename.From
-				break
-			}
-		}
-		titles = append(titles, approved)
-	}
-	var targets []int
-	for _, t := range append(titles, title) {
-		if n, ok := commentTarget(t); ok && !slices.Contains(targets, n) {
-			targets = append(targets, n)
+// labelledAt replays the label's events up to and including the approval at index at.
+func labelledAt(events []issueEvent, at int, name string) bool {
+	on := false
+	for _, e := range events[:at+1] {
+		if e.labelled(name) {
+			on = e.Event == "labeled"
 		}
 	}
-	return targets
+	return on
 }
 
 // checkDraftEvents refuses a rename or kind change at or after the approval; an owner kind change in the same second but listed before it is the owner preparing the approval.
@@ -411,12 +373,8 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 	}
 	var link string
 	if err == nil {
-		post := p.gh.fileIssue
-		if d.comment {
-			post = p.gh.postComment
-		}
 		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
-		link, err = post(wctx, cfg, d)
+		link, err = p.gh.fileIssue(wctx, cfg, d)
 		cancel()
 	}
 	if err != nil {
@@ -432,17 +390,14 @@ func (p *poller) publishDraft(ctx context.Context, cfg forkConfig, number int) d
 }
 
 type upstreamHit struct {
-	post    *issueItem
-	link    string
-	comment bool
-	target  int
+	post *issueItem
+	link string
 }
 
-// settleFound settles a post carrying this draft's marker; one created before this approval with other content or target is an earlier publish.
+// settleFound settles a post carrying this draft's marker; one created before this approval with other content is an earlier publish.
 func (p *poller) settleFound(ctx context.Context, cfg forkConfig, res draftResult, hit *upstreamHit) draftResult {
-	res.decision.comment = hit.comment
 	d := res.decision
-	differs := hit.post.Body != d.upstreamBody(cfg) || (!hit.comment && hit.post.Title != d.title) || (hit.comment && hit.target != d.target)
+	differs := hit.post.Body != d.upstreamBody(cfg) || hit.post.Title != d.title
 	if hit.post.CreatedAt != nil && hit.post.CreatedAt.Before(d.approvedAt) && differs {
 		return p.settleDraft(ctx, cfg, res, hit.link, draftAlready)
 	}
@@ -453,7 +408,7 @@ func (p *poller) settleFound(ctx context.Context, cfg forkConfig, res draftResul
 // remember keeps the link until the record is written and tells the owner before anything else can fail.
 func (p *poller) remember(ctx context.Context, cfg forkConfig, d draftDecision, link string) {
 	k := prKey{fork: cfg.Fork, number: d.number}
-	p.posted[k] = draftPost{link: link, comment: d.comment, approval: d.approval, title: d.title, body: d.body}
+	p.posted[k] = draftPost{link: link, approval: d.approval, title: d.title, body: d.body}
 	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
 	defer cancel()
 	p.tellOnce(nctx, k, postedKey(link), publishedText(cfg, d, link))
@@ -469,11 +424,7 @@ func refusalKey(approval int64, reason string) string {
 }
 
 func publishedText(cfg forkConfig, d draftDecision, link string) string {
-	text := fmt.Sprintf("Filed the draft %s#%d upstream as an issue", cfg.Fork, d.number)
-	if d.comment {
-		text = fmt.Sprintf("Posted the draft %s#%d upstream as a comment", cfg.Fork, d.number)
-	}
-	return withLink(text, ownDraftURL(cfg, link))
+	return withLink(fmt.Sprintf("Filed the draft %s#%d upstream as an issue", cfg.Fork, d.number), ownDraftURL(cfg, link))
 }
 
 // refuseDraft spends a hard refusal unless this draft's marker is already upstream, which is the publish.
@@ -504,11 +455,7 @@ func (p *poller) settleDraft(ctx context.Context, cfg forkConfig, res draftResul
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), p.writeTimeout)
 	defer cancel()
 	if link != "" {
-		marker := issueMarker
-		if d.comment {
-			marker = commentMarker
-		}
-		record := map[string]any{"body": marker + "\n" + link}
+		record := map[string]any{"body": issueMarker + "\n" + link}
 		if err := p.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, d.number), nil, record, "application/vnd.github+json", nil); err != nil {
 			res.outcome, res.reason = draftRetry, "the publish record could not be written: "+err.Error()
 			return res
@@ -548,43 +495,20 @@ func (d draftDecision) upstreamBody(cfg forkConfig) string {
 	return d.body + "\n\n" + draftMarker(cfg, d.number)
 }
 
-// findPublished finds the owner's upstream issue or comment carrying this draft's marker, whatever kind and target the draft names now.
+// findPublished finds the owner's upstream issue carrying this draft's marker, whatever maintainers did to it or the kind the draft names now.
 func (g *githubClient) findPublished(ctx context.Context, cfg forkConfig, d draftDecision) (*upstreamHit, error) {
 	marker := draftMarker(cfg, d.number)
-	since := url.Values{}
-	if !d.createdAt.IsZero() {
-		since.Set("since", d.createdAt.UTC().Format(time.RFC3339))
-	}
 	q := url.Values{"creator": {cfg.Owner}, "state": {"all"}}
-	for k, v := range since {
-		q[k] = v
+	if !d.createdAt.IsZero() {
+		q.Set("since", d.createdAt.UTC().Format(time.RFC3339))
 	}
 	found, err := listAll(ctx, g, "/repos/"+cfg.Upstream+"/issues", q, "upstream issues to search", func(c issueItem) bool {
 		return !c.isPull() && c.by(cfg.Owner) && c.Number > 0 && strings.Contains(c.Body, marker)
 	})
-	if err != nil {
+	if err != nil || found == nil {
 		return nil, err
 	}
-	if found != nil {
-		return &upstreamHit{post: found, link: issueURL(cfg, found.Number)}, nil
-	}
-	for _, target := range d.targets {
-		found, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, target), since, "upstream comments to search", func(c issueItem) bool {
-			return c.by(cfg.Owner) && c.ID > 0 && strings.Contains(c.Body, marker)
-		})
-		err = rejected(err, "the upstream issue to comment on cannot be found")
-		if err != nil {
-			strict := d.comment && target == d.target
-			if v, _ := classify(err); v == verdictHard && !strict {
-				continue
-			}
-			return nil, err
-		}
-		if found != nil {
-			return &upstreamHit{post: found, link: commentURL(cfg, target, found.ID), comment: true, target: target}, nil
-		}
-	}
-	return nil, nil
+	return &upstreamHit{post: found, link: issueURL(cfg, found.Number)}, nil
 }
 
 func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
@@ -594,16 +518,6 @@ func (g *githubClient) fileIssue(ctx context.Context, cfg forkConfig, d draftDec
 		return "", err
 	}
 	return issueURL(cfg, created.Number), nil
-}
-
-func (g *githubClient) postComment(ctx context.Context, cfg forkConfig, d draftDecision) (string, error) {
-	path := fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Upstream, d.target)
-	var created issueItem
-	err := g.do(ctx, http.MethodPost, path, nil, map[string]any{"body": d.upstreamBody(cfg)}, "application/vnd.github+json", &created)
-	if err := rejected(err, "GitHub refused the upstream comment"); err != nil {
-		return "", err
-	}
-	return commentURL(cfg, d.target, created.ID), nil
 }
 
 // rejected turns the answers that a retry cannot change into a hard refusal.
@@ -633,11 +547,7 @@ func issueURL(cfg forkConfig, number int) string {
 	return fmt.Sprintf("https://github.com/%s/issues/%d", cfg.Upstream, number)
 }
 
-func commentURL(cfg forkConfig, number int, id int64) string {
-	return fmt.Sprintf("%s#issuecomment-%d", issueURL(cfg, number), id)
-}
-
-var draftURL = regexp.MustCompile(`^https://github\.com/([^/]+/[^/]+)/issues/[1-9][0-9]*(#issuecomment-[1-9][0-9]*)?$`)
+var draftURL = regexp.MustCompile(`^https://github\.com/([^/]+/[^/]+)/issues/[1-9][0-9]*$`)
 
 func ownDraftURL(cfg forkConfig, link string) string {
 	if m := draftURL.FindStringSubmatch(link); m != nil && m[1] == cfg.Upstream {
