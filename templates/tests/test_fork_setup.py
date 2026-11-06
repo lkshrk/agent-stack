@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -174,7 +175,13 @@ TEST_IDENTITY = {
 
 def git_env() -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    return {**env, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", **TEST_IDENTITY}
+    return {
+        **env,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CEILING_DIRECTORIES": str(Path(tempfile.gettempdir()).resolve()),
+        **TEST_IDENTITY,
+    }
 
 
 def git(directory: Path, *args: str, check: bool = True) -> str:
@@ -182,28 +189,52 @@ def git(directory: Path, *args: str, check: bool = True) -> str:
     return subprocess.run(command, cwd=directory, check=check, capture_output=True, text=True, env=git_env()).stdout
 
 
-def repository_state() -> tuple[str, str, str]:
+def _digest(path: str) -> str:
+    try:
+        return hashlib.sha256((ROOT / path).read_bytes()).hexdigest() if path else ""
+    except OSError:
+        return ""
+
+
+def repository_state() -> tuple[str, ...]:
     return (
         git(ROOT, "rev-parse", "HEAD", check=False),
-        git(ROOT, "for-each-ref", "refs/tags", "--format=%(objectname) %(refname)", check=False),
+        git(ROOT, "for-each-ref", "--format=%(objectname) %(refname)", check=False),
         git(ROOT, "config", "--get", "core.bare", check=False),
+        _digest(git(ROOT, "rev-parse", "--git-path", "index", check=False).strip()),
+        _digest(git(ROOT, "rev-parse", "--git-path", "config", check=False).strip()),
+        _digest(git(ROOT, "rev-parse", "--git-path", "config.worktree", check=False).strip()),
     )
 
 
-_REPOSITORY_BEFORE = repository_state()
+_REPOSITORY_AT_IMPORT = repository_state()
+
+
+def _require_unchanged(when: str) -> None:
+    if repository_state() != _REPOSITORY_AT_IMPORT:
+        raise AssertionError(f"the real repository at {ROOT} changed {when}: a ref, the index or the config")
+
+
+def setUpModule():
+    _require_unchanged("before the setup tests ran")
 
 
 def tearDownModule():
-    if repository_state() != _REPOSITORY_BEFORE:
-        raise AssertionError(f"the setup tests changed the real repository at {ROOT}: a commit, tag or core.bare")
+    _require_unchanged("during the setup tests")
+
+
+def init_repository(root: Path) -> None:
+    if subprocess.run(["git", "rev-parse", "--git-dir"], cwd=root, capture_output=True, env=git_env()).returncode == 0:
+        raise RuntimeError(f"{root} already resolves to a git repository; refusing to run git init there")
+    git(root, "init", "-q", "-b", "main")
+    if Path(git(root, "rev-parse", "--absolute-git-dir").strip()).resolve() != (root / ".git").resolve():
+        raise RuntimeError("test checkout escaped its temporary directory")
 
 
 def checkout(tagged: bool = True) -> tempfile.TemporaryDirectory:
     directory = tempfile.TemporaryDirectory()
     root = Path(directory.name)
-    git(root, "init", "-q", "-b", "main")
-    if Path(git(root, "rev-parse", "--absolute-git-dir").strip()).resolve() != (root / ".git").resolve():
-        raise RuntimeError("test checkout escaped its temporary directory")
+    init_repository(root)
     (root / "README.md").write_text("x\n")
     (root / "config").mkdir()
     (root / "config" / "public-contributions.yaml").write_text(REGISTRY.read_text())
@@ -609,7 +640,7 @@ class ForkSetupTest(unittest.TestCase):
             copy = Path(directory) / "agent-stack"
             for part in ("scripts", "templates", "policies/omnigent/agent_stack_policies", "config"):
                 shutil.copytree(ROOT / part, copy / part, ignore=shutil.ignore_patterns("__pycache__"))
-            git(copy, "init", "-q", "-b", "main")
+            init_repository(copy)
             git(copy, "add", "-A")
             git(copy, "commit", "-q", "-m", "release")
             git(copy, "tag", "-a", "v9.9.9", "-m", "v9.9.9")
