@@ -23,21 +23,23 @@ Terms used below:
 
 ## Add a fork
 
-Do these steps in order.
+Do these steps in order. The agents' token must never cover a fork that has no rulesets yet, so the policy line comes after the setup.
 
 1. **Registry entry.** Add the upstream to `config/public-contributions.yaml`, then run `go generate ./cmd/contribution-approver`. That renders `cmd/contribution-approver/forks.json`, which the approver embeds. `templates/tests/test_approver_config.py` fails if the two differ.
-2. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-omnigent-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. Today the agents' `gh` and git credential wrappers use this token only for `lkshrk/omnigent`, read from `/agent-secrets/github/omnigent`.
-3. **Release.** Merge to `main`. semantic-release tags the release and builds the images. Pin that release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry.
-4. **Setup.** Run the setup as the owner, from a clean checkout of the release tag:
+2. **Release.** Merge to `main`. semantic-release tags the release and builds the images.
+3. **Setup.** Run the setup as the owner, from a clean checkout of the release tag, then check the result:
 
    ```sh
    git clone https://github.com/lkshrk/agent-stack.git && cd agent-stack
    git checkout v<release>
    gh auth refresh -s workflow
    scripts/agent-stack-fork-setup <name>
+   scripts/agent-stack-fork-setup <name> --check
    ```
 
-   `<name>` is the registry key, for example `omnigent`.
+   `<name>` is the registry key, for example `omnigent`. `--check` must report no drift.
+4. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-omnigent-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. Today the agents' `gh` and git credential wrappers use this token only for `lkshrk/omnigent`, read from `/agent-secrets/github/omnigent`.
+5. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry.
 
 The setup refuses to run unless all of these hold:
 
@@ -65,18 +67,23 @@ A second run changes nothing. If the setup says GitHub doesn't list the CI workf
 ### Approve a fork PR
 
 1. An agent opens a fork PR and labels it `upstream-ready` once `contribution-ci` is green.
-2. The approver announces it to the Signal group once per head commit: title, a body excerpt, the commit, diff size, CI result, link and a code. It announces only when all of these hold:
-   - CI on the head commit is green;
+2. The approver announces it to the Signal group once per head commit: title, the first 300 characters of the body, the commit, diff size, CI result, link and a code. It announces only when all of these hold:
+   - CI on the head commit is green: every `contribution-ci` run for the commit completed with the conclusion `success`;
    - the title follows the registry's `title_format`;
-   - the diff doesn't touch `.github/`;
+   - the diff isn't empty or too large and doesn't touch `.github/`;
    - the diffs against the fork's and the upstream's default branch list the same files;
    - the fork PR's base was never changed.
-3. The owner approves in one of two ways:
+
+   A ready fork PR that fails one of these checks gets no Signal message. The approver only logs it.
+3. Open the link and read the whole body: the announcement shows only an excerpt, but the whole body is published.
+4. After the announcement, the owner approves in one of two ways:
    - submit an approving review on the fork PR in GitHub, or
    - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead.
-4. The approver publishes on its next poll, within about a minute.
+5. The approver publishes on its next poll, within about a minute.
 
-The owner's newest approving, changes-requested or dismissed review decides. Only an approval publishes, and it publishes exactly the commit it was given on. An approval counts only if it came after the announcement of that commit, with the title and body unchanged since. After an approver restart no announcement is known, so the fork PR is announced again and needs a new approval.
+The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. An approving review in GitHub doesn't need the code.
+
+The owner's newest approving, changes-requested or dismissed review decides. Only an approval publishes, and it publishes exactly the commit it was given on. An approval counts only if it came after the announcement of that commit, with the title and body unchanged since. An approval given before the announcement, for example while CI still runs, is ignored: approve again after the announcement. After an approver restart no announcement is known, so the fork PR is announced again and needs a new approval.
 
 What gets published:
 
@@ -94,7 +101,9 @@ Owner notices for fork PRs:
 | … is already upstream: `<link>`; later changes to the pull request are not published. | The approved commit is upstream, or a closed upstream pull request carried it; later fork PR edits don't count |
 | Not publishing …: `<reason>`. The approval was dismissed; approve a new announcement to publish. | A hard refusal; the approval is spent |
 | Not publishing …: `<reason>`. The approval could not be dismissed yet; the approver keeps trying. | A hard refusal whose dismissal failed; the dismissal is retried |
+| Not publishing …: `<reason>`. No approval was dismissed. | A hard refusal that found no single approval to dismiss, for example when the fork PR has more reviews than the approver reads |
 | Not publishing …: the upstream pull request was closed or merged after the approval: `<link>` | Approve again to open a new upstream pull request |
+| Not publishing …: a closed or merged upstream pull request already carried `<commit>`: `<link>` | That commit was upstream once and is never published again; a new commit needs a new approval |
 | Publishing … waits: the upstream head is taken or not visible yet … | GitHub refused to open the upstream pull request: another open one uses the publish branch, or the branch isn't visible yet; retried on every poll |
 | Publishing … waits: moving the publish branch needs the fork synced first … | GitHub refused the branch move because the PAT has no `workflow` scope; sync the fork (see Upkeep); retried on every poll |
 
@@ -103,13 +112,13 @@ Each notice is sent once per approval and reason. A notice that Signal doesn't a
 ### Approve an issue draft
 
 1. An agent opens a fork issue labelled `upstream-issue`.
-2. The owner adds the `approved-upstream` label. The label counts only if the owner added it; anyone else's is removed without a notice.
+2. The owner adds the `approved-upstream` label. The label counts only if the owner added it; anyone else's is removed without a notice. If an agent removes and re-adds the label, the newest label is the agent's, so it is removed and the owner's approval is gone: add the label again.
 3. On its next poll the approver files one upstream issue with exactly the draft's title and its body, followed by a blank line and a hidden marker.
 4. It comments a publish record with the upstream link on the fork issue, removes `approved-upstream` and closes the fork issue.
 
 The marker is `<!-- contribution-fork:<fork>#<n> -->`, for example `<!-- contribution-fork:lkshrk/omnigent#12 -->`. Every upstream issue body the approver files carries one. GitHub hides it in the rendered issue, but it shows in the raw markdown and in the edit box. The approver finds earlier publishes by this marker, so leave it in place.
 
-Removing `approved-upstream` spends the approval: a reopened draft never publishes again. Adding the label again approves the current text.
+Removing `approved-upstream` spends the approval: a reopened draft never publishes again. Adding the label again to a draft that wasn't published approves its current text. On a published draft, a new label only closes it again with the notice that it already has a publish record.
 
 A draft is refused when any of these is true:
 
@@ -139,21 +148,22 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 
 ## Behaviour changes
 
-- An approval given while CI is still running is kept. It publishes once CI is green.
-- A hard refusal spends the approval. On a fork PR the approver dismisses the owner's approval and gives the reason. On an issue draft it removes `approved-upstream`. Examples: an edit after the approval, a `.github/` change, mismatched diffs, failed CI, a changed base, or a closed and reopened fork PR.
-- A transient refusal changes nothing and retries on the next poll. Examples: CI still running, or a GitHub API error.
+- The owner approves after the Signal announcement, which comes once CI is green. An approval given before the announcement is ignored.
+- If CI on the approved commit is re-run after the announcement, the approval waits for that run and publishes once it is green.
+- A hard refusal spends the approval. On a fork PR the approver dismisses the owner's approval and gives the reason. On an issue draft it removes `approved-upstream`. Examples: an edit after the approval, a `.github/` change, mismatched diffs, CI that completed without `success` (`neutral` and `skipped` count as failed), a changed base, or a closed and reopened fork PR.
+- A transient refusal changes nothing and retries on the next poll. Examples: a CI re-run still running, or a GitHub API error.
 - If the approver is down, approvals wait and publish on its first poll after it is back.
 
 ## Accepted residuals
 
 - **A maintainer removes the trace.** The approver files an issue draft, but its answer is lost or it restarts before it writes the publish record. If a maintainer deletes the marker from the upstream issue, or transfers, deletes or converts that issue, in that window, the next poll files the draft a second time.
-- **I3: an edit in the same second as the label.** For a draft whose body was never edited, only GitHub's `updated_at` shows later activity, and only to the second. If GitHub ever drops an edit from a draft's edit history, an edit in the same second as the owner's label would publish unseen. A go-live check covers whether GitHub drops edits.
+- **An edit in the same second as the label.** For a draft whose body was never edited, only GitHub's `updated_at` shows later activity, and only to the second. If GitHub ever drops an edit from a draft's edit history, an edit in the same second as the owner's label would publish unseen. A go-live check covers whether GitHub drops edits; if it does, issue drafts don't go live until draft approvals are bound to a Signal announcement of the draft's content.
 - **The unedited check on publish records works at second precision.** A publish record counts as unedited when its `updated_at` equals its `created_at`. An edit in the same second the approver wrote the record passes as unedited. An agent would have to beat the approver's own write.
-- **A double notice (review 8, m-1).** If removing `approved-upstream` after a refusal fails and an agent then removes `upstream-comment`, the owner gets a second, different refusal notice for the same approval. Both refusals are true.
+- **A second refusal notice for one approval.** If removing `approved-upstream` after a refusal fails and an agent then removes `upstream-comment`, the owner gets a second, different refusal notice for the same approval. Both refusals are true.
 
 ## Go-live checks
 
-Prove each of these on a throwaway fork before the first real contribution:
+Prove each of these before the first real contribution. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
 
 - [ ] The setup clears the fork's "Actions disabled" banner through the API.
 - [ ] Disabling a workflow works before Actions are enabled. If it does, the setup can disable upstream workflows before it enables Actions.
@@ -170,8 +180,8 @@ Prove each of these on a throwaway fork before the first real contribution:
 - [ ] A later reject or dismissal stops a republish.
 - [ ] Closing the upstream pull request doesn't reopen it.
 - [ ] One issue draft publishes, and a comment draft is refused with the comment-drafts notice.
-- [ ] A draft's `updated_at` equals the second of its `approved-upstream` labeled event (R-C8).
-- [ ] GitHub never drops `userContentEdits` revision nodes (I3).
+- [ ] A draft's `updated_at` equals the second of its `approved-upstream` labeled event.
+- [ ] GitHub never drops `userContentEdits` revision nodes. If it does, issue drafts don't go live: draft approvals must first be bound to a Signal announcement of the draft's content.
 - [ ] `Label.updatedAt` when a label is created and applied in the same second.
 - [ ] A collaborator's edit of an owner comment bumps its `updated_at`.
 - [ ] Reactions on a comment, or hiding it, bump its `updated_at`.
@@ -179,6 +189,9 @@ Prove each of these on a throwaway fork before the first real contribution:
 - [ ] The issues list with `since` includes closed issues.
 - [ ] Renaming a repository label rewrites the name in past `labeled` events.
 - [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice.
+- [ ] Opening an upstream pull request on a head that another open pull request uses, and right after creating the branch, fails with "A pull request already exists" or `field: head, code: invalid`. The approver waits on those texts; other wording would count as a hard refusal and dismiss a valid approval.
+- [ ] In h-cloud, `CONTRIBUTION_FORKS` is dropped in the same change as the `agent-tools` pin bump, because 1.22.0 exits without it.
+- [ ] Afterwards, remove the stand-in's registry entry, its policy line and both repositories.
 
 ## Working on a contribution
 
@@ -191,4 +204,4 @@ Prove each of these on a throwaway fork before the first real contribution:
 - Keep the fork current with GitHub's "Sync fork". It merges upstream into the default branch and keeps the CI commit.
 - After every "Sync fork", run `scripts/agent-stack-fork-setup <name> --check` from a release tag checkout. Workflows that upstream added arrive enabled, and `--check` reports them as drift. `--check` writes nothing; it only warns when the checkout isn't a clean release tag, and it still needs the `workflow` scope. Fix drift by running the setup without `--check`.
 - After a registry entry changes, release and pin it in h-cloud, then run the setup again.
-- Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver tells the owner once per approval that the move needs the fork synced first, and retries on every poll. Sync the fork and have the agent rebase. Don't widen the token.
+- Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver tells the owner once per approval that the move needs the fork synced first, and retries on every poll. Syncing the fork clears the wait, and the approval then publishes. Rebase only if the sync doesn't clear it; a rebase makes a new head that needs a new approval. Don't widen the token.

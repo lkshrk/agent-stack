@@ -61,12 +61,12 @@ Fork settings come from `forks.json`. It is embedded in the binary and rendered 
 
 - It checks that the token belongs to the fork owner, and that GitHub reports the fork as owned by that owner with the registry upstream as its parent.
 - It lists open pull requests on the default branch. A pull request is ready when it is labelled `upstream-ready`, its head is a fork branch other than `upstream/*`, and its base is the fork's default branch. Each ready pull request gets 20 s.
-- It then polls issue drafts in their own 45 s window, 20 s per draft.
+- It then polls issue drafts in their own 45 s window, 20 s per draft, so a stalled fork can hold one iteration for up to 90 s.
 - Only the poll loop publishes. Every list is read to the end; when publishing, more pages than the cap refuse.
 
-**Announcements.** A ready pull request is announced once per head SHA to the Signal group: title, a body excerpt, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes.
+**Announcements.** A ready pull request is announced once per head SHA to the Signal group: title, the first 300 runes of the body, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes.
 
-- It is announced only when CI on the head is green. A title that doesn't follow `title_format`, a changed base, or an upstream diff that is empty, too large, touches `.github/` or differs from the fork-relative diff is logged once per head and not announced.
+- It is announced only when every CI run on the head completed with `success`. A title that doesn't follow `title_format`, a changed base, or an upstream diff that is empty, too large, touches `.github/` or differs from the fork-relative diff is logged once per head and not announced.
 - A new head SHA replaces the code. A pull request that stops being ready loses it.
 - A head the owner already reviewed is not announced, unless the approval can't be bound to an announcement (after a restart, or when the text changed). Then it is announced once more.
 - Codes live in memory, so a restart announces again with new codes. That skips a pull request whose approved commit is already on its upstream pull request, or was carried by a closed or merged one.
@@ -84,10 +84,10 @@ Fork settings come from `forks.json`. It is embedded in the binary and rendered 
 - the approval came after the announcement of that commit, and the title and body are unchanged since (the review ID is greater than the newest review when the announcement went out);
 - the title wasn't renamed and the body wasn't edited at or after the review, by the GraphQL edit history;
 - the pull request is open, labelled and was never closed and reopened after the review, and its base was never changed;
-- CI on the commit completed green;
+- every CI run and check run on the commit completed with `success`; any other conclusion refuses;
 - the fork-relative and upstream-relative diffs list the same files and blobs, and neither touches `.github/`.
 
-CI that is still running is a transient refusal, so an approval given while CI runs publishes once CI is green. A hard refusal dismisses the owner's approval with the reason, which spends it. Transient refusals retry on the next poll.
+An approval before the announcement fails the first rule, so the owner approves after the announcement, which comes once CI is green. CI re-run after the announcement is a transient refusal: the approval waits for the run. A hard refusal dismisses the owner's approval with the reason, which spends it. Transient refusals retry on the next poll.
 
 The write points `upstream/pr-<N>` at the commit, then opens the upstream pull request (`maintainer_can_modify: false`), or, if one is open, updates its title and body after the branch move. Once the branch matches, the text is never written again.
 
