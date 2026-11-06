@@ -4,6 +4,7 @@ set -uo pipefail
 bin=${AGENT_BIN:-/opt/agent/bin}
 registry=/opt/agent-stack/public-contributions.yaml
 policies=/opt/agent-stack/policies/agent_stack_policies
+python=/opt/venv/bin/python3
 fail=0
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
@@ -26,6 +27,16 @@ break_registry() {
 restore_registry() {
   cp -p "$dir/registry.orig" "$registry"
   if [[ -e $policies.off ]]; then mv "$policies.off" "$policies"; fi
+}
+
+stub_python() {
+  mv "$python" "$python.real"
+  printf '#!/bin/sh\nexit 1\n' >"$python"
+  chmod 755 "$python"
+}
+
+restore_python() {
+  mv -f "$python.real" "$python"
 }
 
 expect() {
@@ -83,8 +94,15 @@ PY
     rm -f "$dir/code"
     expect "git: a $state registry never hands out GIT_TOKEN" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
     printf code-token >"$dir/code"
+    "$bin/contribution-fork" lkshrk/omnigent 2>/dev/null
+    expect "contribution-fork exits 2 when the registry is $state" "$?" 2
     restore_registry
   done
+  stub_python
+  expect "git: a fork check that exits 1 hands out no token" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
+  printf 'protocol=https\nhost=github.com\npath=lkshrk/omnigent.git\n\n' | "$bin/git-credential-agent" get >/dev/null 2>&1
+  expect "git: a fork check that exits 1 fails the helper" "$?" 1
+  restore_python
 else
   echo "skip registry checks (need root to rewrite $registry)"
 fi
@@ -114,6 +132,9 @@ if [[ $(id -u) == 0 && -x /usr/local/bin/gh ]]; then
       expect "gh: a $state registry leaves calls without --repo alone" "$("$bin/gh" pr list)" code-token
       restore_registry
     done
+    stub_python
+    expect "gh: a fork check that exits 1 stops a --repo call" "$("$bin/gh" pr list --repo lkshrk/omnigent 2>/dev/null; echo "exit=$?")" exit=1
+    restore_python
   fi
   mv /usr/local/bin/gh.real /usr/local/bin/gh
 else
