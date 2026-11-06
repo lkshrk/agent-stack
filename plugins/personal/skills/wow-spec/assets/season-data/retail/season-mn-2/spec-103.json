@@ -5,13 +5,13 @@
   "game": "retail",
   "season": "season-mn-2",
   "verified_patch": "12.1.5",
-  "verified_at": "2026-10-26",
+  "verified_at": "2026-11-06",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; alternatives are conditional, not simultaneous selections.",
   "sources": [
     {
       "url": "https://www.method.gg/guides/feral-druid/stats-races-and-consumables",
-      "updated": "2026-10-16"
+      "updated": "2026-10-28"
     },
     {
       "url": "https://murlok.io/druid/feral/m+",
