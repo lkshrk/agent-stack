@@ -145,9 +145,25 @@ class FakeFork:
         return 204, None
 
 
-def git(directory: Path, *args: str) -> str:
+def git(directory: Path, *args: str, check: bool = True) -> str:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True, text=True, env=env).stdout
+    return subprocess.run(["git", *args], cwd=directory, check=check, capture_output=True, text=True, env=env).stdout
+
+
+def repository_state() -> tuple[str, str, str]:
+    return (
+        git(ROOT, "rev-parse", "HEAD", check=False),
+        git(ROOT, "for-each-ref", "refs/tags", "--format=%(objectname) %(refname)", check=False),
+        git(ROOT, "config", "--get", "core.bare", check=False),
+    )
+
+
+_REPOSITORY_BEFORE = repository_state()
+
+
+def tearDownModule():
+    if repository_state() != _REPOSITORY_BEFORE:
+        raise AssertionError(f"the setup tests changed the real repository at {ROOT}: a commit, tag or core.bare")
 
 
 def checkout(tagged: bool = True) -> tempfile.TemporaryDirectory:
