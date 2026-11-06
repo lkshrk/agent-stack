@@ -1072,3 +1072,65 @@ func TestAnUnreadableUpstreamNeverReannouncesAnUnboundApproval(t *testing.T) {
 		t.Fatalf("messages = %q, want only %q", msgs, want)
 	}
 }
+
+const workflowScopeMessage = "refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope"
+
+func TestAWorkflowScopeRefusalIsToldOncePerApproval(t *testing.T) {
+	refs := "/repos/" + testFork + "/git/refs"
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			rv := announcedAndApproved(t, h)
+			h.gh.failWith(http.MethodPost, refs, fakeFailure{Status: status, Message: workflowScopeMessage})
+			before := len(h.signal.messages())
+
+			pollTimes(h, 3)
+
+			msgs := ownerNotices(messagesSince(h, before))
+			if len(msgs) != 1 || !strings.Contains(msgs[0], "Publishing "+testFork+"#7 at "+shaA+" waits") || !strings.Contains(msgs[0], workflowScopeReason) {
+				t.Fatalf("messages = %q, want one sync notice", msgs)
+			}
+			if n := h.gh.callCount(http.MethodPost, refs); n != 3 {
+				t.Fatalf("branch moves = %d, want one per poll", n)
+			}
+			dismissals := "/repos/lkshrk/omnigent/pulls/7/reviews/" + itoa(int(rv.id)) + "/dismissals"
+			if n := h.gh.callCount(http.MethodPut, dismissals); n != 0 {
+				t.Fatalf("dismissals = %d, want none", n)
+			}
+			if n := h.gh.callCount(http.MethodPost, upPulls); n != 0 {
+				t.Fatalf("upstream POSTs = %d, want none", n)
+			}
+			wantNoAttackerText(t, msgs)
+			for _, m := range msgs {
+				if strings.Contains(m, ".github/workflows") {
+					t.Errorf("owner message %q repeats GitHub's text", m)
+				}
+			}
+
+			h.clock.advance(time.Minute)
+			approve(h, shaA)
+			before = len(h.signal.messages())
+			pollTimes(h, 2)
+			if n := countContaining(ownerNotices(messagesSince(h, before)), workflowScopeReason); n != 1 {
+				t.Fatalf("messages = %q, want the notice once for the new approval", messagesSince(h, before))
+			}
+
+			h.gh.fail(http.MethodPost, refs, 0)
+			before = len(h.signal.messages())
+			pollTimes(h, 1)
+			if n := countContaining(messagesSince(h, before), "Published "+testFork+"#7"); n != 1 {
+				t.Fatalf("messages = %q, want the publish once the fork is synced", messagesSince(h, before))
+			}
+		})
+	}
+	t.Run("another refusal of the branch move", func(t *testing.T) {
+		h := publishable(t, shaA, nil)
+		announcedAndApproved(t, h)
+		h.gh.failWith(http.MethodPost, refs, fakeFailure{Status: http.StatusForbidden, Message: "Resource not accessible by personal access token"})
+		before := len(h.signal.messages())
+		pollTimes(h, 2)
+		if msgs := messagesSince(h, before); countContaining(msgs, workflowScopeReason) != 0 {
+			t.Fatalf("messages = %q, want no sync notice", msgs)
+		}
+	})
+}

@@ -863,3 +863,41 @@ func TestPublishRefusesOtherUpstreamPOSTRejections(t *testing.T) {
 		})
 	}
 }
+
+func TestPublishWaitsWhenTheBranchMoveNeedsTheWorkflowScope(t *testing.T) {
+	cases := map[string]struct {
+		setup  func(t *testing.T, h *harness)
+		method string
+		path   string
+	}{
+		"creating the branch": {
+			setup:  func(t *testing.T, h *harness) { approve(h, shaA) },
+			method: http.MethodPost, path: "/repos/lkshrk/omnigent/git/refs",
+		},
+		"moving the branch of an open upstream pull request": {
+			setup: func(t *testing.T, h *harness) {
+				publishedOnce(t, h)
+				approveNewHead(h, shaB, "feat(web): add the better thing")
+			},
+			method: http.MethodPatch, path: forkPublishRef,
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := publishable(t, shaA, nil)
+			c.setup(t, h)
+			h.gh.failWith(c.method, c.path, fakeFailure{Status: http.StatusUnprocessableEntity, Message: workflowScopeMessage})
+			before := len(h.gh.writes())
+			r := publishPR(t, h)
+			wantOutcome(t, r, outcomeRetry)
+			if r.reason != workflowScopeReason || r.dismissed {
+				t.Fatalf("result = %+v", r)
+			}
+			for _, w := range h.gh.writes()[before:] {
+				if w.Method != c.method || w.Path != c.path {
+					t.Fatalf("write %s %s after the refused branch move", w.Method, w.Path)
+				}
+			}
+		})
+	}
+}

@@ -138,7 +138,7 @@ func (p *poller) report(ctx context.Context, cfg forkConfig, k prKey, res publis
 		if d.reviewID != 0 && d.verdict == verdictPublish {
 			p.retried[k] = attempt
 		}
-		if res.reason == headTakenReason {
+		if res.reason == headTakenReason || res.reason == workflowScopeReason {
 			p.tellOnce(ctx, k, reasonKey, "Publishing "+name+at+" waits: "+res.reason+". It is tried again on every poll.")
 		}
 	}

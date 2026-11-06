@@ -96,6 +96,7 @@ Owner notices for fork PRs:
 | Not publishing …: `<reason>`. The approval could not be dismissed yet; the approver keeps trying. | A hard refusal whose dismissal failed; the dismissal is retried |
 | Not publishing …: the upstream pull request was closed or merged after the approval: `<link>` | Approve again to open a new upstream pull request |
 | Publishing … waits: the upstream head is taken or not visible yet … | GitHub refused to open the upstream pull request: another open one uses the publish branch, or the branch isn't visible yet; retried on every poll |
+| Publishing … waits: moving the publish branch needs the fork synced first … | GitHub refused the branch move because the PAT has no `workflow` scope; sync the fork (see Upkeep); retried on every poll |
 
 Each notice is sent once per approval and reason. A notice that Signal doesn't accept waits for the next poll.
 
@@ -177,6 +178,7 @@ Prove each of these on a throwaway fork before the first real contribution:
 - [ ] The HTML comment marker survives edits in GitHub's web editor.
 - [ ] The issues list with `since` includes closed issues.
 - [ ] Renaming a repository label rewrites the name in past `labeled` events.
+- [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice.
 
 ## Working on a contribution
 
@@ -189,4 +191,4 @@ Prove each of these on a throwaway fork before the first real contribution:
 - Keep the fork current with GitHub's "Sync fork". It merges upstream into the default branch and keeps the CI commit.
 - After every "Sync fork", run `scripts/agent-stack-fork-setup <name> --check` from a release tag checkout. Workflows that upstream added arrive enabled, and `--check` reports them as drift. `--check` writes nothing; it only warns when the checkout isn't a clean release tag, and it still needs the `workflow` scope. Fix drift by running the setup without `--check`.
 - After a registry entry changes, release and pin it in h-cloud, then run the setup again.
-- Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver retries on every poll and logs the refusal. Sync the fork and have the agent rebase. Don't widen the token.
+- Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver tells the owner once per approval that the move needs the fork synced first, and retries on every poll. Sync the fork and have the agent rebase. Don't widen the token.

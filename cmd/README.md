@@ -94,6 +94,7 @@ The write points `upstream/pr-<N>` at the commit, then opens the upstream pull r
 - Upstream pull requests count only when their author is the owner and their head repository is the fork; they are listed with `state=all`.
 - A commit that a closed or merged upstream pull request carried is never republished. A different commit needs an owner approval newer than the close.
 - A 422 "A pull request already exists" or `head invalid` on opening waits; other 422s refuse.
+- A branch move that GitHub refuses "without `workflow` scope" waits, and the group is told once per approval to sync the fork first.
 - Once a commit is upstream, later changes to the fork pull request never dismiss its approval; the group is told once that later changes are not published.
 - A settled pull request costs its reviews list and the pull request read; GETs revalidate with `If-None-Match`.
 

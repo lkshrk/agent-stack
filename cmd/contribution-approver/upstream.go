@@ -43,6 +43,8 @@ type publishResult struct {
 
 const upstreamUnknownReason = "the upstream pull requests could not be read, so the refusal waits"
 
+const workflowScopeReason = "moving the publish branch needs the fork synced first, because GitHub wants the workflow scope for the approved commit's history"
+
 const carriedReason = "a closed or merged upstream pull request already carried "
 
 func (r publishResult) carried() bool {
@@ -196,7 +198,7 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 			return nil
 		}
 		res.upstream, res.upstreamURL = open[0].Number, upstreamURL(cfg, open[0].Number)
-		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
+		if err := g.moveBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
 			return err
 		}
 		text := map[string]any{"title": d.title, "body": d.body}
@@ -215,7 +217,7 @@ func (g *githubClient) publishUpstream(ctx context.Context, cfg forkConfig, d pu
 		return nil
 	}
 	if !exists || current != d.sha {
-		if err := g.pointBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
+		if err := g.moveBranch(ctx, cfg.Fork, branch, d.sha, exists); err != nil {
 			return err
 		}
 	}
@@ -302,6 +304,22 @@ func (g *githubClient) branchSHA(ctx context.Context, fork, branch string) (stri
 		return "", false, fmt.Errorf("GitHub GET /repos/%s/git/ref/heads/%s: unexpected ref", fork, branch)
 	}
 	return ref.Object.SHA, true, nil
+}
+
+func (g *githubClient) moveBranch(ctx context.Context, fork, branch, sha string, exists bool) error {
+	err := g.pointBranch(ctx, fork, branch, sha, exists)
+	var api *apiError
+	if errors.As(err, &api) && needsWorkflowScope(api.body) {
+		return &refusal{verdictTransient, workflowScopeReason}
+	}
+	return err
+}
+
+func needsWorkflowScope(body []byte) bool {
+	var res struct {
+		Message string `json:"message"`
+	}
+	return json.Unmarshal(body, &res) == nil && strings.Contains(res.Message, "without `workflow` scope")
 }
 
 func (g *githubClient) pointBranch(ctx context.Context, fork, branch, sha string, exists bool) error {
