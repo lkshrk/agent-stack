@@ -190,7 +190,7 @@ jobs:
         uses: anthropics/claude-code-action@c0949c50a78c1ec8ce2647db36629b870e715d0c # v1.0.268
         env:
           ANTHROPIC_BASE_URL: ${{ steps.provider.outputs.base_url }}
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: claude-haiku
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: anthropic/claude-haiku
         with:
           anthropic_api_key: ${{ secrets.WOW_REFRESH_API_KEY }}
           github_token: ${{ github.token }}
