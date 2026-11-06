@@ -39,8 +39,10 @@ Do these steps in order. The agents' token must never cover a fork that has no r
    ```
 
    `<name>` is the registry key, for example `omnigent`. `--check` must report no drift.
-5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-omnigent-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. Today the agents' `gh` and git credential wrappers use this token only for `lkshrk/omnigent`, read from `/agent-secrets/github/omnigent`.
-6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry.
+5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-fork-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. The token minter mints this policy as the `forks` key, and Polly's sandboxes mount it at `/agent-secrets/github/forks`.
+6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' `gh` and git credential wrappers use the `forks` token for every fork in that copy, and the `code` token for everything else.
+
+For one release, the wrappers fall back to the older `omnigent` key (`/agent-secrets/github/omnigent`, policy `agent-stack-omnigent-writer`) when `forks` is missing. After that release, the `omnigent` key and its policy are removed. If the image's registry can't be read, the wrappers refuse instead of falling back to the `code` token.
 
 The setup refuses to run unless all of these hold:
 

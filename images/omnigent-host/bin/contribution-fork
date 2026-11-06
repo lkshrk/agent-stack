@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Exits 0 if the repository is a registered contribution fork, 1 if not, 2 if the registry is unreadable.
+set -euo pipefail
+
+exec /opt/venv/bin/python3 -I - "$@" <<'PY'
+import sys
+
+from agent_stack_policies.public_contributions import RUNTIME_REGISTRY, Registry, RegistryError
+
+
+def slug(spec: str) -> str:
+    value = spec.strip().lower()
+    for prefix in ("https://github.com/", "github.com/"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+            break
+    value = value.rstrip("/")
+    return value[:-4] if value.endswith(".git") else value
+
+
+def main(argv: list[str]) -> None:
+    if len(argv) != 1:
+        print("usage: contribution-fork <owner/repo>", file=sys.stderr)
+        raise SystemExit(2)
+    try:
+        registry = Registry.load(RUNTIME_REGISTRY)
+    except RegistryError as error:
+        print(f"contribution-fork: {error}", file=sys.stderr)
+        raise SystemExit(2)
+    forks = {item.fork.lower() for item in registry.repositories}
+    raise SystemExit(0 if slug(argv[0]) in forks else 1)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
+PY
