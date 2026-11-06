@@ -283,24 +283,46 @@ func TestOnlyAnOwnerRecordCounts(t *testing.T) {
 }
 
 func TestAnOwnerRecordIsFoundOnEveryPageAndItsLinkIsNotTrusted(t *testing.T) {
-	for _, marker := range []string{issueMarker, commentMarker} {
-		for _, mk := range []func(*testing.T) *harness{issueDraft, commentDraft} {
-			h := mk(t)
-			for range 150 {
-				h.gh.comment(testFork, draftNumber, testAgent, "noise")
-			}
-			h.gh.comment(testFork, draftNumber, testOwner, marker+"\nhttps://evil.example/@lkshrk")
-			pollTimes(h, 1)
-			if got := writeSummary(h.gh.writes()); strings.Join(got, ",") != "DELETE "+forkDraftApproval+",PATCH "+forkDraft {
-				t.Fatalf("writes = %v, want only the spend and the close", got)
-			}
-			msgs := h.signal.messages()
-			if len(msgs) != 1 || strings.Contains(msgs[0], "https://") {
-				t.Fatalf("messages = %q, want one link-free record notice", msgs)
-			}
-			wantNoAttackerText(t, msgs)
+	for _, mk := range []func(*testing.T) *harness{issueDraft, commentDraft} {
+		h := mk(t)
+		for range 150 {
+			h.gh.comment(testFork, draftNumber, testAgent, "noise")
 		}
+		h.gh.comment(testFork, draftNumber, testOwner, issueMarker+"\nhttps://evil.example/@lkshrk")
+		pollTimes(h, 1)
+		if got := writeSummary(h.gh.writes()); strings.Join(got, ",") != "DELETE "+forkDraftApproval+",PATCH "+forkDraft {
+			t.Fatalf("writes = %v, want only the spend and the close", got)
+		}
+		msgs := h.signal.messages()
+		if len(msgs) != 1 || strings.Contains(msgs[0], "https://") {
+			t.Fatalf("messages = %q, want one link-free record notice", msgs)
+		}
+		wantNoAttackerText(t, msgs)
 	}
+}
+
+func TestACommentMarkerIsNotAPublishRecord(t *testing.T) {
+	const legacy = "<!-- contribution-fork:upstream-comment -->"
+	t.Run("issue draft", func(t *testing.T) {
+		h := newDraft(t, issueLabel, draftTitle, draftBody)
+		h.gh.comment(testFork, draftNumber, testOwner, legacy+"\nhttps://evil.example")
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 1)
+		if up := upstreamWrites(h.gh.writes()); len(up) != 1 {
+			t.Fatalf("upstream writes = %v, want the draft filed", writeSummary(up))
+		}
+	})
+	t.Run("comment draft", func(t *testing.T) {
+		h := newDraft(t, commentLabel, "Comment on #42", commentBody)
+		h.gh.comment(testFork, draftNumber, testOwner, legacy+"\nhttps://evil.example")
+		h.clock.advance(time.Minute)
+		approveDraft(h)
+		h.clock.advance(time.Minute)
+		pollTimes(h, 1)
+		wantRefused(t, h, 0, "comment drafts are not published yet; file it as an issue draft or post it by hand")
+	})
 }
 
 func TestADraftApprovedByAnyoneButTheOwnerIsNotPublished(t *testing.T) {
@@ -854,7 +876,7 @@ func TestAnEditedDraftIgnoresActivityAfterTheApproval(t *testing.T) {
 func ownerRecord(t *testing.T, h *harness) fakeComment {
 	t.Helper()
 	for _, c := range draftState(h).comments {
-		if c.user == testOwner && (strings.HasPrefix(c.body, issueMarker) || strings.HasPrefix(c.body, commentMarker)) {
+		if c.user == testOwner && strings.HasPrefix(c.body, issueMarker) {
 			return *c
 		}
 	}
@@ -1534,7 +1556,7 @@ func TestAnUneditedRecordWinsOverAnEditedOne(t *testing.T) {
 	h.clock.advance(time.Minute)
 	pollTimes(h, 1)
 	h.clock.advance(time.Minute)
-	editOwnerComment(h, testFork, draftNumber, commentMarker+"\nhttps://evil.example")
+	editOwnerComment(h, testFork, draftNumber, issueMarker+"\nhttps://evil.example")
 	h.gh.reopen(testFork, draftNumber, testOwner)
 	approveDraft(h)
 	h.clock.advance(time.Minute)

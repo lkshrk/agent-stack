@@ -137,8 +137,7 @@ func (g *githubClient) spend(ctx context.Context, cfg forkConfig, res publishRes
 	return res
 }
 
-// settledUpstream reports, without writing, whether d's approval is already Current or blocked by a closed upstream pull request.
-// A hard refusal from the lookup (several open pull requests) means "not upstream"; any other error is returned.
+// settledUpstream reports, without writing, whether d is Current or blocked by a closed upstream pull request; a lookup refusal means not upstream.
 func (g *githubClient) settledUpstream(ctx context.Context, cfg forkConfig, d publishDecision) (publishResult, bool, error) {
 	res := publishResult{decision: d, outcome: outcomeNothing}
 	if err := g.publishUpstream(ctx, cfg, d, &res, false); err != nil {

@@ -19,7 +19,6 @@ const (
 	issueLabel    = "upstream-issue"
 	commentLabel  = "upstream-comment"
 	issueMarker   = "<!-- contribution-fork:upstream-issue -->"
-	commentMarker = "<!-- contribution-fork:upstream-comment -->"
 )
 
 type ghUser struct {
@@ -210,7 +209,7 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 	}
 	var edited bool
 	record, err := listAll(ctx, g, fmt.Sprintf("/repos/%s/issues/%d/comments", cfg.Fork, number), nil, "comments on the draft", func(c issueItem) bool {
-		if record := c.by(cfg.Owner) && (strings.HasPrefix(c.Body, issueMarker) || strings.HasPrefix(c.Body, commentMarker)); !record {
+		if record := c.by(cfg.Owner) && strings.HasPrefix(c.Body, issueMarker); !record {
 			return false
 		}
 		edited = edited || !c.unedited()
