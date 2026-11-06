@@ -25,9 +25,10 @@ Terms used below:
 
 Do these steps in order. The agents' token must never cover a fork that has no rulesets yet, so the policy line comes after the setup.
 
-1. **Registry entry.** Add the upstream to `config/public-contributions.yaml`, then run `go generate ./cmd/contribution-approver`. That renders `cmd/contribution-approver/forks.json`, which the approver embeds. `templates/tests/test_approver_config.py` fails if the two differ.
-2. **Release.** Merge to `main`. semantic-release tags the release and builds the images.
-3. **Setup.** Run the setup as the owner, from a clean checkout of the release tag, then check the result:
+1. **Fork.** Fork the upstream into `lkshrk/<name>` on GitHub, keeping the upstream's default branch. The setup refuses a fork that doesn't exist.
+2. **Registry entry.** Add the upstream to `config/public-contributions.yaml`, then run `go generate ./cmd/contribution-approver`. That renders `cmd/contribution-approver/forks.json`, which the approver embeds. `templates/tests/test_approver_config.py` fails if the two differ.
+3. **Release.** Merge to `main`. semantic-release tags the release and builds the images.
+4. **Setup.** Run the setup as the owner, from a clean checkout of the release tag, then check the result:
 
    ```sh
    git clone https://github.com/lkshrk/agent-stack.git && cd agent-stack
@@ -38,8 +39,8 @@ Do these steps in order. The agents' token must never cover a fork that has no r
    ```
 
    `<name>` is the registry key, for example `omnigent`. `--check` must report no drift.
-4. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-omnigent-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. Today the agents' `gh` and git credential wrappers use this token only for `lkshrk/omnigent`, read from `/agent-secrets/github/omnigent`.
-5. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry.
+5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-omnigent-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. Today the agents' `gh` and git credential wrappers use this token only for `lkshrk/omnigent`, read from `/agent-secrets/github/omnigent`.
+6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry.
 
 The setup refuses to run unless all of these hold:
 
@@ -152,7 +153,7 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 - If CI on the approved commit is re-run after the announcement, the approval waits for that run and publishes once it is green.
 - A hard refusal spends the approval. On a fork PR the approver dismisses the owner's approval and gives the reason. On an issue draft it removes `approved-upstream`. Examples: an edit after the approval, a `.github/` change, mismatched diffs, CI that completed without `success` (`neutral` and `skipped` count as failed), a changed base, or a closed and reopened fork PR.
 - A transient refusal changes nothing and retries on the next poll. Examples: a CI re-run still running, or a GitHub API error.
-- If the approver is down, approvals wait and publish on its first poll after it is back.
+- If the approver is down, issue-draft approvals wait and publish on its first poll after it is back. Fork PRs are announced again after a restart and need a new approval after that announcement.
 
 ## Accepted residuals
 
@@ -191,7 +192,7 @@ Prove each of these before the first real contribution. Use a stand-in: a throwa
 - [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice.
 - [ ] Opening an upstream pull request on a head that another open pull request uses, and right after creating the branch, fails with "A pull request already exists" or `field: head, code: invalid`. The approver waits on those texts; other wording would count as a hard refusal and dismiss a valid approval.
 - [ ] In h-cloud, `CONTRIBUTION_FORKS` is dropped in the same change as the `agent-tools` pin bump, because 1.22.0 exits without it.
-- [ ] Afterwards, remove the stand-in's registry entry, its policy line and both repositories.
+- [ ] Afterwards, remove the stand-in's policy line and both repositories. Then drop it from the registry, release, and pin `agent-tools` in h-cloud again; until then the approver logs a fork check error on every poll.
 
 ## Working on a contribution
 
