@@ -42,6 +42,8 @@ Do these steps in order. The agents' token must never cover a fork that has no r
 5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-fork-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. The token minter mints this policy as the `forks` key, and Polly's sandboxes mount it at `/agent-secrets/github/forks`.
 6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' git credential helper, and `gh` called with `-R`/`--repo`, use the `forks` token for every fork in that copy and the `code` token for everything else; if the registry check fails, they refuse. The token scopes are the boundary, not the wrappers (`images/README.md`).
 
+The `omnigent-host` pin may come before steps 4 and 5. The wrappers give a fork only the `forks` token and refuse while `/agent-secrets/github/forks` is missing, so until the policy covers the fork, its writes just fail.
+
 The setup refuses to run unless all of these hold:
 
 - HEAD is exactly a tag, the checkout is the repository's top level, and the tree is clean, untracked files included.
