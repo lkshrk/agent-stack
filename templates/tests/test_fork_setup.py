@@ -57,6 +57,7 @@ class FakeFork:
         self.hide_ci_lists = 0
         self.workflow_permissions = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
         self.fail: tuple[str, str] | None = None
+        self.fail_answer: tuple[int, dict] = (500, {"message": "Server Error"})
         self.redirects: dict[tuple[str, str], tuple[int, str]] = {}
         routes = [
             ("GET", r"/user", self.user),
@@ -83,7 +84,7 @@ class FakeFork:
     def guard(self, method, pattern, handler):
         def run(match, query, body):
             if self.fail == (method, pattern):
-                return 500, {"message": "Server Error"}
+                return self.fail_answer
             if (method, pattern) in self.redirects:
                 status, location = self.redirects[(method, pattern)]
                 return status, {"message": "Moved"}, {"Location": location}
@@ -189,21 +190,31 @@ def git(directory: Path, *args: str, check: bool = True) -> str:
     return subprocess.run(command, cwd=directory, check=check, capture_output=True, text=True, env=git_env()).stdout
 
 
-def _digest(path: str) -> str:
+def _index_digest() -> str:
+    path = git(ROOT, "rev-parse", "--git-path", "index", check=False).strip()
     try:
         return hashlib.sha256((ROOT / path).read_bytes()).hexdigest() if path else ""
     except OSError:
         return ""
 
 
+def _config_digest() -> str:
+    path = git(ROOT, "rev-parse", "--git-path", "config", check=False).strip()
+    if not path:
+        return ""
+    listing = git(ROOT, "config", "--file", str(ROOT / path), "--list", check=False)
+    kept = [line for line in listing.splitlines() if not line.startswith(("branch.", "remote."))]
+    return hashlib.sha256("\n".join(kept).encode()).hexdigest()
+
+
 def repository_state() -> tuple[str, ...]:
     return (
+        git(ROOT, "symbolic-ref", "-q", "HEAD", check=False),
         git(ROOT, "rev-parse", "HEAD", check=False),
-        git(ROOT, "for-each-ref", "--format=%(objectname) %(refname)", check=False),
+        git(ROOT, "for-each-ref", "refs/tags", "--format=%(objectname) %(refname)", check=False),
         git(ROOT, "config", "--get", "core.bare", check=False),
-        _digest(git(ROOT, "rev-parse", "--git-path", "index", check=False).strip()),
-        _digest(git(ROOT, "rev-parse", "--git-path", "config", check=False).strip()),
-        _digest(git(ROOT, "rev-parse", "--git-path", "config.worktree", check=False).strip()),
+        _config_digest(),
+        _index_digest(),
     )
 
 
@@ -212,7 +223,7 @@ _REPOSITORY_AT_IMPORT = repository_state()
 
 def _require_unchanged(when: str) -> None:
     if repository_state() != _REPOSITORY_AT_IMPORT:
-        raise AssertionError(f"the real repository at {ROOT} changed {when}: a ref, the index or the config")
+        raise AssertionError(f"the real repository at {ROOT} changed {when}: HEAD, a tag, core.bare, the config or the index")
 
 
 def setUpModule():
@@ -655,7 +666,7 @@ class ForkSetupTest(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertIn("not clean", result.stderr)
                     self.assertFalse(marker.exists())
-            (copy / "scripts" / "json.py").unlink()
+            (copy / "scripts" / "os.py").write_text(planted)
             result = subprocess.run([sys.executable, str(script), "omnigent"], cwd=copy, capture_output=True, text=True, env=git_env(), timeout=60)
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("not clean", result.stderr)
@@ -772,6 +783,9 @@ class ForkSetupTest(unittest.TestCase):
                 self.gh.route("GET", API + r"/rulesets/(\d+)", lambda m, q, b: (200, ["x"])),
             ),
             "permissions are a list": lambda fork: self.gh.route("GET", API + r"/actions/permissions", lambda m, q, b: (200, ["x"])),
+            "ruleset id is a string": lambda fork: self.gh.route(
+                "GET", API + r"/rulesets", lambda m, q, b: (200, [{"id": "100", "name": "contribution-default-branch", "target": "branch", "enforcement": "active"}])
+            ),
         }
         ids_only_matter_when_writing = {"workflow without id", "workflow id is a string"}
         for name, break_it in cases.items():
@@ -790,6 +804,57 @@ class ForkSetupTest(unittest.TestCase):
             code, out, err = self.run_setup()
         self.assertEqual(code, 1)
         self.assertEqual(err, "agent-stack-fork-setup: stopped on an internal error (KeyError)\n")
+
+    def test_a_non_ascii_lookalike_label_is_neither_drift_nor_renamed(self):
+        self.fork.labels.append({"name": "approved-up\u017ftream", "color": "1d76db", "description": "x"})
+
+        self.assertEqual(self.run_setup()[0], 0)
+
+        self.assertNotIn("PATCH", [method for method, _, _ in self.gh.writes()])
+        self.assertIn("approved-upstream", [b["name"] for m, p, b in self.gh.writes() if m == "POST" and p.endswith("/labels")])
+        self.assertIn("approved-up\u017ftream", [label["name"] for label in self.fork.labels])
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("drift: label", out)
+
+    def test_an_exact_label_wins_over_a_case_variant_in_the_same_listing(self):
+        self.run_setup()
+        written = len(self.gh.writes())
+        self.fork.labels.append({"name": "APPROVED-UPSTREAM", "color": "ffffff", "description": "x"})
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertNotIn("drift: label", out)
+        self.assertEqual(self.run_setup()[0], 0)
+        self.assertEqual(len(self.gh.writes()), written)
+
+    def test_a_missing_pyyaml_is_named(self):
+        with unittest.mock.patch.dict(sys.modules):
+            for name in ("agent_stack_policies.public_contributions", "render_contribution_fork"):
+                sys.modules.pop(name, None)
+            sys.modules["yaml"] = None
+            code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("PyYAML is required", err)
+        self.assertNotIn("internal error", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_github_text_in_drift_lines_is_escaped(self):
+        self.run_setup()
+        self.fork.workflows.append({"id": 40, "name": "x", "path": ".github/workflows/evil\x1b[2K\r.yml", "state": "active"})
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertEqual(code, 1)
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\r", out)
+        self.assertIn("evil\\x1b[2K\\r.yml", out)
+
+    def test_github_error_messages_are_escaped(self):
+        self.fork.fail = ("GET", r"/user")
+        self.fork.fail_answer = (422, {"message": "bad\x1b[2K\rname\nmore"})
+        with self.assertRaises(setup.SetupError) as raised:
+            setup.GitHub(self.gh.url, TOKEN, read_only=False).request("GET", "/user")
+        message = str(raised.exception)
+        for raw in ("\x1b", "\r", "\n"):
+            self.assertNotIn(raw, message)
+        self.assertIn("bad\\x1b[2K\\rname", message)
 
     def test_every_request_carries_the_token_only_in_the_authorization_header(self):
         self.run_setup()

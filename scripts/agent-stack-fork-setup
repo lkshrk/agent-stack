@@ -1,14 +1,18 @@
 #!/usr/bin/env -S python3 -I
 """Set up the owner's contribution fork of a registered upstream: labels, both rulesets, the contribution-ci workflow and the Actions settings. With --check, report drift and write nothing. Run it as the owner with your own gh login, from a clean release tag checkout."""
 
+import os
+import sys
+
+if __name__ == "__main__" and not sys.flags.isolated:
+    os.execv(sys.executable, [sys.executable, "-I", os.path.abspath(__file__), *sys.argv[1:]])
+
 import argparse
 import base64
 import binascii
 import difflib
 import json
-import os
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -153,8 +157,13 @@ def load_repository_modules(root: Path) -> SimpleNamespace:
     for path in (root / "policies" / "omnigent", root / "templates"):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
-    from agent_stack_policies.public_contributions import FORK_OWNER, Registry, RegistryError
-    from render_contribution_fork import CI_PATH, ci_workflow
+    try:
+        from agent_stack_policies.public_contributions import FORK_OWNER, Registry, RegistryError
+        from render_contribution_fork import CI_PATH, ci_workflow
+    except ImportError as error:
+        if error.name == "yaml":
+            raise SetupError(f"PyYAML is required; install it system-wide for {sys.executable} (-I ignores the user site)") from None
+        raise SetupError(f"cannot import {error.name} with {sys.executable} -I") from None
 
     return SimpleNamespace(owner=FORK_OWNER, registry=Registry, registry_error=RegistryError, ci_path=CI_PATH, ci_workflow=ci_workflow)
 
@@ -251,14 +260,14 @@ class Setup:
             raise SetupError(f"{self.fork}'s default branch is not the registry's {self.branch}")
 
     def label_changes(self) -> list[tuple[str, str | None]]:
-        current: dict[str, dict] = {}
-        for label in self.gh.paginate(f"{self.repo}/labels", "labels"):
-            if not isinstance(label.get("name"), str):
-                raise unexpected("labels")
-            current[label["name"].casefold()] = label
+        labels = self.gh.paginate(f"{self.repo}/labels", "labels")
+        if not all(isinstance(label.get("name"), str) for label in labels):
+            raise unexpected("labels")
+        exact = {label["name"]: label for label in labels}
+        folded = {label["name"].lower(): label for label in labels if label["name"].isascii()}
         changes = []
         for name, (color, _) in LABELS.items():
-            label = current.get(name.casefold())
+            label = exact.get(name) or folded.get(name)
             if label is None:
                 changes.append((name, None))
             elif label["name"] != name or not _same(label.get("color"), color):
