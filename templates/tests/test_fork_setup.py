@@ -2,12 +2,18 @@ import base64
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
+import shutil
+import socket
 import subprocess
+import sys
 import tempfile
+import traceback
 import unittest
 import unittest.mock
 from pathlib import Path
+from urllib.parse import unquote
 
 from .fake_github import FakeGitHub
 
@@ -22,6 +28,7 @@ TOKEN = "gho_forksetupsecret0123456789"
 FORK = "lkshrk/omnigent"
 CI_PATH = ".github/workflows/contribution-ci.yml"
 RENDERED = (ROOT / "templates" / "contribution-fork" / CI_PATH).read_text()
+REGISTRY = ROOT / "config" / "public-contributions.yaml"
 API = r"/repos/lkshrk/omnigent"
 
 
@@ -49,11 +56,13 @@ class FakeFork:
         self.hide_ci_lists = 0
         self.workflow_permissions = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
         self.fail: tuple[str, str] | None = None
+        self.redirects: dict[tuple[str, str], tuple[int, str]] = {}
         routes = [
             ("GET", r"/user", self.user),
             ("GET", API, lambda m, q, b: (200, self.repo)),
             ("GET", API + r"/labels", lambda m, q, b: self.page(self.labels, q)),
             ("POST", API + r"/labels", self.create_label),
+            ("PATCH", API + r"/labels/([^/]+)", self.update_label),
             ("GET", API + r"/rulesets", self.list_rulesets),
             ("POST", API + r"/rulesets", self.create_ruleset),
             ("GET", API + r"/rulesets/(\d+)", lambda m, q, b: (200, self.rulesets[int(m[1])])),
@@ -74,6 +83,9 @@ class FakeFork:
         def run(match, query, body):
             if self.fail == (method, pattern):
                 return 500, {"message": "Server Error"}
+            if (method, pattern) in self.redirects:
+                status, location = self.redirects[(method, pattern)]
+                return status, {"message": "Moved"}, {"Location": location}
             return handler(match, query, body)
 
         return run
@@ -93,6 +105,13 @@ class FakeFork:
             return 422, {"message": "Validation Failed", "errors": [{"code": "already_exists"}]}
         self.labels.append(dict(body))
         return 201, dict(body)
+
+    def update_label(self, match, query, body):
+        label = next((label for label in self.labels if label["name"] == unquote(match[1])), None)
+        if label is None:
+            return 404, {"message": "Not Found"}
+        label.update({key: value for key, value in body.items() if key != "new_name"}, name=body.get("new_name", label["name"]))
+        return 200, dict(label)
 
     def list_rulesets(self, match, query, body):
         summaries = [{"id": i, "name": r["name"], "target": r["target"], "enforcement": r["enforcement"]} for i, r in self.rulesets.items()]
@@ -136,7 +155,7 @@ class FakeFork:
         return self.page(self.workflows, query, "workflows")
 
     def toggle_workflow(self, match, query, body):
-        workflow = next(w for w in self.workflows if w["id"] == int(match[1]))
+        workflow = next(w for w in self.workflows if w.get("id") == int(match[1]))
         workflow["state"] = "active" if match[2] == "enable" else "disabled_manually"
         return 204, None
 
@@ -145,9 +164,22 @@ class FakeFork:
         return 204, None
 
 
-def git(directory: Path, *args: str, check: bool = True) -> str:
+TEST_IDENTITY = {
+    "GIT_AUTHOR_NAME": "fork-setup-test",
+    "GIT_AUTHOR_EMAIL": "fork-setup-test@example.invalid",
+    "GIT_COMMITTER_NAME": "fork-setup-test",
+    "GIT_COMMITTER_EMAIL": "fork-setup-test@example.invalid",
+}
+
+
+def git_env() -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    return subprocess.run(["git", *args], cwd=directory, check=check, capture_output=True, text=True, env=env).stdout
+    return {**env, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", **TEST_IDENTITY}
+
+
+def git(directory: Path, *args: str, check: bool = True) -> str:
+    command = ["git", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", *args]
+    return subprocess.run(command, cwd=directory, check=check, capture_output=True, text=True, env=git_env()).stdout
 
 
 def repository_state() -> tuple[str, str, str]:
@@ -173,10 +205,12 @@ def checkout(tagged: bool = True) -> tempfile.TemporaryDirectory:
     if Path(git(root, "rev-parse", "--absolute-git-dir").strip()).resolve() != (root / ".git").resolve():
         raise RuntimeError("test checkout escaped its temporary directory")
     (root / "README.md").write_text("x\n")
-    git(root, "add", "README.md")
-    git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init")
+    (root / "config").mkdir()
+    (root / "config" / "public-contributions.yaml").write_text(REGISTRY.read_text())
+    git(root, "add", "README.md", "config")
+    git(root, "commit", "-q", "-m", "init")
     if tagged:
-        git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "tag", "-a", "v1.2.3", "-m", "v1.2.3")
+        git(root, "tag", "-a", "v1.2.3", "-m", "v1.2.3")
     return directory
 
 
@@ -211,7 +245,7 @@ class ForkSetupTest(unittest.TestCase):
         self.addCleanup(self.checkout.cleanup)
         self.root = Path(self.checkout.name)
 
-    def run_setup(self, *args: str) -> tuple[int, str, str]:
+    def run_setup(self, *args: str, api_url: str | None = None) -> tuple[int, str, str]:
         stdout, stderr = io.StringIO(), io.StringIO()
 
         def confirm(prompt: str) -> str:
@@ -220,7 +254,7 @@ class ForkSetupTest(unittest.TestCase):
 
         code = setup.main(
             list(args) or ["omnigent"],
-            api_url=self.gh.url,
+            api_url=api_url or self.gh.url,
             token=TOKEN,
             confirm=confirm,
             stdout=stdout,
@@ -447,7 +481,7 @@ class ForkSetupTest(unittest.TestCase):
 
     def test_refuses_a_head_one_commit_past_the_tag(self):
         (self.root / "README.md").write_text("y\n")
-        git(self.root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-am", "next")
+        git(self.root, "commit", "-q", "-am", "next")
         code, out, err = self.run_setup()
         self.assertEqual(code, 1)
         self.assertIn("release tag", err)
@@ -483,7 +517,7 @@ class ForkSetupTest(unittest.TestCase):
             self.root = Path(untagged.name)
             code, out, err = self.run_setup()
         self.assertEqual(code, 1)
-        self.assertIn("release tag", err)
+        self.assertIn("is not checked out at a release tag", err)
         self.assertEqual(self.gh.requests, [])
 
     def test_check_only_warns_about_an_untagged_or_dirty_checkout(self):
@@ -515,6 +549,216 @@ class ForkSetupTest(unittest.TestCase):
         self.assertNotIn("drift", out)
         self.assertIn("info: ", out)
         self.assertIn("dynamic/dependabot/dependabot-updates", out)
+
+    def drift_lines(self, out: str) -> list[str]:
+        return [line for line in out.splitlines() if line.startswith("drift: ")]
+
+    def ruleset_named(self, name: str) -> dict:
+        return next(r for r in self.fork.rulesets.values() if r["name"] == name)
+
+    def commit_and_tag(self, message: str, tag: str) -> None:
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", message)
+        git(self.root, "tag", "-a", tag, "-m", tag)
+
+    def test_a_301_is_refused_without_following_it(self):
+        with FakeGitHub("elsewhere-token") as elsewhere:
+            self.fork.redirects[("GET", API)] = (301, elsewhere.url + "/repos/someone/omnigent")
+            code, out, err = self.run_setup()
+            self.assertEqual(elsewhere.requests, [])
+        self.assertEqual(code, 1)
+        self.assertIn("301", err)
+        self.assertEqual(self.gh.writes(), [])
+
+    def test_a_307_on_a_write_is_refused_and_never_replayed(self):
+        with FakeGitHub("elsewhere-token") as elsewhere:
+            self.fork.redirects[("PUT", API + r"/contents/(.+)")] = (307, elsewhere.url + "/repos/someone/omnigent/contents/" + CI_PATH)
+            code, out, err = self.run_setup()
+            self.assertEqual(elsewhere.requests, [])
+        self.assertEqual(code, 1)
+        self.assertIn("307", err)
+        self.assertEqual(len([w for w in self.gh.writes() if w[0] == "PUT" and "/contents/" in w[1]]), 1)
+        self.assertNotIn(CI_PATH, self.fork.files)
+        self.assertEqual(self.steps(), ["labels", "rulesets", "commit"])
+
+    def test_control_characters_in_the_fork_ci_are_escaped_in_the_diff(self):
+        self.fork.files[CI_PATH] = ("name: contribution-ci\x1b[2K\rlooks: fine\x07\n", "old")
+        self.answer = "n"
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 1)
+        for raw in ("\x1b", "\r", "\x07"):
+            self.assertNotIn(raw, out)
+        self.assertIn("\\x1b[2K\\rlooks: fine\\x07", out)
+
+    def test_a_network_error_never_shows_the_token(self):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        code, out, err = self.run_setup(api_url=f"http://127.0.0.1:{port}")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot talk to GitHub", err)
+
+        with self.assertRaises(setup.SetupError) as raised:
+            setup.GitHub(f"http://127.0.0.1:{port}", TOKEN, read_only=False).request("GET", "/user")
+        self.assertNotIn(TOKEN, "".join(traceback.format_exception(raised.exception)))
+
+    def test_a_planted_module_never_runs_before_the_release_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory) / "agent-stack"
+            for part in ("scripts", "templates", "policies/omnigent/agent_stack_policies", "config"):
+                shutil.copytree(ROOT / part, copy / part, ignore=shutil.ignore_patterns("__pycache__"))
+            git(copy, "init", "-q", "-b", "main")
+            git(copy, "add", "-A")
+            git(copy, "commit", "-q", "-m", "release")
+            git(copy, "tag", "-a", "v9.9.9", "-m", "v9.9.9")
+            marker = Path(directory) / "planted-ran"
+            planted = f"open({str(marker)!r}, 'w').write('ran')\nraise SystemExit(7)\n"
+            (copy / "templates" / "yaml.py").write_text(planted)
+            (copy / "scripts" / "json.py").write_text(planted)
+            script = copy / "scripts" / "agent-stack-fork-setup"
+            for command in ([str(script), "omnigent"], [sys.executable, "-I", str(script), "omnigent"]):
+                with self.subTest(command=command[0]):
+                    result = subprocess.run(command, cwd=copy, capture_output=True, text=True, env=git_env(), timeout=60)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("not clean", result.stderr)
+                    self.assertFalse(marker.exists())
+            (copy / "scripts" / "json.py").unlink()
+            result = subprocess.run([sys.executable, str(script), "omnigent"], cwd=copy, capture_output=True, text=True, env=git_env(), timeout=60)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("not clean", result.stderr)
+            self.assertFalse(marker.exists())
+
+    def test_untracked_files_count_even_when_the_status_config_hides_them(self):
+        git(self.root, "config", "status.showUntrackedFiles", "no")
+        (self.root / "stray.txt").write_text("x\n")
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("not clean", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_refuses_a_checkout_below_the_repository_top_level(self):
+        (self.root / "sub").mkdir()
+        (self.root / "sub" / "file").write_text("x\n")
+        self.commit_and_tag("sub", "v1.2.4")
+        self.root = self.root / "sub"
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("top level", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_a_registry_path_is_refused_without_check(self):
+        code, out, err = self.run_setup("omnigent", "--registry", str(REGISTRY))
+        self.assertEqual(code, 1)
+        self.assertIn("--registry", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_check_accepts_a_registry_path(self):
+        self.run_setup()
+        code, out, err = self.run_setup("omnigent", "--check", "--registry", str(REGISTRY))
+        self.assertEqual(code, 0, err)
+
+    def test_a_normal_run_reads_the_registry_of_the_checkout(self):
+        registry = self.root / "config" / "public-contributions.yaml"
+        registry.write_text(registry.read_text().replace("default_branch: main", "default_branch: trunk"))
+        self.commit_and_tag("trunk", "v1.2.4")
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("trunk", err)
+        self.assertEqual(self.gh.writes(), [])
+
+    def test_each_ruleset_field_alone_is_drift_and_is_restored(self):
+        cases = {
+            "enforcement": lambda r: r.update(enforcement="evaluate"),
+            "target": lambda r: r.update(target="tag"),
+            "include": lambda r: r["conditions"]["ref_name"].update(include=["refs/heads/main", "refs/heads/other"]),
+            "exclude": lambda r: r["conditions"]["ref_name"].update(exclude=["refs/heads/main"]),
+        }
+        self.run_setup()
+        for field, change in cases.items():
+            with self.subTest(field=field):
+                ruleset = self.ruleset_named("contribution-default-branch")
+                restored = json.loads(json.dumps(ruleset))
+                change(ruleset)
+                code, out, err = self.run_setup("omnigent", "--check")
+                self.assertEqual(code, 1)
+                self.assertEqual(self.drift_lines(out), ["drift: ruleset contribution-default-branch differs from the setup"])
+                self.assertEqual(self.run_setup()[0], 0)
+                self.assertEqual(self.ruleset_named("contribution-default-branch"), restored)
+
+    def test_check_flags_changed_ci_content_alone(self):
+        self.run_setup()
+        text, sha = self.fork.files[CI_PATH]
+        self.fork.files[CI_PATH] = (text + "# extra\n", sha)
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.drift_lines(out), [f"drift: {CI_PATH} on main differs from the rendered workflow"])
+
+    def test_check_flags_an_inactive_ci_workflow_alone(self):
+        self.run_setup()
+        next(w for w in self.fork.workflows if w["path"] == CI_PATH)["state"] = "disabled_manually"
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.drift_lines(out), [f"drift: {CI_PATH} is not an active workflow"])
+
+    def test_refuses_a_repository_whose_fork_flag_is_off_even_with_the_right_parent(self):
+        self.fork.repo["fork"] = False
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("not a fork", err)
+        self.assertEqual(self.gh.writes(), [])
+
+    def test_a_label_differing_in_case_or_colour_converges_in_one_run(self):
+        self.fork.labels.append({"name": "Approved-Upstream", "color": "ffffff", "description": "old"})
+        self.fork.labels.append({"name": "upstream-issue", "color": "000000", "description": "old"})
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertIn("drift: label approved-upstream", out)
+        self.assertIn("drift: label upstream-issue", out)
+
+        self.assertEqual(self.run_setup()[0], 0)
+
+        matching = [label for label in self.fork.labels if label["name"].casefold() == "approved-upstream"]
+        self.assertEqual([label["name"] for label in matching], ["approved-upstream"])
+        self.assertEqual(matching[0]["color"], setup.LABELS["approved-upstream"][0])
+        self.assertIn(("PATCH", f"/repos/{FORK}/labels/Approved-Upstream"), [(m, p) for m, p, _ in self.gh.writes()])
+        self.assertEqual(next(label for label in self.fork.labels if label["name"] == "upstream-issue")["color"], setup.LABELS["upstream-issue"][0])
+        self.assertNotIn("approved-upstream", [b["name"] for m, p, b in self.gh.writes() if m == "POST" and p.endswith("/labels")])
+        written = len(self.gh.writes())
+        self.assertEqual(self.run_setup("omnigent", "--check")[0], 0)
+        self.assertEqual(self.run_setup()[0], 0)
+        self.assertEqual(len(self.gh.writes()), written)
+
+    def test_malformed_answers_refuse_cleanly(self):
+        cases = {
+            "user is a list": lambda fork: self.gh.route("GET", r"/user", lambda m, q, b: (200, ["x"], {"X-OAuth-Scopes": "workflow"})),
+            "repo is a string": lambda fork: self.gh.route("GET", API, lambda m, q, b: (200, "x")),
+            "label is a string": lambda fork: setattr(fork, "labels", ["oops"]),
+            "workflow without id": lambda fork: fork.workflows.append({"name": "x", "path": ".github/workflows/x.yml", "state": "active"}),
+            "workflow id is a string": lambda fork: fork.workflows.append({"id": "7", "path": ".github/workflows/x.yml", "state": "active"}),
+            "ruleset detail is a list": lambda fork: (
+                fork.rulesets.update({100: {"id": 100, "name": "contribution-default-branch", "target": "branch", "enforcement": "active"}}),
+                self.gh.route("GET", API + r"/rulesets/(\d+)", lambda m, q, b: (200, ["x"])),
+            ),
+            "permissions are a list": lambda fork: self.gh.route("GET", API + r"/actions/permissions", lambda m, q, b: (200, ["x"])),
+        }
+        ids_only_matter_when_writing = {"workflow without id", "workflow id is a string"}
+        for name, break_it in cases.items():
+            with self.subTest(case=name):
+                self.gh.routes.clear()
+                self.fork = FakeFork(self.gh)
+                break_it(self.fork)
+                for args in (["omnigent"],) if name in ids_only_matter_when_writing else (["omnigent"], ["omnigent", "--check"]):
+                    code, out, err = self.run_setup(*args)
+                    self.assertEqual(code, 1, err)
+                    self.assertTrue(err.startswith("agent-stack-fork-setup: unexpected answer from GitHub"), err)
+                    self.assertNotIn("Traceback", err)
+
+    def test_an_internal_error_is_a_clean_refusal(self):
+        with unittest.mock.patch.object(setup.Setup, "verify", side_effect=KeyError("boom")):
+            code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "agent-stack-fork-setup: stopped on an internal error (KeyError)\n")
 
     def test_every_request_carries_the_token_only_in_the_authorization_header(self):
         self.run_setup()
