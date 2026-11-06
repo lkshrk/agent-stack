@@ -12,8 +12,6 @@ done
 if [ -n "$repo" ]; then
   if /opt/agent/bin/contribution-fork "$repo"; then
     file=${FORKS_TOKEN_FILE:-/agent-secrets/github/forks}
-    # One-release fallback while the minter still writes the omnigent key.
-    [ -r "$file" ] || file=${OMNIGENT_TOKEN_FILE:-/agent-secrets/github/omnigent}
   else
     [ "$?" = 1 ] || exit 1
   fi

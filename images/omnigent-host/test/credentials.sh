@@ -28,6 +28,8 @@ password() {
 
 # shellcheck disable=SC2016
 expect "profile exports the forks token file" "$(env -u FORKS_TOKEN_FILE HOME= sh -c '. /etc/profile.d/zz-agent-home.sh; printf %s "$FORKS_TOKEN_FILE"')" /agent-secrets/github/forks
+# shellcheck disable=SC2016
+expect "profile no longer exports the omnigent token file" "$(env -u OMNIGENT_TOKEN_FILE HOME= sh -c '. /etc/profile.d/zz-agent-home.sh; printf %s "${OMNIGENT_TOKEN_FILE:-unset}"')" unset
 expect "git: other repositories use the code token" "$(password lkshrk/agent-stack.git)" code-token
 expect "git: knowledge uses its token" "$(password lkshrk/knowledge.git)" knowledge-token
 expect "git: a registered fork uses the forks token" "$(password lkshrk/omnigent.git)" forks-token
@@ -35,11 +37,8 @@ expect "git: a registered fork without .git uses the forks token" "$(password lk
 expect "git: the upstream uses the code token" "$(password omnigent-ai/omnigent.git)" code-token
 expect "git: a lookalike uses the code token" "$(password lkshrk/omnigent-other.git)" code-token
 mv "$dir/forks" "$dir/forks.off"
-expect "git: without the forks token a fork falls back to the omnigent token" "$(password lkshrk/omnigent.git)" omnigent-token
-mv "$dir/omnigent" "$dir/omnigent.off"
-expect "git: a fork without fork tokens never falls back" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
+expect "git: a fork without the forks token never falls back" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
 mv "$dir/forks.off" "$dir/forks"
-mv "$dir/omnigent.off" "$dir/omnigent"
 
 if [[ $(id -u) == 0 && -w ${registry%/*} ]]; then
   cp -p "$registry" "$dir/registry.orig"
@@ -83,11 +82,8 @@ if [[ $(id -u) == 0 && -x /usr/local/bin/gh ]]; then
   expect "gh: a fork-named body uses the code token" "$("$bin/gh" pr create --body lkshrk/omnigent --repo lkshrk/agent-stack)" code-token
   expect "gh: an explicit GH_TOKEN wins" "$(GH_TOKEN=preset "$bin/gh" pr list --repo lkshrk/omnigent)" preset
   mv "$dir/forks" "$dir/forks.off"
-  expect "gh: without the forks token a fork falls back to the omnigent token" "$("$bin/gh" pr list --repo lkshrk/omnigent)" omnigent-token
-  mv "$dir/omnigent" "$dir/omnigent.off"
-  expect "gh: a fork without fork tokens never gets the code token" "$("$bin/gh" pr list --repo lkshrk/omnigent)" ""
+  expect "gh: a fork without the forks token never falls back" "$("$bin/gh" pr list --repo lkshrk/omnigent)" ""
   mv "$dir/forks.off" "$dir/forks"
-  mv "$dir/omnigent.off" "$dir/omnigent"
   if [[ -w ${registry%/*} ]]; then
     printf 'version: invalid\n' >"$registry"
     expect "gh: an unreadable registry stops a --repo call" "$("$bin/gh" pr list --repo lkshrk/omnigent 2>/dev/null; echo "exit=$?")" exit=1
