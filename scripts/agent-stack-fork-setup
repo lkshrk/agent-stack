@@ -6,6 +6,7 @@ import base64
 import binascii
 import difflib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, TextIO
 from urllib.parse import quote, urlencode
 
+sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "policies" / "omnigent"))
 sys.path.insert(0, str(ROOT / "templates"))
@@ -37,6 +39,7 @@ LABELS = {
 }
 WORKFLOW_PERMISSIONS = {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": False}
 BRANCH_RULES = ("creation", "update", "deletion", "non_fast_forward")
+DYNAMIC_PREFIX = "dynamic/"
 
 
 class SetupError(Exception):
@@ -120,6 +123,25 @@ def gh_token() -> str:
     if result.returncode or not token:
         raise SetupError("gh auth token failed; run gh auth login")
     return token
+
+
+def checkout_problems(checkout: Path) -> list[str]:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+
+    def git(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, text=True, timeout=30, check=False, env=env)
+
+    try:
+        tag = git("describe", "--exact-match", "--tags", "HEAD")
+        status = git("status", "--porcelain")
+    except (OSError, subprocess.TimeoutExpired):
+        return [f"cannot run git in {checkout}, so it is not a release tag checkout"]
+    problems = []
+    if tag.returncode or not tag.stdout.strip():
+        problems.append(f"{checkout} is not checked out at a release tag")
+    if status.returncode or status.stdout.strip():
+        problems.append(f"{checkout} is not clean")
+    return problems
 
 
 def _same(a: Any, b: str) -> bool:
@@ -231,7 +253,7 @@ class Setup:
         current = self.gh.get(f"{self.repo}/actions/permissions/workflow") or {}
         return {key: current.get(key) for key in WORKFLOW_PERMISSIONS}
 
-    def drift(self) -> list[str]:
+    def drift(self) -> tuple[list[str], list[str]]:
         found = [f"label {name} is missing" for name in self.missing_labels()]
         for name, (ruleset_id, matches) in self.ruleset_state().items():
             if ruleset_id is None:
@@ -246,10 +268,22 @@ class Setup:
         ci = [w for w in workflows if w.get("path") == CI_PATH]
         if not ci or any(w.get("state") != "active" for w in ci):
             found.append(f"{CI_PATH} is not an active workflow")
-        found += [f"workflow {w.get('path')} is active" for w in workflows if w.get("path") != CI_PATH and w.get("state") == "active"]
+        found += [f"workflow {w.get('path')} is active" for w in self.other_workflows(workflows) if w.get("state") == "active"]
         if self.workflow_permissions() != WORKFLOW_PERMISSIONS:
             found.append("workflow permissions are not read-only with PR approvals off")
-        return found
+        return found, self.dynamic_notes(workflows)
+
+    @staticmethod
+    def other_workflows(workflows: list[dict]) -> list[dict]:
+        return [w for w in workflows if w.get("path") != CI_PATH and not str(w.get("path")).startswith(DYNAMIC_PREFIX)]
+
+    @staticmethod
+    def dynamic_notes(workflows: list[dict]) -> list[str]:
+        return [
+            f"dynamic workflow {w.get('path')} is {w.get('state')}; GitHub manages it, so it is left as it is"
+            for w in workflows
+            if str(w.get("path")).startswith(DYNAMIC_PREFIX)
+        ]
 
     def apply(self) -> None:
         for name in self.missing_labels():
@@ -296,8 +330,10 @@ class Setup:
         for workflow in ci:
             if workflow.get("state") != "active":
                 self.write("PUT", f"{self.repo}/actions/workflows/{int(workflow['id'])}/enable", None, f"enabled workflow {CI_PATH}")
-        for workflow in workflows:
-            if workflow.get("path") != CI_PATH and workflow.get("state") == "active":
+        for note in self.dynamic_notes(workflows):
+            self.say(note)
+        for workflow in self.other_workflows(workflows):
+            if workflow.get("state") == "active":
                 self.write("PUT", f"{self.repo}/actions/workflows/{int(workflow['id'])}/disable", None, f"disabled workflow {workflow.get('path')}")
 
         if self.workflow_permissions() != WORKFLOW_PERMISSIONS:
@@ -315,6 +351,7 @@ def main(
     stdout: TextIO = sys.stdout,
     stderr: TextIO = sys.stderr,
     sleep: Callable[[float], None] = time.sleep,
+    checkout: Path = ROOT,
 ) -> int:
     parser = argparse.ArgumentParser(prog="agent-stack-fork-setup", description=__doc__)
     parser.add_argument("repository", help="registry key, e.g. omnigent")
@@ -322,6 +359,11 @@ def main(
     parser.add_argument("--registry", type=Path, default=ROOT / "config" / "public-contributions.yaml")
     args = parser.parse_args(argv)
     try:
+        problems = checkout_problems(checkout)
+        if problems and not args.check:
+            raise SetupError("; ".join(problems) + "; run the setup from a clean release tag checkout")
+        for problem in problems:
+            print(f"agent-stack-fork-setup: warning: {printable(problem)}", file=stderr)
         entry = Registry.load(args.registry).repository(args.repository)
         gh = GitHub(api_url, token if token is not None else gh_token(), read_only=args.check)
         setup = Setup(gh, entry, stdout, confirm, sleep)
@@ -329,7 +371,9 @@ def main(
         if not args.check:
             setup.apply()
             return 0
-        drift = setup.drift()
+        drift, notes = setup.drift()
+        for line in notes:
+            setup.say(f"info: {line}")
         for line in drift:
             setup.say(f"drift: {line}")
         if not drift:

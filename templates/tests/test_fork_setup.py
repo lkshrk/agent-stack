@@ -2,7 +2,11 @@ import base64
 import importlib.machinery
 import importlib.util
 import io
+import os
+import subprocess
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from .fake_github import FakeGitHub
@@ -141,6 +145,25 @@ class FakeFork:
         return 204, None
 
 
+def git(directory: Path, *args: str) -> str:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    return subprocess.run(["git", "-C", str(directory), *args], check=True, capture_output=True, text=True, env=env).stdout
+
+
+def checkout(tagged: bool = True) -> tempfile.TemporaryDirectory:
+    directory = tempfile.TemporaryDirectory()
+    root = Path(directory.name)
+    git(root, "init", "-q", "-b", "main")
+    if Path(git(root, "rev-parse", "--absolute-git-dir").strip()).resolve() != (root / ".git").resolve():
+        raise RuntimeError("test checkout escaped its temporary directory")
+    (root / "README.md").write_text("x\n")
+    git(root, "add", "README.md")
+    git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init")
+    if tagged:
+        git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "tag", "-a", "v1.2.3", "-m", "v1.2.3")
+    return directory
+
+
 def step(method: str, path: str) -> str:
     suffix = path.removeprefix("/repos/" + FORK)
     if suffix == "/labels":
@@ -168,6 +191,9 @@ class ForkSetupTest(unittest.TestCase):
         self.fork = FakeFork(self.gh)
         self.prompts: list[tuple[str, int]] = []
         self.answer = "y"
+        self.checkout = checkout()
+        self.addCleanup(self.checkout.cleanup)
+        self.root = Path(self.checkout.name)
 
     def run_setup(self, *args: str) -> tuple[int, str, str]:
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -177,7 +203,14 @@ class ForkSetupTest(unittest.TestCase):
             return self.answer
 
         code = setup.main(
-            list(args) or ["omnigent"], api_url=self.gh.url, token=TOKEN, confirm=confirm, stdout=stdout, stderr=stderr, sleep=lambda s: None
+            list(args) or ["omnigent"],
+            api_url=self.gh.url,
+            token=TOKEN,
+            confirm=confirm,
+            stdout=stdout,
+            stderr=stderr,
+            sleep=lambda s: None,
+            checkout=self.root,
         )
         out, err = stdout.getvalue(), stderr.getvalue()
         self.assertNotIn(TOKEN, out + err)
@@ -386,6 +419,86 @@ class ForkSetupTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("labels", err)
         self.assertEqual(self.gh.writes(), [])
+
+    def test_refuses_an_untagged_head_before_calling_github(self):
+        untagged = checkout(tagged=False)
+        self.addCleanup(untagged.cleanup)
+        self.root = Path(untagged.name)
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("release tag", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_refuses_a_head_one_commit_past_the_tag(self):
+        (self.root / "README.md").write_text("y\n")
+        git(self.root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-am", "next")
+        code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("release tag", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_refuses_a_dirty_tree_before_calling_github(self):
+        for dirty in ("modified", "untracked"):
+            with self.subTest(dirty=dirty):
+                fresh = checkout()
+                self.addCleanup(fresh.cleanup)
+                self.root = Path(fresh.name)
+                if dirty == "modified":
+                    (self.root / "README.md").write_text("changed\n")
+                else:
+                    (self.root / "yaml.py").write_text("raise SystemExit\n")
+                code, out, err = self.run_setup()
+                self.assertEqual(code, 1)
+                self.assertIn("not clean", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_refuses_a_directory_that_is_not_a_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.root = Path(directory)
+            code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("release tag", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_inherited_git_variables_cannot_point_the_release_check_elsewhere(self):
+        untagged = checkout(tagged=False)
+        self.addCleanup(untagged.cleanup)
+        with unittest.mock.patch.dict(os.environ, {"GIT_DIR": str(self.root / ".git"), "GIT_WORK_TREE": str(self.root)}):
+            self.root = Path(untagged.name)
+            code, out, err = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("release tag", err)
+        self.assertEqual(self.gh.requests, [])
+
+    def test_check_only_warns_about_an_untagged_or_dirty_checkout(self):
+        self.run_setup()
+        untagged = checkout(tagged=False)
+        self.addCleanup(untagged.cleanup)
+        self.root = Path(untagged.name)
+        (self.root / "README.md").write_text("changed\n")
+
+        code, out, err = self.run_setup("omnigent", "--check")
+
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning", err)
+        self.assertIn("release tag", err)
+        self.assertIn("not clean", err)
+
+    def test_dynamic_workflows_are_reported_but_never_disabled(self):
+        self.fork.workflows.append({"id": 30, "name": "Dependabot Updates", "path": "dynamic/dependabot/dependabot-updates", "state": "active"})
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertNotIn(f"/repos/{FORK}/actions/workflows/30/disable", [path for _, path, _ in self.gh.writes()])
+        self.assertIn("dynamic/dependabot/dependabot-updates", out)
+        self.assertEqual(next(w for w in self.fork.workflows if w["id"] == 30)["state"], "active")
+
+        code, out, err = self.run_setup("omnigent", "--check")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("drift", out)
+        self.assertIn("info: ", out)
+        self.assertIn("dynamic/dependabot/dependabot-updates", out)
 
     def test_every_request_carries_the_token_only_in_the_authorization_header(self):
         self.run_setup()
