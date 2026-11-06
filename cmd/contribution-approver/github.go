@@ -24,7 +24,7 @@ const (
 )
 
 var (
-	protectedPrefixes = []string{".github/", "publish/"}
+	protectedPrefixes = []string{".github/"}
 	titleFormats      = map[string]*regexp.Regexp{"conventional-scoped": regexp.MustCompile(`^[a-z]+\([^()\s]+\)!?: \S.*$`)}
 )
 
@@ -251,7 +251,6 @@ func (g *githubClient) pull(ctx context.Context, fork string, number int) (pullR
 	return pr, err
 }
 
-// ciGreen must stay in step with _require_green_ci in templates/contribution-fork/publish/gate.py.
 func (g *githubClient) ciGreen(ctx context.Context, cfg forkConfig, sha string) (bool, int, error) {
 	var res struct {
 		TotalCount int `json:"total_count"`

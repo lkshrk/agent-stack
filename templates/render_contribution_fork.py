@@ -1,21 +1,19 @@
-"""Render the contribution fork template for one registry entry into a checkout of the fork's default branch, then print a `gh workflow disable` command for every other workflow there."""
+"""Render the contribution fork's CI workflow for one registry entry into a directory; templates/contribution-fork is the omnigent render."""
 
 import argparse
 import json
 import re
 import shlex
-import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "templates" / "contribution-fork"
 sys.path.insert(0, str(ROOT / "policies" / "omnigent"))
 
-from agent_stack_policies.public_contributions import FORK_OWNER, RegisteredRepository, Registry, RegistryError  # noqa: E402
+from agent_stack_policies.public_contributions import RegisteredRepository, Registry, RegistryError  # noqa: E402
 
 CI_WORKFLOW = "contribution-ci.yml"
-STATIC = (".github/workflows/publish-upstream.yml", "publish/gate.py")
+CI_PATH = f".github/workflows/{CI_WORKFLOW}"
 _PLAIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._/=,+-]*")
 TOOLCHAINS = {
     "web": """      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -28,22 +26,6 @@ TOOLCHAINS = {
 
 def _scalar(text: str) -> str:
     return text if _PLAIN.fullmatch(text) and not text.endswith(" ") else json.dumps(text)
-
-
-def _upstream_slug(entry: RegisteredRepository) -> str:
-    return entry.upstream.removeprefix("https://github.com/").removesuffix(".git")
-
-
-def contribution_config(entry: RegisteredRepository) -> str:
-    config = {
-        "upstream": _upstream_slug(entry),
-        "fork": entry.fork,
-        "owner": FORK_OWNER,
-        "default_branch": entry.default_branch,
-        "title_format": entry.contribution.title_format,
-        "ci_workflow": CI_WORKFLOW,
-    }
-    return json.dumps(config, indent=2) + "\n"
 
 
 def ci_workflow(entry: RegisteredRepository) -> str:
@@ -90,49 +72,22 @@ def ci_workflow(entry: RegisteredRepository) -> str:
 
 
 def render(registry_path: Path, name: str, out: Path) -> None:
-    entries = {entry.name: entry for entry in Registry.load(registry_path).repositories}
-    if name not in entries:
-        raise RegistryError(f"unknown repository {name}")
-    entry = entries[name]
-    files = {
-        f".github/workflows/{CI_WORKFLOW}": ci_workflow(entry),
-        "publish/contribution.json": contribution_config(entry),
-    }
-    for relative, text in files.items():
-        (out / relative).parent.mkdir(parents=True, exist_ok=True)
-        (out / relative).write_text(text)
-    for relative in STATIC:
-        if (out / relative).resolve() != (TEMPLATE / relative).resolve():
-            (out / relative).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(TEMPLATE / relative, out / relative)
-
-
-def workflows_to_disable(out: Path) -> list[str]:
-    ours = {CI_WORKFLOW, Path(STATIC[0]).name}
-    directory = out / ".github" / "workflows"
-    if not directory.is_dir():
-        return []
-    return sorted(p.name for p in directory.iterdir() if p.is_file() and p.suffix in (".yml", ".yaml") and p.name not in ours)
-
-
-def disable_commands(fork: str, workflows: list[str]) -> list[str]:
-    return [shlex.join(["gh", "workflow", "disable", name, "--repo", fork]) for name in workflows]
+    target = out / CI_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(ci_workflow(Registry.load(registry_path).repository(name)))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("repository", help="registry key, e.g. omnigent")
-    parser.add_argument("out", type=Path, help="checkout of the fork's default branch")
+    parser.add_argument("out", type=Path, help="directory to render into")
     parser.add_argument("--registry", type=Path, default=ROOT / "config" / "public-contributions.yaml")
     args = parser.parse_args()
     try:
         render(args.registry, args.repository, args.out)
-        fork = Registry.load(args.registry).repository(args.repository).fork
     except RegistryError as error:
         print(f"render-contribution-fork: {error}", file=sys.stderr)
         return 1
-    for command in disable_commands(fork, workflows_to_disable(args.out)):
-        print(command)
     return 0
 
 

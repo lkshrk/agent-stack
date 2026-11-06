@@ -136,8 +136,7 @@ class ForkStagingTest(unittest.TestCase):
     def test_allows_upstream_based_branch_when_fork_main_carries_the_template(self):
         upstream_head = git(self.tree, "rev-parse", "HEAD~1").strip()
         git(self.tree, "switch", "-q", "-c", "fork-main", upstream_head)
-        commit(self.tree, ".github/workflows/publish-upstream.yml", "on: pull_request_review\n", "ci: add publish")
-        commit(self.tree, "publish/gate.py", "print()\n", "ci: add gate")
+        commit(self.tree, ".github/workflows/contribution-ci.yml", "on: pull_request\n", "ci: add contribution-ci")
         fork_main = git(self.tree, "rev-parse", "HEAD").strip()
         git(self.tree, "switch", "-q", "-")
         with patch.object(contribution_vcs, "fork_default_head", lambda repository: fork_main):

@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import sys
 import tempfile
 import unittest
@@ -28,21 +27,6 @@ class RenderTest(unittest.TestCase):
             render.render(REGISTRY, "omnigent", Path(directory))
             self.assertEqual(tree(Path(directory)), tree(TEMPLATE))
 
-    def test_contribution_config_matches_the_registry_entry(self):
-        entry = next(r for r in Registry.load(REGISTRY).repositories if r.name == "omnigent")
-        config = json.loads((TEMPLATE / "publish" / "contribution.json").read_text())
-        self.assertEqual(
-            config,
-            {
-                "upstream": "omnigent-ai/omnigent",
-                "fork": entry.fork,
-                "owner": "lkshrk",
-                "default_branch": entry.default_branch,
-                "title_format": entry.contribution.title_format,
-                "ci_workflow": "contribution-ci.yml",
-            },
-        )
-
     def test_ci_runs_every_validation_command_with_scripts_ignored(self):
         entry = next(r for r in Registry.load(REGISTRY).repositories if r.name == "omnigent")
         ci = (TEMPLATE / ".github" / "workflows" / "contribution-ci.yml").read_text()
@@ -54,43 +38,16 @@ class RenderTest(unittest.TestCase):
         self.assertIn("runs-on: ubuntu-latest", ci)
         self.assertIn("persist-credentials: false", ci)
 
-    def test_lists_every_other_workflow_for_disabling(self):
-        with tempfile.TemporaryDirectory() as directory:
-            out = Path(directory)
-            workflows = out / ".github" / "workflows"
-            workflows.mkdir(parents=True)
-            for name in ("ci.yml", "release.yaml", "contribution-ci.yml", "publish-upstream.yml", "README.md"):
-                (workflows / name).write_text("on: push\n")
-            (workflows / "nested").mkdir()
-            (workflows / "nested" / "x.yml").write_text("on: push\n")
-
-            render.render(REGISTRY, "omnigent", out)
-
-            self.assertEqual(render.workflows_to_disable(out), ["ci.yml", "release.yaml"])
-            self.assertEqual(
-                render.disable_commands("lkshrk/omnigent", render.workflows_to_disable(out)),
-                ["gh workflow disable ci.yml --repo lkshrk/omnigent", "gh workflow disable release.yaml --repo lkshrk/omnigent"],
-            )
-
-    def test_main_prints_the_disable_commands(self):
+    def test_main_renders_only_the_ci_workflow_and_prints_nothing(self):
         import contextlib
         import io
 
         with tempfile.TemporaryDirectory() as directory:
-            workflows = Path(directory) / ".github" / "workflows"
-            workflows.mkdir(parents=True)
-            (workflows / "pr-review.yml").write_text("on: pull_request_target\n")
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout), unittest.mock.patch.object(sys, "argv", ["render", "omnigent", directory]):
                 self.assertEqual(render.main(), 0)
-            self.assertEqual(stdout.getvalue(), "gh workflow disable pr-review.yml --repo lkshrk/omnigent\n")
-
-    def test_only_the_publish_job_names_the_token_and_it_runs_in_its_environment(self):
-        import yaml
-
-        workflow = yaml.safe_load((TEMPLATE / ".github" / "workflows" / "publish-upstream.yml").read_text())
-        self.assertEqual(workflow["jobs"]["publish"]["environment"], "upstream-publish")
-        self.assertNotIn("UPSTREAM_PUBLISH_TOKEN", (TEMPLATE / ".github" / "workflows" / "contribution-ci.yml").read_text())
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(list(tree(Path(directory))), [".github/workflows/contribution-ci.yml"])
 
     def test_refuses_an_unknown_repository(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(RegistryError):

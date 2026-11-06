@@ -567,10 +567,9 @@ func TestPublishDecisionChecksTheDiff(t *testing.T) {
 		{"CODEOWNERS", func(h *harness) {
 			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": ".github/CODEOWNERS"})
 		}, verdictHard, ".github/"},
-		{"the gate", func(h *harness) { setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": "publish/gate.py"}) }, verdictHard, "publish/"},
-		{"the gate config among other files", func(h *harness) {
+		{"a top-level publish directory", func(h *harness) {
 			setBothCompares(h, shaA, "ahead", 1, thing, map[string]any{"filename": "publish/contribution.json"})
-		}, verdictHard, "publish/"},
+		}, verdictPublish, ""},
 		{"a workflow renamed away", func(h *harness) {
 			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": "web/moved.yml", "previous_filename": ".github/workflows/ci.yml", "status": "renamed"})
 		}, verdictHard, ".github/"},
@@ -829,7 +828,7 @@ func TestPublishDecisionReasonsCarryNoAttackerText(t *testing.T) {
 			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": ".github/" + hostile})
 		},
 		"a protected previous filename": func(h *harness) {
-			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": "web/x", "previous_filename": "publish/" + hostile})
+			setBothCompares(h, shaA, "ahead", 1, map[string]any{"filename": "web/x", "previous_filename": ".github/" + hostile})
 		},
 		"a mismatched filename": func(h *harness) {
 			h.gh.setCompare(testFork, upCompare+shaA, "ahead", 1, 0, map[string]any{"filename": "web/" + hostile})

@@ -525,7 +525,7 @@ func (g *githubClient) diffFiles(ctx context.Context, cfg forkConfig, base, sha 
 		for _, name := range []string{f.Filename, f.PreviousFilename} {
 			for _, prefix := range protectedPrefixes {
 				if strings.HasPrefix(name, prefix) {
-					return nil, hard("the diff changes a file under .github/ or publish/, which never go upstream")
+					return nil, hard("the diff changes a file under .github/, which never goes upstream")
 				}
 			}
 		}

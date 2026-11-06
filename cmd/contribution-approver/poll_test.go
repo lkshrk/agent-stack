@@ -270,7 +270,6 @@ func TestPollDoesNotAnnounceWhatTheGateWouldRefuse(t *testing.T) {
 		"workflow change": func(pr *fakePR) {
 			pr.changes = append(pr.changes, map[string]any{"filename": ".github/workflows/ci.yml"})
 		},
-		"publish change": func(pr *fakePR) { pr.changes = []map[string]any{{"filename": "publish/gate.py"}} },
 		"renamed from .github": func(pr *fakePR) {
 			pr.changes = []map[string]any{{"filename": "docs/ci.yml", "previous_filename": ".github/ci.yml"}}
 		},
