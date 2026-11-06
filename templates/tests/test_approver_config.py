@@ -18,18 +18,17 @@ class ApproverConfigTest(unittest.TestCase):
         self.assertEqual(FORKS.read_text(), render.render(REGISTRY))
 
     def test_omnigent_entry(self):
+        entries = {entry["fork"]: entry for entry in json.loads(render.render(REGISTRY))}
         self.assertEqual(
-            json.loads(render.render(REGISTRY)),
-            [
-                {
-                    "upstream": "omnigent-ai/omnigent",
-                    "fork": "lkshrk/omnigent",
-                    "owner": "lkshrk",
-                    "default_branch": "main",
-                    "title_format": "conventional-scoped",
-                    "ci_workflow": "contribution-ci.yml",
-                }
-            ],
+            entries["lkshrk/omnigent"],
+            {
+                "upstream": "omnigent-ai/omnigent",
+                "fork": "lkshrk/omnigent",
+                "owner": "lkshrk",
+                "default_branch": "main",
+                "title_format": "conventional-scoped",
+                "ci_workflow": "contribution-ci.yml",
+            },
         )
 
     def test_check_flags_drift_and_main_writes(self):
