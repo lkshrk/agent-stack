@@ -27,7 +27,7 @@ Do these steps in order. The agents' token must never cover a fork that has no r
 
 1. **Fork.** Fork the upstream into `lkshrk/<name>` on GitHub, keeping the upstream's default branch. The setup refuses a fork that doesn't exist.
 2. **Registry entry.** Add the upstream to `config/public-contributions.yaml`, then run `go generate ./cmd/contribution-approver`. That renders `cmd/contribution-approver/forks.json`, which the approver embeds. `templates/tests/test_approver_config.py` fails if the two differ.
-3. **Release.** Merge to `main`. semantic-release tags the release and builds the images.
+3. **Release.** Merge to `main` with a `feat:` or `fix:` commit, so semantic-release cuts a tag that contains the entry, and builds the images.
 4. **Setup.** Run the setup as the owner, from a clean checkout of the release tag, then check the result:
 
    ```sh
@@ -39,8 +39,9 @@ Do these steps in order. The agents' token must never cover a fork that has no r
    ```
 
    `<name>` is the registry key, for example `omnigent`. `--check` must report no drift.
-5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-fork-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. The token minter mints this policy as the `forks` key, and Polly's sandboxes mount it at `/agent-secrets/github/forks`.
-6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' git credential helper, and `gh` called with `-R`/`--repo`, use the `forks` token for every fork in that copy and the `code` token for everything else; if the registry check fails, they refuse. The token scopes are the boundary, not the wrappers (`images/README.md`).
+5. **App coverage.** Before the policy line merges, check that the octo-sts GitHub App's installation covers the fork: find its installation id with `gh api user/installations --jq '.installations[] | [.id, .app_slug] | @tsv'`, then `gh api user/installations/<id>/repositories --paginate --jq '.repositories[].full_name'` must list every fork the policy will name, the new one included. The token minter mints every token in one run and stops at the first failed exchange; an exchange fails when the policy names a repository the App can't see, and then every agent token stops within about an hour, Hermes's included.
+6. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-fork-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The token minter mints this policy as the `forks` key, and Polly's sandboxes mount it at `/agent-secrets/github/forks`. octo-sts reads only the merged policy, so the exchange against the new repository set can only run after the merge: wait for the next token-minter run (every 20 minutes) and check that it succeeded, with `kubectl -n omnigent-sandboxes get jobs --sort-by=.metadata.creationTimestamp` showing the newest `token-minter` Job as complete. If it failed, revert the policy line at once.
+7. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' git credential helper, and `gh` called with `-R`/`--repo`, use the `forks` token for every fork in that copy and the `code` token for everything else; if the registry check fails, they refuse. The token scopes are the boundary, not the wrappers (`images/README.md`).
 
 The `omnigent-host` pin may come before steps 4 and 5. The wrappers give a fork only the `forks` token and refuse while `/agent-secrets/github/forks` is missing, so until the policy covers the fork, its writes just fail.
 
@@ -161,12 +162,13 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 
 - **A maintainer removes the trace.** The approver files an issue draft, but its answer is lost or it restarts before it writes the publish record. If a maintainer deletes the marker from the upstream issue, or transfers, deletes or converts that issue, in that window, the next poll files the draft a second time.
 - **An edit in the same second as the label.** For a draft whose body was never edited, only GitHub's `updated_at` shows later activity, and only to the second. If GitHub ever drops an edit from a draft's edit history, an edit in the same second as the owner's label would publish unseen. A go-live check covers whether GitHub drops edits; if it does, issue drafts don't go live until draft approvals are bound to a Signal announcement of the draft's content.
+- **A draft edited while the owner reads a stale page.** The label approves the draft's content at the moment it is applied, not what the owner read. If an agent edits the draft after the owner opened it and before the owner adds the label, the edited text is published. Reload the draft right before adding the label.
 - **The unedited check on publish records works at second precision.** A publish record counts as unedited when its `updated_at` equals its `created_at`. An edit in the same second the approver wrote the record passes as unedited. An agent would have to beat the approver's own write.
 - **A second refusal notice for one approval.** If removing `approved-upstream` after a refusal fails and an agent then removes `upstream-comment`, the owner gets a second, different refusal notice for the same approval. Both refusals are true.
 
 ## Go-live checks
 
-Prove each of these before the first real contribution. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
+Prove each of these before the first real contribution, and approve nothing real until the list is done. Run this phase only after the first fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
 
 - [ ] The setup clears the fork's "Actions disabled" banner through the API.
 - [ ] Disabling a workflow works before Actions are enabled. If it does, the setup can disable upstream workflows before it enables Actions.
@@ -194,7 +196,7 @@ Prove each of these before the first real contribution. Use a stand-in: a throwa
 - [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice.
 - [ ] Opening an upstream pull request on a head that another open pull request uses, and right after creating the branch, fails with "A pull request already exists" or `field: head, code: invalid`. The approver waits on those texts; other wording would count as a hard refusal and dismiss a valid approval.
 - [ ] In h-cloud, `CONTRIBUTION_FORKS` is dropped in the same change as the `agent-tools` pin bump, because 1.22.0 exits without it.
-- [ ] Afterwards, remove the stand-in's policy line and both repositories. Then drop it from the registry, release, and pin `agent-tools` in h-cloud again; until then the approver logs a fork check error on every poll.
+- [ ] Afterwards, remove the stand-in's policy line, wait for a token-minter run that succeeds after that merge, and only then delete both repositories. Then drop the stand-in from the registry, release, and pin `agent-tools` in h-cloud again; until then the approver logs a fork check error on every poll.
 
 ## Working on a contribution
 
@@ -208,4 +210,5 @@ Prove each of these before the first real contribution. Use a stand-in: a throwa
 - After every "Sync fork", run `scripts/agent-stack-fork-setup <name> --check` from a release tag checkout. Workflows that upstream added arrive enabled, and `--check` reports them as drift. `--check` writes nothing; it only warns when the checkout isn't a clean release tag, and it still needs the `workflow` scope. Fix drift by running the setup without `--check`.
 - After a registry entry changes, release and pin it in h-cloud, then run the setup again.
 - Keep `repositories:` in lkshrk/.github `agent-stack-fork-writer.sts.yaml` equal to the registry forks; nothing checks it.
+- Never delete, rename or transfer a fork that `repositories:` still lists, and never remove it from the octo-sts App's installation: the next token-minter run fails and every agent token stops. Remove the policy line first and wait for a successful minter run.
 - Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver tells the owner once per approval that the move needs the fork synced first, and retries on every poll. Syncing the fork clears the wait, and the approval then publishes. Rebase only if the sync doesn't clear it; a rebase makes a new head that needs a new approval. Don't widen the token.
