@@ -162,7 +162,10 @@ def load_repository_modules(root: Path) -> SimpleNamespace:
         from render_contribution_fork import CI_PATH, ci_workflow
     except ImportError as error:
         if error.name == "yaml":
-            raise SetupError(f"PyYAML is required; install it system-wide for {sys.executable} (-I ignores the user site)") from None
+            raise SetupError(
+                f"PyYAML is required; the script runs {sys.executable} in isolated mode (-I), which ignores the user site, "
+                "so install PyYAML from the system or a distro package (on Arch: python-yaml), not with pip install --user"
+            ) from None
         raise SetupError(f"cannot import {error.name} with {sys.executable} -I") from None
 
     return SimpleNamespace(owner=FORK_OWNER, registry=Registry, registry_error=RegistryError, ci_path=CI_PATH, ci_workflow=ci_workflow)

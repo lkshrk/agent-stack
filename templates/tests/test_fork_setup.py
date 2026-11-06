@@ -834,6 +834,8 @@ class ForkSetupTest(unittest.TestCase):
             code, out, err = self.run_setup()
         self.assertEqual(code, 1)
         self.assertIn("PyYAML is required", err)
+        for part in ("isolated mode", "user site", "python-yaml"):
+            self.assertIn(part, err)
         self.assertNotIn("internal error", err)
         self.assertEqual(self.gh.requests, [])
 
