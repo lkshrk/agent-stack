@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Exits 0 if the repository is a registered contribution fork, 1 if not, 2 if the registry is unreadable.
+# Exits 0 for a registered contribution fork, 3 for any other repository; any other status means refuse.
 set -euo pipefail
 
 exec /opt/venv/bin/python3 -I - "$@" <<'PY'
+import os
+import re
 import sys
 
-from agent_stack_policies.public_contributions import RUNTIME_REGISTRY, Registry, RegistryError
+NOT_A_FORK = 3
+_SUFFIX = re.compile(r"(\.git)?(/info/lfs)?/*$")
 
 
 def slug(spec: str) -> str:
@@ -14,23 +17,25 @@ def slug(spec: str) -> str:
         if value.startswith(prefix):
             value = value[len(prefix):]
             break
-    value = value.rstrip("/")
-    return value[:-4] if value.endswith(".git") else value
+    return _SUFFIX.sub("", value, count=1)
 
 
-def main(argv: list[str]) -> None:
+def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: contribution-fork <owner/repo>", file=sys.stderr)
-        raise SystemExit(2)
-    try:
-        registry = Registry.load(RUNTIME_REGISTRY)
-    except RegistryError as error:
-        print(f"contribution-fork: {error}", file=sys.stderr)
-        raise SystemExit(2)
-    forks = {item.fork.lower() for item in registry.repositories}
-    raise SystemExit(0 if slug(argv[0]) in forks else 1)
+        return 2
+    from agent_stack_policies.public_contributions import RUNTIME_REGISTRY, Registry
+
+    forks = {item.fork.lower() for item in Registry.load(RUNTIME_REGISTRY).repositories}
+    return 0 if slug(argv[0]) in forks else NOT_A_FORK
 
 
-if __name__ == "__main__":
-    main(sys.argv[1:])
+try:
+    status = main(sys.argv[1:])
+except BaseException as error:
+    print(f"contribution-fork: {type(error).__name__}: {error}"[:500], file=sys.stderr)
+    status = 2
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(status)
 PY

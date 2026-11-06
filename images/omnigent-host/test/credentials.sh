@@ -3,6 +3,7 @@ set -uo pipefail
 
 bin=${AGENT_BIN:-/opt/agent/bin}
 registry=/opt/agent-stack/public-contributions.yaml
+policies=/opt/agent-stack/policies/agent_stack_policies
 fail=0
 dir=$(mktemp -d)
 trap 'rm -rf "$dir"' EXIT
@@ -12,6 +13,20 @@ printf forks-token >"$dir/forks"
 printf omnigent-token >"$dir/omnigent"
 export GH_TOKEN_FILE=$dir/code KNOWLEDGE_TOKEN_FILE=$dir/knowledge FORKS_TOKEN_FILE=$dir/forks OMNIGENT_TOKEN_FILE=$dir/omnigent
 unset GH_TOKEN GIT_TOKEN
+
+break_registry() {
+  case $1 in
+    invalid) printf 'version: invalid\n' >"$registry" ;;
+    non-utf8) printf 'version: 1\nrepositories: \xff\xfe\n' >"$registry" ;;
+    nested) /opt/venv/bin/python3 -I -c 'import sys; open(sys.argv[1], "w").write("version: 1\nrepositories: " + "[" * 5000 + "]" * 5000 + "\n")' "$registry" ;;
+    no-module) mv "$policies" "$policies.off" ;;
+  esac
+}
+
+restore_registry() {
+  cp -p "$dir/registry.orig" "$registry"
+  if [[ -e $policies.off ]]; then mv "$policies.off" "$policies"; fi
+}
 
 expect() {
   if [[ $2 == "$3" ]]; then
@@ -34,6 +49,8 @@ expect "git: other repositories use the code token" "$(password lkshrk/agent-sta
 expect "git: knowledge uses its token" "$(password lkshrk/knowledge.git)" knowledge-token
 expect "git: a registered fork uses the forks token" "$(password lkshrk/omnigent.git)" forks-token
 expect "git: a registered fork without .git uses the forks token" "$(password lkshrk/omnigent)" forks-token
+expect "git: LFS on a registered fork uses the forks token" "$(password lkshrk/omnigent.git/info/lfs)" forks-token
+expect "git: LFS on another repository uses the code token" "$(password lkshrk/agent-stack.git/info/lfs)" code-token
 expect "git: the upstream uses the code token" "$(password omnigent-ai/omnigent.git)" code-token
 expect "git: a lookalike uses the code token" "$(password lkshrk/omnigent-other.git)" code-token
 mv "$dir/forks" "$dir/forks.off"
@@ -57,11 +74,17 @@ with open(path, "w") as handle:
 PY
   expect "git: a fork added to the registry uses the forks token" "$(password lkshrk/widget.git)" forks-token
   expect "git: a fork removed from the registry uses the code token" "$(password lkshrk/omnigent.git)" code-token
-  printf 'version: invalid\n' >"$registry"
-  expect "git: an unreadable registry hands out no token" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
-  printf 'protocol=https\nhost=github.com\npath=lkshrk/omnigent.git\n\n' | "$bin/git-credential-agent" get >/dev/null 2>&1
-  expect "git: an unreadable registry fails the helper" "$?" 1
-  cp -p "$dir/registry.orig" "$registry"
+  restore_registry
+  for state in invalid non-utf8 nested no-module; do
+    break_registry "$state"
+    expect "git: a $state registry hands out no token" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
+    printf 'protocol=https\nhost=github.com\npath=lkshrk/omnigent.git\n\n' | GIT_TOKEN=fallback "$bin/git-credential-agent" get >/dev/null 2>&1
+    expect "git: a $state registry fails the helper" "$?" 1
+    rm -f "$dir/code"
+    expect "git: a $state registry never hands out GIT_TOKEN" "$(GIT_TOKEN=fallback password lkshrk/omnigent.git)" ""
+    printf code-token >"$dir/code"
+    restore_registry
+  done
 else
   echo "skip registry checks (need root to rewrite $registry)"
 fi
@@ -85,10 +108,12 @@ if [[ $(id -u) == 0 && -x /usr/local/bin/gh ]]; then
   expect "gh: a fork without the forks token never falls back" "$("$bin/gh" pr list --repo lkshrk/omnigent)" ""
   mv "$dir/forks.off" "$dir/forks"
   if [[ -w ${registry%/*} ]]; then
-    printf 'version: invalid\n' >"$registry"
-    expect "gh: an unreadable registry stops a --repo call" "$("$bin/gh" pr list --repo lkshrk/omnigent 2>/dev/null; echo "exit=$?")" exit=1
-    expect "gh: an unreadable registry leaves calls without --repo alone" "$("$bin/gh" pr list)" code-token
-    cp -p "$dir/registry.orig" "$registry"
+    for state in invalid non-utf8 nested no-module; do
+      break_registry "$state"
+      expect "gh: a $state registry stops a --repo call" "$("$bin/gh" pr list --repo lkshrk/omnigent 2>/dev/null; echo "exit=$?")" exit=1
+      expect "gh: a $state registry leaves calls without --repo alone" "$("$bin/gh" pr list)" code-token
+      restore_registry
+    done
   fi
   mv /usr/local/bin/gh.real /usr/local/bin/gh
 else

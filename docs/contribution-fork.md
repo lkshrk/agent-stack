@@ -40,7 +40,7 @@ Do these steps in order. The agents' token must never cover a fork that has no r
 
    `<name>` is the registry key, for example `omnigent`. `--check` must report no drift.
 5. **Policy line.** In `lkshrk/.github`, add the fork's repository name to `repositories:` in `.github/chainguard/agent-stack-fork-writer.sts.yaml`. Keep its permissions as they are: contents, pull requests and issues write, never administration or workflows. The octo-sts GitHub App must cover the fork. The token minter mints this policy as the `forks` key, and Polly's sandboxes mount it at `/agent-secrets/github/forks`.
-6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' `gh` and git credential wrappers use the `forks` token for every fork in that copy, and the `code` token for everything else. A fork never gets the `code` token, and if the image's registry can't be read, the wrappers refuse.
+6. **h-cloud pins.** Pin the release in h-cloud: `agent-tools` for the approver, which then watches the new fork, and `omnigent-host` for the agents' copy of the registry. The agents' git credential helper, and `gh` called with `-R`/`--repo`, use the `forks` token for every fork in that copy and the `code` token for everything else; if the registry check fails, they refuse. The token scopes are the boundary, not the wrappers (`images/README.md`).
 
 The setup refuses to run unless all of these hold:
 
@@ -205,4 +205,5 @@ Prove each of these before the first real contribution. Use a stand-in: a throwa
 - Keep the fork current with GitHub's "Sync fork". It merges upstream into the default branch and keeps the CI commit.
 - After every "Sync fork", run `scripts/agent-stack-fork-setup <name> --check` from a release tag checkout. Workflows that upstream added arrive enabled, and `--check` reports them as drift. `--check` writes nothing; it only warns when the checkout isn't a clean release tag, and it still needs the `workflow` scope. Fix drift by running the setup without `--check`.
 - After a registry entry changes, release and pin it in h-cloud, then run the setup again.
+- Keep `repositories:` in lkshrk/.github `agent-stack-fork-writer.sts.yaml` equal to the registry forks; nothing checks it.
 - Moving `upstream/pr-<N>` needs the fork synced. If the approved commit's history carries upstream workflow changes the fork lacks, GitHub refuses the move, because the PAT has no `workflow` scope. The approver tells the owner once per approval that the move needs the fork synced first, and retries on every poll. Syncing the fork clears the wait, and the approval then publishes. Rebase only if the sync doesn't clear it; a rebase makes a new head that needs a new approval. Don't widen the token.
