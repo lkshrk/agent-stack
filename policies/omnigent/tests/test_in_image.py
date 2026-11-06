@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import stat
 import subprocess
@@ -63,7 +64,11 @@ class InImageTest(unittest.TestCase):
             text=True,
             check=True,
         )
-        self.assertEqual(result.stdout, '["omnigent"]\n')
+        from agent_stack_policies.public_contributions import Registry
+
+        expected = [repository.name for repository in Registry.load(REGISTRY_PATH).repositories]
+        self.assertIn("omnigent", expected)
+        self.assertEqual(json.loads(result.stdout), expected)
 
     def test_registry_loads_in_omnigent(self):
         from omnigent.policies.registry import get_registry, load_registry
