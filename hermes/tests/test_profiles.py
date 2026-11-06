@@ -84,6 +84,7 @@ DISPATCHER_KANBAN = {
     "review_dispatch": False,
     "failure_limit": 2,
     "max_in_progress_per_profile": 3,
+    "dispatch_profiles": ["delivery", "omnigent-runner"],
 }
 
 
@@ -134,6 +135,14 @@ class ProfilesTest(unittest.TestCase):
         self.assertEqual(kanban, DISPATCHER_KANBAN)
         for key, value in DISPATCHER_KANBAN.items():
             self.assertIs(type(kanban[key]), type(value), key)
+
+    def test_dispatcher_never_runs_cards_as_default(self):
+        self.assertNotIn("default", effective("default")["kanban"]["dispatch_profiles"])
+
+    def test_dev_lane_memory_stays_out_of_openviking(self):
+        for name in SECONDARY:
+            provider = (effective(name).get("memory") or {}).get("provider", "")
+            self.assertNotEqual(provider, "openviking", name)
 
     def test_delivery_has_no_terminal_or_file_write(self):
         cfg = effective("delivery")

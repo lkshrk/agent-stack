@@ -44,6 +44,8 @@ kanban:
   review_dispatch: false
   failure_limit: 2
   max_in_progress_per_profile: 3
+  # Workers can assign cards to any profile; default has the write tools, so it never takes cards.
+  dispatch_profiles: [delivery, omnigent-runner]
 
 mcp_servers:
   linear_read:
