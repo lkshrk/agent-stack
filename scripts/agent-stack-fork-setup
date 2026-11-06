@@ -1,0 +1,344 @@
+#!/usr/bin/env python3
+"""Set up the owner's contribution fork of a registered upstream: labels, both rulesets, the contribution-ci workflow and the Actions settings. With --check, report drift and write nothing. Run it as the owner with your own gh login, from a release tag checkout."""
+
+import argparse
+import base64
+import binascii
+import difflib
+import json
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from email.message import Message
+from pathlib import Path
+from typing import Any, Callable, TextIO
+from urllib.parse import quote, urlencode
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "policies" / "omnigent"))
+sys.path.insert(0, str(ROOT / "templates"))
+
+from agent_stack_policies.public_contributions import FORK_OWNER, RegisteredRepository, Registry, RegistryError  # noqa: E402
+from render_contribution_fork import CI_PATH, ci_workflow  # noqa: E402
+
+API_URL = "https://api.github.com"
+PAGE_SIZE = 100
+MAX_PAGES = 10
+ADMIN_ROLE_ID = 5
+CI_WAIT_ATTEMPTS = 10
+CI_WAIT_SECONDS = 3
+LABELS = {
+    "upstream-ready": ("0e8a16", "Fork PR ready for the owner's upstream approval"),
+    "approved-upstream": ("1d76db", "Owner approval to file this draft upstream"),
+    "upstream-issue": ("c5def5", "Draft of an upstream issue"),
+    "upstream-comment": ("d4c5f9", "Draft of an upstream comment (not published yet)"),
+}
+WORKFLOW_PERMISSIONS = {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": False}
+BRANCH_RULES = ("creation", "update", "deletion", "non_fast_forward")
+
+
+class SetupError(Exception):
+    pass
+
+
+def printable(text: str) -> str:
+    return "".join(ch if ch.isprintable() or ch in "\n\t" else ch.encode("unicode_escape").decode() for ch in text)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class GitHub:
+    def __init__(self, api_url: str, token: str, read_only: bool):
+        self.api_url = api_url.rstrip("/")
+        self.token = token
+        self.read_only = read_only
+        self.opener = urllib.request.build_opener(_NoRedirect)
+
+    def request(self, method: str, path: str, body: Any = None, query: dict | None = None, missing_ok: bool = False) -> tuple[int, Any, Message]:
+        if self.read_only and method != "GET":
+            raise SetupError(f"--check must not write, refusing {method} {path}")
+        url = self.api_url + path + ("?" + urlencode(query) if query else "")
+        request = urllib.request.Request(
+            url,
+            data=None if body is None else json.dumps(body).encode(),
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+                "User-Agent": "agent-stack-fork-setup",
+            },
+        )
+        try:
+            with self.opener.open(request, timeout=30) as response:
+                raw = response.read()
+                return response.status, json.loads(raw) if raw.strip() else None, response.headers
+        except urllib.error.HTTPError as error:
+            with error:
+                if missing_ok and error.code == 404:
+                    return 404, None, error.headers
+                raise SetupError(f"GitHub answered {error.code} for {method} {path}: {_message(error)}") from None
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            raise SetupError(f"cannot talk to GitHub for {method} {path}: {type(error).__name__}") from None
+
+    def get(self, path: str, **kwargs) -> Any:
+        return self.request("GET", path, **kwargs)[1]
+
+    def paginate(self, path: str, what: str, key: str | None = None) -> list[dict]:
+        items: list[dict] = []
+        for page in range(1, MAX_PAGES + 1):
+            data = self.get(path, query={"per_page": PAGE_SIZE, "page": page})
+            chunk = data.get(key) if key and isinstance(data, dict) else data
+            if not isinstance(chunk, list):
+                raise SetupError(f"unexpected answer listing {what}")
+            items.extend(chunk)
+            if len(chunk) < PAGE_SIZE:
+                return items
+        raise SetupError(f"{what} span more than {MAX_PAGES} pages; refusing to act on a partial list")
+
+
+def _message(error: urllib.error.HTTPError) -> str:
+    try:
+        message = json.loads(error.read()).get("message", "")
+    except (ValueError, AttributeError, OSError):
+        message = ""
+    return printable(str(message)).replace("\n", " ")[:200] or "no message"
+
+
+def gh_token() -> str:
+    try:
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise SetupError("cannot run gh auth token; install gh and run gh auth login") from None
+    token = result.stdout.strip()
+    if result.returncode or not token:
+        raise SetupError("gh auth token failed; run gh auth login")
+    return token
+
+
+def _same(a: Any, b: str) -> bool:
+    return isinstance(a, str) and a.casefold() == b.casefold()
+
+
+def ruleset_body(name: str, ref: str) -> dict:
+    return {
+        "name": name,
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [{"actor_id": ADMIN_ROLE_ID, "actor_type": "RepositoryRole", "bypass_mode": "always"}],
+        "conditions": {"ref_name": {"include": [ref], "exclude": []}},
+        "rules": [{"type": rule} for rule in BRANCH_RULES],
+    }
+
+
+def ruleset_shape(ruleset: dict) -> tuple:
+    ref_name = (ruleset.get("conditions") or {}).get("ref_name") or {}
+    rules = []
+    for rule in ruleset.get("rules") or []:
+        parameters = dict(rule.get("parameters") or {})
+        if parameters.get("update_allows_fetch_and_merge") is False:
+            del parameters["update_allows_fetch_and_merge"]
+        rules.append((rule.get("type"), json.dumps(parameters, sort_keys=True)))
+    bypass = [(a.get("actor_id"), a.get("actor_type"), a.get("bypass_mode")) for a in ruleset.get("bypass_actors") or []]
+    return (
+        ruleset.get("target"),
+        ruleset.get("enforcement"),
+        sorted(ref_name.get("include") or []),
+        sorted(ref_name.get("exclude") or []),
+        sorted(rules),
+        sorted(bypass, key=repr),
+    )
+
+
+class Setup:
+    def __init__(self, gh: GitHub, entry: RegisteredRepository, out: TextIO, confirm: Callable[[str], str], sleep: Callable[[float], None]):
+        self.gh = gh
+        self.entry = entry
+        self.fork = entry.fork
+        self.repo = f"/repos/{entry.fork}"
+        self.branch = entry.default_branch
+        self.upstream = entry.upstream.removeprefix("https://github.com/").removesuffix(".git")
+        self.out = out
+        self.confirm = confirm
+        self.sleep = sleep
+        self.changes = 0
+        self.rulesets = {
+            "contribution-default-branch": f"refs/heads/{self.branch}",
+            "contribution-upstream-branches": "refs/heads/upstream/**",
+        }
+
+    def say(self, text: str) -> None:
+        print(printable(text), file=self.out)
+
+    def write(self, method: str, path: str, body: Any, done: str) -> None:
+        self.gh.request(method, path, body)
+        self.changes += 1
+        self.say(done)
+
+    def verify(self) -> None:
+        _, user, headers = self.gh.request("GET", "/user")
+        login = (user or {}).get("login")
+        if not _same(login, FORK_OWNER):
+            raise SetupError(f"the gh login is {printable(str(login))}, not the fork owner {FORK_OWNER}")
+        scopes = {scope.strip() for scope in (headers.get("X-OAuth-Scopes") or "").split(",")}
+        if "workflow" not in scopes:
+            raise SetupError("the gh token lacks the workflow scope, which committing contribution-ci.yml needs; run: gh auth refresh -s workflow")
+        repo = self.gh.get(self.repo) or {}
+        if not _same(repo.get("full_name"), self.fork) or not _same((repo.get("owner") or {}).get("login"), FORK_OWNER):
+            raise SetupError(f"{self.fork} is not the fork owner {FORK_OWNER}'s repository")
+        if repo.get("fork") is not True or not _same((repo.get("parent") or {}).get("full_name"), self.upstream):
+            raise SetupError(f"{self.fork} is not a fork of the registry upstream {self.upstream}")
+        if repo.get("default_branch") != self.branch:
+            raise SetupError(f"{self.fork}'s default branch is not the registry's {self.branch}")
+
+    def missing_labels(self) -> list[str]:
+        names = {label.get("name") for label in self.gh.paginate(f"{self.repo}/labels", "labels")}
+        return [name for name in LABELS if name not in names]
+
+    def ruleset_state(self) -> dict[str, tuple[int | None, bool]]:
+        existing = {r.get("name"): r.get("id") for r in self.gh.paginate(f"{self.repo}/rulesets", "rulesets")}
+        state = {}
+        for name, ref in self.rulesets.items():
+            ruleset_id = existing.get(name)
+            if not isinstance(ruleset_id, int):
+                state[name] = (None, False)
+                continue
+            current = self.gh.get(f"{self.repo}/rulesets/{ruleset_id}") or {}
+            state[name] = (ruleset_id, ruleset_shape(current) == ruleset_shape(ruleset_body(name, ref)))
+        return state
+
+    def current_ci(self) -> tuple[str | None, str | None]:
+        status, data, _ = self.gh.request("GET", f"{self.repo}/contents/{quote(CI_PATH)}", query={"ref": self.branch}, missing_ok=True)
+        if status == 404:
+            return None, None
+        if not isinstance(data, dict) or data.get("type") != "file" or data.get("encoding") != "base64":
+            raise SetupError(f"{CI_PATH} on {self.fork} is not a plain file")
+        try:
+            return base64.b64decode(data.get("content") or "").decode(), data.get("sha")
+        except (binascii.Error, UnicodeDecodeError):
+            raise SetupError(f"cannot decode {CI_PATH} on {self.fork}") from None
+
+    def workflows(self) -> list[dict]:
+        return self.gh.paginate(f"{self.repo}/actions/workflows", "workflows", key="workflows")
+
+    def workflow_permissions(self) -> dict:
+        current = self.gh.get(f"{self.repo}/actions/permissions/workflow") or {}
+        return {key: current.get(key) for key in WORKFLOW_PERMISSIONS}
+
+    def drift(self) -> list[str]:
+        found = [f"label {name} is missing" for name in self.missing_labels()]
+        for name, (ruleset_id, matches) in self.ruleset_state().items():
+            if ruleset_id is None:
+                found.append(f"ruleset {name} is missing")
+            elif not matches:
+                found.append(f"ruleset {name} differs from the setup")
+        if self.current_ci()[0] != ci_workflow(self.entry):
+            found.append(f"{CI_PATH} on {self.branch} differs from the rendered workflow")
+        if (self.gh.get(f"{self.repo}/actions/permissions") or {}).get("enabled") is not True:
+            found.append("Actions are disabled")
+        workflows = self.workflows()
+        ci = [w for w in workflows if w.get("path") == CI_PATH]
+        if not ci or any(w.get("state") != "active" for w in ci):
+            found.append(f"{CI_PATH} is not an active workflow")
+        found += [f"workflow {w.get('path')} is active" for w in workflows if w.get("path") != CI_PATH and w.get("state") == "active"]
+        if self.workflow_permissions() != WORKFLOW_PERMISSIONS:
+            found.append("workflow permissions are not read-only with PR approvals off")
+        return found
+
+    def apply(self) -> None:
+        for name in self.missing_labels():
+            color, description = LABELS[name]
+            self.write("POST", f"{self.repo}/labels", {"name": name, "color": color, "description": description}, f"created label {name}")
+
+        for name, (ruleset_id, matches) in self.ruleset_state().items():
+            body = ruleset_body(name, self.rulesets[name])
+            if ruleset_id is None:
+                self.write("POST", f"{self.repo}/rulesets", body, f"created ruleset {name}")
+            elif not matches:
+                self.write("PUT", f"{self.repo}/rulesets/{ruleset_id}", body, f"restored ruleset {name}")
+
+        rendered = ci_workflow(self.entry)
+        current, sha = self.current_ci()
+        if current != rendered:
+            diff = difflib.unified_diff(
+                (current or "").splitlines(keepends=True), rendered.splitlines(keepends=True), f"{self.fork}:{self.branch}/{CI_PATH}", "rendered"
+            )
+            self.out.write(printable("".join(diff)))
+            try:
+                answer = self.confirm(f"Commit this to {self.fork} {self.branch}? [y/N] ")
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                raise SetupError(f"{CI_PATH} not committed; stopped after the labels and rulesets")
+            body = {"message": f"ci: {'update' if current is not None else 'add'} contribution-ci", "content": base64.b64encode(rendered.encode()).decode(), "branch": self.branch}
+            if sha is not None:
+                body["sha"] = sha
+            self.write("PUT", f"{self.repo}/contents/{quote(CI_PATH)}", body, f"committed {CI_PATH} to {self.branch}")
+
+        if (self.gh.get(f"{self.repo}/actions/permissions") or {}).get("enabled") is not True:
+            self.write("PUT", f"{self.repo}/actions/permissions", {"enabled": True}, "enabled Actions")
+
+        for attempt in range(CI_WAIT_ATTEMPTS):
+            workflows = self.workflows()
+            ci = [w for w in workflows if w.get("path") == CI_PATH]
+            if ci:
+                break
+            if attempt + 1 < CI_WAIT_ATTEMPTS:
+                self.sleep(CI_WAIT_SECONDS)
+        else:
+            raise SetupError(f"GitHub does not list {CI_PATH} as a workflow of {self.fork} yet; run the setup again in a minute")
+        for workflow in ci:
+            if workflow.get("state") != "active":
+                self.write("PUT", f"{self.repo}/actions/workflows/{int(workflow['id'])}/enable", None, f"enabled workflow {CI_PATH}")
+        for workflow in workflows:
+            if workflow.get("path") != CI_PATH and workflow.get("state") == "active":
+                self.write("PUT", f"{self.repo}/actions/workflows/{int(workflow['id'])}/disable", None, f"disabled workflow {workflow.get('path')}")
+
+        if self.workflow_permissions() != WORKFLOW_PERMISSIONS:
+            self.write("PUT", f"{self.repo}/actions/permissions/workflow", WORKFLOW_PERMISSIONS, "set read-only workflow permissions, PR approvals off")
+
+        self.say(f"{self.fork} is set up" if self.changes else f"{self.fork} already matches the setup")
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    api_url: str = API_URL,
+    token: str | None = None,
+    confirm: Callable[[str], str] = input,
+    stdout: TextIO = sys.stdout,
+    stderr: TextIO = sys.stderr,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    parser = argparse.ArgumentParser(prog="agent-stack-fork-setup", description=__doc__)
+    parser.add_argument("repository", help="registry key, e.g. omnigent")
+    parser.add_argument("--check", action="store_true", help="report drift and write nothing")
+    parser.add_argument("--registry", type=Path, default=ROOT / "config" / "public-contributions.yaml")
+    args = parser.parse_args(argv)
+    try:
+        entry = Registry.load(args.registry).repository(args.repository)
+        gh = GitHub(api_url, token if token is not None else gh_token(), read_only=args.check)
+        setup = Setup(gh, entry, stdout, confirm, sleep)
+        setup.verify()
+        if not args.check:
+            setup.apply()
+            return 0
+        drift = setup.drift()
+        for line in drift:
+            setup.say(f"drift: {line}")
+        if not drift:
+            setup.say(f"{entry.fork} matches the setup")
+        return 1 if drift else 0
+    except (SetupError, RegistryError) as error:
+        print(f"agent-stack-fork-setup: {printable(str(error))}", file=stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

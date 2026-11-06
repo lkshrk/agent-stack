@@ -29,6 +29,7 @@ policies:
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
   - 'templates/**'
+  - 'scripts/**'
   - 'config/public-contributions.yaml'
   - 'cmd/contribution-approver/forks.json'
 omnigent-host:
