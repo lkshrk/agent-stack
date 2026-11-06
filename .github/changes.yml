@@ -29,7 +29,9 @@ policies:
   - 'config/omnigent/**'
   - 'images/omnigent-host/codex/**'
   - 'templates/**'
+  - 'scripts/**'
   - 'config/public-contributions.yaml'
+  - 'cmd/contribution-approver/forks.json'
 omnigent-host:
   - *shared
   - 'policies/omnigent/agent_stack_policies/**'

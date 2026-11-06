@@ -9,9 +9,13 @@ for arg in "$@"; do
   case "$arg" in --repo=*) repo=${arg#--repo=} ;; esac
   prev=$arg
 done
-case "$repo" in
-  lkshrk/omnigent | https://github.com/lkshrk/omnigent | https://github.com/lkshrk/omnigent.git) file=${OMNIGENT_TOKEN_FILE:-/agent-secrets/github/omnigent} ;;
-esac
+if [ -n "$repo" ]; then
+  if /opt/agent/bin/contribution-fork "$repo"; then
+    file=${FORKS_TOKEN_FILE:-/agent-secrets/github/forks}
+  else
+    [ "$?" = 3 ] || exit 1
+  fi
+fi
 if [ -z "${GH_TOKEN:-}" ] && [ -r "$file" ]; then
   GH_TOKEN=$(cat "$file")
   export GH_TOKEN

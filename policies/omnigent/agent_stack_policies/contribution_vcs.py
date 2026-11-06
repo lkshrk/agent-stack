@@ -26,6 +26,7 @@ _GIT_ENV_KEEP = ("PATH", "HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL", "GIT_CO
 _FILTER_DRIVER = re.compile(r"[A-Za-z0-9_.-]+")
 _WORKFLOWS = ".github/workflows/"
 _OWNER_LABEL = "approved-upstream"
+_COMMENT_LABEL = "upstream-comment"
 _PUBLISH_BRANCHES = "upstream/"
 _REMOTE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")
 _BRANCH_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_./-]*")
@@ -494,6 +495,8 @@ def fork_gh(argv: list[str], repository: "RegisteredRepository") -> Decision | N
     labels = [label.strip().casefold() for name in ("--label", "--add-label") for value in values.get(name, []) for label in value.split(",")]
     if _OWNER_LABEL in labels:
         return deny(f"only the owner applies the {_OWNER_LABEL} label")
+    if _COMMENT_LABEL in labels:
+        return deny(f"comment drafts are off, so the {_COMMENT_LABEL} label is not allowed; file an upstream issue draft or leave a note for the owner")
     if command == ("pr", "create") and len(values.get("--head", [])) != 1:
         return deny(f"{FORK_GH_FORM}; gh pr create needs exactly one --head <branch>")
     return allow()

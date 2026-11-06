@@ -74,7 +74,7 @@ func TestApproveReviewsTheAnnouncedHeadOnce(t *testing.T) {
 		t.Fatalf("review = %+v, want APPROVE on %s", r, shaA)
 	}
 	msgs := h.signal.messages()
-	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[1], "https://github.com/lkshrk/omnigent/actions/workflows/publish-upstream.yml") || !strings.Contains(msgs[2], "unknown or already used") {
+	if len(msgs) != 3 || !strings.Contains(msgs[1], "Approved lkshrk/omnigent#7 at "+shaA) || !strings.Contains(msgs[1], "Publishing upstream follows") || !strings.Contains(msgs[2], "unknown or already used") {
 		t.Fatalf("confirmations = %q", msgs)
 	}
 }
@@ -345,5 +345,25 @@ func TestADecisionIsRefusedWhenThePullRequestChangedSinceTheAnnouncement(t *test
 				}
 			})
 		}
+	}
+}
+
+func TestADecisionIsRefusedWhenTheForkNoLongerMatchesTheRegistry(t *testing.T) {
+	for name, change := range map[string]func(g *fakeGitHub){
+		"parent": func(g *fakeGitHub) { g.fork.parent = "someone-else/omnigent" },
+		"owner":  func(g *fakeGitHub) { g.fork.owner = "someone" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			code := announce(t, h, 7, shaA)
+			h.gh.update(func() { change(h.gh) })
+
+			if rec := decide(h, "Bearer "+testShared, `{"action":"approve","code":"`+code+`"}`); rec.Code != http.StatusBadGateway {
+				t.Fatalf("answer = %d, want 502", rec.Code)
+			}
+			if calls := h.gh.reviewCalls(); len(calls) != 0 {
+				t.Fatalf("submitted %v", calls)
+			}
+		})
 	}
 }

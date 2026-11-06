@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 
 class FakeGitHub:
-    """An in-process GitHub REST API: routes are (method, path regex) -> handler(match, query, body) -> (status, json)."""
+    """An in-process GitHub REST API: routes are (method, path regex) -> handler(match, query, body) -> (status, json[, headers])."""
 
     def __init__(self, token: str):
         self.token = token
@@ -26,9 +26,11 @@ class FakeGitHub:
                 fake.requests.append(
                     {"method": self.command, "path": url.path, "query": url.query, "body": body, "auth": self.headers.get("Authorization")}
                 )
-                status, payload = fake.dispatch(self.command, url.path, parse_qs(url.query), body, self.headers.get("Authorization"))
+                status, payload, *extra = fake.dispatch(self.command, url.path, parse_qs(url.query), body, self.headers.get("Authorization"))
                 data = json.dumps(payload).encode()
                 self.send_response(status)
+                for name, value in (extra[0] if extra else {}).items():
+                    self.send_header(name, value)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -51,7 +53,7 @@ class FakeGitHub:
     def route(self, method: str, pattern: str, handler: Callable[..., tuple[int, Any]]) -> None:
         self.routes.insert(0, (method, re.compile(pattern), handler))
 
-    def dispatch(self, method, path, query, body, auth):
+    def dispatch(self, method, path, query, body, auth) -> tuple:
         if auth != f"Bearer {self.token}":
             return 401, {"message": "Bad credentials"}
         for route_method, pattern, handler in self.routes:

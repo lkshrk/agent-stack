@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 const (
@@ -19,10 +20,11 @@ const (
 	pageSize        = 100
 	maxPages        = 10
 	maxRespBytes    = 4 << 20
+	maxETagBytes    = 32 << 20
 )
 
 var (
-	protectedPrefixes = []string{".github/", "publish/"}
+	protectedPrefixes = []string{".github/"}
 	titleFormats      = map[string]*regexp.Regexp{"conventional-scoped": regexp.MustCompile(`^[a-z]+\([^()\s]+\)!?: \S.*$`)}
 )
 
@@ -35,7 +37,20 @@ var (
 type githubClient struct {
 	base, token string
 	http        *http.Client
+
+	mu        sync.Mutex
+	etags     map[string]etagged
+	etagBytes int
 }
+
+type etagged struct {
+	etag string
+	body []byte
+}
+
+type forkMismatch struct{ detail string }
+
+func (e *forkMismatch) Error() string { return e.detail }
 
 type forkConfig struct {
 	Upstream      string `json:"upstream"`
@@ -89,6 +104,8 @@ func (p pullRequest) hasLabel(name string) bool {
 type apiError struct {
 	method, path string
 	status       int
+	body         []byte
+	header       http.Header
 }
 
 func (e *apiError) Error() string {
@@ -114,6 +131,11 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 	}
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", accept)
+	cacheKey := accept + " " + u
+	cached, revalidate := g.cachedETag(method, cacheKey)
+	if revalidate {
+		req.Header.Set("If-None-Match", cached.etag)
+	}
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -127,8 +149,13 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 	if err != nil {
 		return fmt.Errorf("GitHub %s %s: read failed", method, path)
 	}
-	if res.StatusCode/100 != 2 {
-		return &apiError{method: method, path: path, status: res.StatusCode}
+	switch {
+	case res.StatusCode == http.StatusNotModified && revalidate:
+		raw = cached.body
+	case res.StatusCode/100 != 2:
+		return &apiError{method: method, path: path, status: res.StatusCode, body: raw, header: res.Header}
+	case method == http.MethodGet && res.Header.Get("ETag") != "":
+		g.storeETag(cacheKey, res.Header.Get("ETag"), raw)
 	}
 	if b, ok := out.(*[]byte); ok {
 		*b = raw
@@ -141,6 +168,30 @@ func (g *githubClient) do(ctx context.Context, method, path string, query url.Va
 		return fmt.Errorf("GitHub %s %s: undecodable response", method, path)
 	}
 	return nil
+}
+
+func (g *githubClient) cachedETag(method, key string) (etagged, bool) {
+	if method != http.MethodGet {
+		return etagged{}, false
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	e, ok := g.etags[key]
+	return e, ok
+}
+
+// storeETag keeps GET bodies for If-None-Match; GitHub does not bill a 304 against the PAT's hourly limit.
+func (g *githubClient) storeETag(key, etag string, raw []byte) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.etags == nil || g.etagBytes+len(raw) > maxETagBytes {
+		g.etags, g.etagBytes = map[string]etagged{}, 0
+	}
+	if old, ok := g.etags[key]; ok {
+		g.etagBytes -= len(old.body)
+	}
+	g.etags[key] = etagged{etag: etag, body: bytes.Clone(raw)}
+	g.etagBytes += len(raw)
 }
 
 func (g *githubClient) get(ctx context.Context, path string, query url.Values, out any) error {
@@ -157,37 +208,25 @@ func (g *githubClient) login(ctx context.Context) (string, error) {
 	return user.Login, nil
 }
 
-func (g *githubClient) config(ctx context.Context, fork string) (forkConfig, error) {
-	var raw []byte
-	if err := g.do(ctx, http.MethodGet, "/repos/"+fork+"/contents/publish/contribution.json", nil, nil, "application/vnd.github.raw+json", &raw); err != nil {
-		return forkConfig{}, err
+func (g *githubClient) verifyFork(ctx context.Context, cfg forkConfig) error {
+	var repo struct {
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+		Parent *struct {
+			FullName string `json:"full_name"`
+		} `json:"parent"`
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return forkConfig{}, fmt.Errorf("%s contribution.json is not JSON", fork)
+	if err := g.get(ctx, "/repos/"+cfg.Fork, nil, &repo); err != nil {
+		return err
 	}
-	want := []string{"upstream", "fork", "owner", "default_branch", "title_format", "ci_workflow"}
-	if len(fields) != len(want) {
-		return forkConfig{}, fmt.Errorf("%s contribution.json must hold exactly %v", fork, want)
+	if repo.Owner.Login != cfg.Owner {
+		return &forkMismatch{fmt.Sprintf("%s is owned by %s, not %s", cfg.Fork, repo.Owner.Login, cfg.Owner)}
 	}
-	for _, k := range want {
-		if s, ok := fields[k].(string); !ok || s == "" {
-			return forkConfig{}, fmt.Errorf("%s contribution.json must hold exactly %v as strings", fork, want)
-		}
+	if repo.Parent == nil || repo.Parent.FullName != cfg.Upstream {
+		return &forkMismatch{fmt.Sprintf("%s is not a fork of %s", cfg.Fork, cfg.Upstream)}
 	}
-	var cfg forkConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return forkConfig{}, fmt.Errorf("%s contribution.json is malformed", fork)
-	}
-	switch {
-	case cfg.Fork != fork:
-		return forkConfig{}, fmt.Errorf("%s contribution.json names the fork %s", fork, cfg.Fork)
-	case !slug.MatchString(cfg.Upstream) || strings.SplitN(fork, "/", 2)[0] != cfg.Owner:
-		return forkConfig{}, fmt.Errorf("%s contribution.json upstream or owner is invalid", fork)
-	case titleFormats[cfg.TitleFormat] == nil || !branchName.MatchString(cfg.DefaultBranch):
-		return forkConfig{}, fmt.Errorf("%s contribution.json title_format or default_branch is invalid", fork)
-	}
-	return cfg, nil
+	return nil
 }
 
 func (g *githubClient) openPulls(ctx context.Context, cfg forkConfig) ([]pullRequest, error) {
@@ -212,7 +251,6 @@ func (g *githubClient) pull(ctx context.Context, fork string, number int) (pullR
 	return pr, err
 }
 
-// ciGreen must stay in step with _require_green_ci in templates/contribution-fork/publish/gate.py.
 func (g *githubClient) ciGreen(ctx context.Context, cfg forkConfig, sha string) (bool, int, error) {
 	var res struct {
 		TotalCount int `json:"total_count"`
@@ -276,33 +314,6 @@ func (g *githubClient) review(ctx context.Context, fork string, number int, sha,
 type compareFile struct {
 	Filename         string `json:"filename"`
 	PreviousFilename string `json:"previous_filename"`
-}
-
-// compare must stay in step with _require_clean_diff in templates/contribution-fork/publish/gate.py.
-func (g *githubClient) compare(ctx context.Context, cfg forkConfig, sha string) (string, error) {
-	var res struct {
-		Status  string         `json:"status"`
-		AheadBy int            `json:"ahead_by"`
-		Files   *[]compareFile `json:"files"`
-	}
-	upstreamOwner := strings.SplitN(cfg.Upstream, "/", 2)[0]
-	if err := g.get(ctx, "/repos/"+cfg.Fork+"/compare/"+upstreamOwner+":"+cfg.DefaultBranch+"..."+sha, nil, &res); err != nil {
-		return "", err
-	}
-	if (res.Status != "ahead" && res.Status != "diverged") || res.AheadBy <= 0 {
-		return fmt.Sprintf("it is not ahead of the upstream %s", cfg.DefaultBranch), nil
-	}
-	if res.Files == nil || len(*res.Files) == 0 || len(*res.Files) >= maxCompareFiles {
-		return "the upstream diff is empty or too large to inspect", nil
-	}
-	for _, f := range *res.Files {
-		for _, name := range []string{f.Filename, f.PreviousFilename} {
-			for _, prefix := range protectedPrefixes {
-				if strings.HasPrefix(name, prefix) {
-					return "the upstream diff changes " + name + "; .github/ and publish/ never go upstream", nil
-				}
-			}
-		}
-	}
-	return "", nil
+	Status           string `json:"status"`
+	SHA              string `json:"sha"`
 }

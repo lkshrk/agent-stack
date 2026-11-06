@@ -5,9 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -16,13 +19,62 @@ const (
 	maxBodyRunes  = 300
 )
 
+// poller is driven by one goroutine, run; only links and kick are shared with the decision handler.
 type poller struct {
-	gh      *githubClient
-	forks   []string
-	codes   *codeStore
-	notify  notifier
-	login   string
-	refused map[prKey]string
+	gh           *githubClient
+	forks        []forkConfig
+	codes        *codeStore
+	notify       notifier
+	login        string
+	refused      map[prKey]string
+	forkTimeout  time.Duration
+	kick         chan struct{}
+	links        *upstreamLinks
+	settled      map[prKey]string
+	retried      map[prKey]string
+	told         map[prKey]map[string]bool
+	unsent       map[prKey][]notice
+	prTimeout    time.Duration
+	draftTimeout time.Duration
+	writeTimeout time.Duration
+	// posted: upstream links written by this process whose record is not written yet; any later approval only records them.
+	posted    map[prKey]draftPost
+	livePulls map[string]map[prKey]bool
+	// knownDrafts: every draft ever polled, so its notices survive the draft leaving the list.
+	knownDrafts map[string]map[prKey]bool
+	// started separates reviews a restart may already have reported from reviews this process must report.
+	started time.Time
+}
+
+func newPoller(gh *githubClient, forks []forkConfig, codes *codeStore, notify notifier) *poller {
+	return &poller{
+		gh: gh, forks: forks, codes: codes, notify: notify, forkTimeout: pollTimeout, prTimeout: prTimeout, draftTimeout: prTimeout, writeTimeout: draftWriteTimeout, posted: map[prKey]draftPost{}, started: codes.now(),
+		kick: make(chan struct{}, 1), links: &upstreamLinks{urls: map[prKey]string{}},
+		livePulls: map[string]map[prKey]bool{}, knownDrafts: map[string]map[prKey]bool{},
+		settled: map[prKey]string{}, retried: map[prKey]string{}, told: map[prKey]map[string]bool{}, unsent: map[prKey][]notice{},
+	}
+}
+
+func (p *poller) run(ctx context.Context, interval time.Duration) {
+	for {
+		p.poll(ctx)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		case <-p.kick:
+			timer.Stop()
+		}
+	}
+}
+
+func (p *poller) wake() {
+	select {
+	case p.kick <- struct{}{}:
+	default:
+	}
 }
 
 func contentDigest(title, body string) string {
@@ -32,31 +84,50 @@ func contentDigest(title, body string) string {
 }
 
 func (p *poller) poll(ctx context.Context) {
-	for _, fork := range p.forks {
-		if err := p.pollFork(ctx, fork); err != nil {
-			log.Printf("contribution-approver: poll %s: %v", fork, err)
+	for _, cfg := range p.forks {
+		fctx, cancel := context.WithTimeout(ctx, p.forkTimeout)
+		verified, err := p.pollFork(fctx, cfg)
+		cancel()
+		if err != nil {
+			log.Printf("contribution-approver: poll %s: %v", cfg.Fork, err)
 		}
+		if !verified {
+			continue
+		}
+		dctx, cancel := context.WithTimeout(ctx, p.forkTimeout)
+		if err := p.pollDrafts(dctx, cfg); err != nil {
+			log.Printf("contribution-approver: drafts %s: %v", cfg.Fork, err)
+		}
+		cancel()
+		live := maps.Clone(p.livePulls[cfg.Fork])
+		if live == nil {
+			live = map[prKey]bool{}
+		}
+		maps.Copy(live, p.knownDrafts[cfg.Fork])
+		p.keepOnly(cfg.Fork, live)
 	}
 }
 
-func (p *poller) pollFork(ctx context.Context, fork string) error {
-	cfg, err := p.gh.config(ctx, fork)
-	if err != nil {
-		return err
-	}
+// pollFork reports whether the fork was verified, which drafts need before they are polled.
+func (p *poller) pollFork(ctx context.Context, cfg forkConfig) (bool, error) {
+	fork := cfg.Fork
+	p.flush(ctx, fork)
 	if p.login == "" {
 		login, err := p.gh.login(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
 		p.login = login
 	}
 	if p.login != cfg.Owner {
-		return fmt.Errorf("the GitHub token belongs to %s, not the fork owner %s", p.login, cfg.Owner)
+		return false, fmt.Errorf("the GitHub token belongs to %s, not the fork owner %s", p.login, cfg.Owner)
+	}
+	if err := p.gh.verifyFork(ctx, cfg); err != nil {
+		return false, err
 	}
 	pulls, err := p.gh.openPulls(ctx, cfg)
 	if err != nil {
-		return err
+		return true, err
 	}
 	ready := map[prKey]bool{}
 	for _, pr := range pulls {
@@ -65,15 +136,18 @@ func (p *poller) pollFork(ctx context.Context, fork string) error {
 		}
 		k := prKey{fork: fork, number: pr.Number}
 		ready[k] = true
-		if !p.codes.needsAnnouncement(k, pr.Head.SHA) {
-			continue
+		pctx, cancel := context.WithTimeout(ctx, p.prTimeout)
+		p.maybePublish(pctx, cfg, k)
+		if p.codes.needsAnnouncement(k, pr.Head.SHA) {
+			if err := p.announce(pctx, cfg, k, pr.Head.SHA); err != nil {
+				log.Printf("contribution-approver: announce %s#%d: %v", fork, pr.Number, err)
+			}
 		}
-		if err := p.announce(ctx, cfg, k, pr.Head.SHA); err != nil {
-			log.Printf("contribution-approver: announce %s#%d: %v", fork, pr.Number, err)
-		}
+		cancel()
 	}
 	p.codes.keepOnly(fork, ready)
-	return nil
+	p.livePulls[fork] = ready
+	return true, nil
 }
 
 func isReady(cfg forkConfig, pr pullRequest) bool {
@@ -100,7 +174,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 	if err != nil {
 		return err
 	}
-	if reviewed {
+	if reviewed && !p.codes.reannouncing(k) {
 		p.codes.markReviewed(k, sha)
 		return nil
 	}
@@ -119,7 +193,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		return nil
 	}
 	delete(p.refused, k)
-	code, err := p.codes.issue(k, sha, contentDigest(pr.Title, pr.Body))
+	code, err := p.codes.issue(k, sha)
 	if err != nil {
 		return err
 	}
@@ -127,6 +201,12 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		p.codes.forget(k)
 		return err
 	}
+	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
+	if err != nil {
+		p.codes.bindFailed(k, sha)
+		return fmt.Errorf("announced, but listing reviews to bind it failed: %w", err)
+	}
+	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body), last)
 	log.Printf("contribution-approver: announced %s#%d at %s", cfg.Fork, k.number, sha)
 	return nil
 }
@@ -135,7 +215,23 @@ func (p *poller) gateRefusal(ctx context.Context, cfg forkConfig, pr pullRequest
 	if !titleFormats[cfg.TitleFormat].MatchString(pr.Title) {
 		return "the title does not follow " + cfg.TitleFormat, nil
 	}
-	return p.gh.compare(ctx, cfg, sha)
+	for _, check := range []func() error{
+		func() error { return p.gh.checkTimeline(ctx, cfg, pr.Number, nil) },
+		func() error { return p.gh.checkDiff(ctx, cfg, sha) },
+	} {
+		if err := check(); err != nil {
+			var r *refusal
+			var capped *pageCapError
+			switch {
+			case errors.As(err, &r):
+				return r.reason, nil
+			case errors.As(err, &capped):
+				return capped.what, nil
+			}
+			return "", err
+		}
+	}
+	return "", nil
 }
 
 func announcement(cfg forkConfig, pr pullRequest, sha string, runs int, code string) string {

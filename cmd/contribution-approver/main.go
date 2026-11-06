@@ -13,11 +13,15 @@ import (
 )
 
 const (
-	codeTTL        = 30 * time.Minute
-	pollInterval   = 60 * time.Second
-	pollTimeout    = 45 * time.Second
-	minSharedToken = 32
-	defaultGitHub  = "https://api.github.com"
+	codeTTL      = 30 * time.Minute
+	pollInterval = 60 * time.Second
+	pollTimeout  = 45 * time.Second
+	prTimeout    = 20 * time.Second
+	// draftWriteTimeout bounds each upstream write, notice and settle so a draft in flight finishes inside the 30 s termination grace.
+	draftWriteTimeout = 8 * time.Second
+	shutdownGrace     = 25 * time.Second
+	minSharedToken    = 32
+	defaultGitHub     = "https://api.github.com"
 )
 
 func main() {
@@ -25,14 +29,9 @@ func main() {
 	if len(shared) < minSharedToken {
 		log.Fatalf("contribution-approver: APPROVER_TOKEN must be at least %d characters", minSharedToken)
 	}
-	var forks []string
-	for _, f := range strings.Split(mustEnv("CONTRIBUTION_FORKS"), ",") {
-		if f = strings.TrimSpace(f); f != "" {
-			if !slug.MatchString(f) {
-				log.Fatalf("contribution-approver: CONTRIBUTION_FORKS entry %q is not owner/name", f)
-			}
-			forks = append(forks, f)
-		}
+	forks, err := loadForks(embeddedForks)
+	if err != nil {
+		log.Fatalf("contribution-approver: %v", err)
 	}
 	base := os.Getenv("GITHUB_API_URL")
 	if base == "" {
@@ -47,8 +46,8 @@ func main() {
 		http:      httpClient,
 	}
 	codes := newCodeStore(codeTTL, time.Now)
-	p := &poller{gh: gh, forks: forks, codes: codes, notify: notify}
-	d := &decider{token: shared, codes: codes, gh: gh, notify: notify}
+	p := newPoller(gh, forks, codes, notify)
+	d := &decider{token: shared, codes: codes, gh: gh, forks: forks, notify: notify, kick: p.wake, links: p.links}
 
 	listen := os.Getenv("LISTEN_ADDR")
 	if listen == "" {
@@ -65,30 +64,39 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	runDone := make(chan struct{})
 	go func() {
-		for {
-			pctx, cancel := context.WithTimeout(ctx, pollTimeout)
-			p.poll(pctx)
-			cancel()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pollInterval):
-			}
-		}
+		p.run(ctx, pollInterval)
+		close(runDone)
 	}()
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
-	log.Printf("contribution-approver: listening on %s, watching %s", listen, strings.Join(forks, ", "))
+	names := make([]string, len(forks))
+	for i, f := range forks {
+		names[i] = f.Fork
+	}
+	log.Printf("contribution-approver: listening on %s, watching %s", listen, strings.Join(names, ", "))
 	select {
 	case err := <-serveErr:
 		log.Fatal(err)
 	case <-ctx.Done():
 	}
-	sctx, cancel := context.WithTimeout(context.Background(), reviewTimeout+5*time.Second)
+	shutdown(srv, runDone, shutdownGrace)
+}
+
+// shutdown stops the server and waits for the poll loop, which finishes the draft in flight, for at most grace.
+func shutdown(srv *http.Server, runDone <-chan struct{}, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
-	if err := srv.Shutdown(sctx); err != nil {
+	stopped := make(chan error, 1)
+	go func() { stopped <- srv.Shutdown(ctx) }()
+	select {
+	case <-runDone:
+	case <-ctx.Done():
+		log.Printf("contribution-approver: the poll loop did not finish within %s", grace)
+	}
+	if err := <-stopped; err != nil {
 		log.Printf("contribution-approver: shutdown: %v", err)
 	}
 }

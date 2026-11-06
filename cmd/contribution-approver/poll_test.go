@@ -53,11 +53,11 @@ func TestPollSkipsPullRequestsThatAreNotReady(t *testing.T) {
 		"no label":  func(g *fakeGitHub, pr *fakePR) { pr.labels = []string{"other"} },
 		"ci failed": func(g *fakeGitHub, pr *fakePR) { g.runs[pr.sha][0].conclusion = "failure" },
 		"ci running": func(g *fakeGitHub, pr *fakePR) {
-			g.runs[pr.sha][0] = fakeRun{"in_progress", "", ".github/workflows/contribution-ci.yml"}
+			g.runs[pr.sha][0] = fakeRun{status: "in_progress", path: ".github/workflows/contribution-ci.yml"}
 		},
 		"no ci run": func(g *fakeGitHub, pr *fakePR) { delete(g.runs, pr.sha) },
 		"one red run": func(g *fakeGitHub, pr *fakePR) {
-			g.runs[pr.sha] = append(g.runs[pr.sha], fakeRun{"completed", "failure", ".github/workflows/contribution-ci.yml"})
+			g.runs[pr.sha] = append(g.runs[pr.sha], fakeRun{status: "completed", conclusion: "failure", path: ".github/workflows/contribution-ci.yml"})
 		},
 		"other workflow":     func(g *fakeGitHub, pr *fakePR) { g.runs[pr.sha][0].path = ".github/workflows/other.yml" },
 		"head in other repo": func(g *fakeGitHub, pr *fakePR) { pr.headRepo = "someone/omnigent" },
@@ -91,26 +91,40 @@ func TestPollRefusesWhenTheTokenIsNotTheForkOwner(t *testing.T) {
 	}
 }
 
-func TestPollRefusesAMalformedForkConfig(t *testing.T) {
-	for name, config := range map[string]string{
-		"other fork":   strings.Replace(contribConfig, `"fork":"lkshrk/omnigent"`, `"fork":"lkshrk/other"`, 1),
-		"extra key":    strings.Replace(contribConfig, `{`, `{"extra":"x",`, 1),
-		"missing key":  strings.Replace(contribConfig, `,"ci_workflow":"contribution-ci.yml"`, ``, 1),
-		"owner":        strings.Replace(contribConfig, `"owner":"lkshrk"`, `"owner":"someone"`, 1),
-		"not json":     "nope",
-		"title format": strings.Replace(contribConfig, `"conventional-scoped"`, `"anything"`, 1),
-	} {
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			h.gh.config = config
-			h.gh.readyPR(7, shaA)
+func TestPollRefusesAForkWhoseParentIsNotTheRegistryUpstream(t *testing.T) {
+	h := newHarness(t)
+	h.gh.fork.parent = "someone-else/omnigent"
+	h.gh.readyPR(7, shaA)
 
-			h.poller.poll(context.Background())
+	h.poller.poll(context.Background())
 
-			if msgs := h.signal.messages(); len(msgs) != 0 {
-				t.Fatalf("announced %q", msgs)
-			}
-		})
+	if msgs := h.signal.messages(); len(msgs) != 0 {
+		t.Fatalf("announced %q", msgs)
+	}
+}
+
+func TestPollRefusesAForkNotOwnedByTheRegistryOwner(t *testing.T) {
+	h := newHarness(t)
+	h.gh.fork.owner = "someone"
+	h.gh.readyPR(7, shaA)
+
+	h.poller.poll(context.Background())
+
+	if msgs := h.signal.messages(); len(msgs) != 0 {
+		t.Fatalf("announced %q", msgs)
+	}
+}
+
+func TestPollNoLongerReadsAConfigFromTheFork(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+
+	h.poller.poll(context.Background())
+
+	for _, req := range h.gh.requests {
+		if strings.Contains(req, "/contents/") {
+			t.Fatalf("read %s", req)
+		}
 	}
 }
 
@@ -185,7 +199,7 @@ func TestTitlesAreFlattenedAndTruncated(t *testing.T) {
 func TestCodesExpire(t *testing.T) {
 	c := &clock{t: time.Now()}
 	s := newCodeStore(30*time.Minute, c.now)
-	code, err := s.issue(prKey{testFork, 1}, shaA, "d")
+	code, err := s.issue(prKey{testFork, 1}, shaA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +213,7 @@ func TestCodesAreEightDigitsAndUnique(t *testing.T) {
 	s := newCodeStore(time.Hour, time.Now)
 	seen := map[string]bool{}
 	for i := range 200 {
-		code, err := s.issue(prKey{testFork, i}, shaA, "d")
+		code, err := s.issue(prKey{testFork, i}, shaA)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,18 +229,16 @@ func TestPollSkipsAHeadTheOwnerAlreadyReviewed(t *testing.T) {
 		login, state, sha string
 		announce          bool
 	}{
-		"approved":            {"lkshrk", "APPROVED", shaA, false},
-		"changes requested":   {"lkshrk", "CHANGES_REQUESTED", shaA, false},
-		"approved older head": {"lkshrk", "APPROVED", shaB, true},
-		"commented":           {"lkshrk", "COMMENTED", shaA, true},
-		"someone else":        {"npa-bot", "APPROVED", shaA, true},
+		"approved without an announcement": {"lkshrk", "APPROVED", shaA, true},
+		"changes requested":                {"lkshrk", "CHANGES_REQUESTED", shaA, false},
+		"approved older head":              {"lkshrk", "APPROVED", shaB, true},
+		"commented":                        {"lkshrk", "COMMENTED", shaA, true},
+		"someone else":                     {"npa-bot", "APPROVED", shaA, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
 			h.gh.readyPR(7, shaA)
-			h.gh.update(func() {
-				h.gh.existing[7] = []map[string]any{{"user": map[string]any{"login": tc.login}, "state": tc.state, "commit_id": tc.sha}}
-			})
+			h.gh.addReview(7, tc.login, tc.state, tc.sha)
 
 			h.poller.poll(context.Background())
 			h.poller.poll(context.Background())
@@ -258,7 +270,6 @@ func TestPollDoesNotAnnounceWhatTheGateWouldRefuse(t *testing.T) {
 		"workflow change": func(pr *fakePR) {
 			pr.changes = append(pr.changes, map[string]any{"filename": ".github/workflows/ci.yml"})
 		},
-		"publish change": func(pr *fakePR) { pr.changes = []map[string]any{{"filename": "publish/gate.py"}} },
 		"renamed from .github": func(pr *fakePR) {
 			pr.changes = []map[string]any{{"filename": "docs/ci.yml", "previous_filename": ".github/ci.yml"}}
 		},

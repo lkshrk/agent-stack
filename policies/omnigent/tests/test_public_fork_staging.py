@@ -136,8 +136,7 @@ class ForkStagingTest(unittest.TestCase):
     def test_allows_upstream_based_branch_when_fork_main_carries_the_template(self):
         upstream_head = git(self.tree, "rev-parse", "HEAD~1").strip()
         git(self.tree, "switch", "-q", "-c", "fork-main", upstream_head)
-        commit(self.tree, ".github/workflows/publish-upstream.yml", "on: pull_request_review\n", "ci: add publish")
-        commit(self.tree, "publish/gate.py", "print()\n", "ci: add gate")
+        commit(self.tree, ".github/workflows/contribution-ci.yml", "on: pull_request\n", "ci: add contribution-ci")
         fork_main = git(self.tree, "rev-parse", "HEAD").strip()
         git(self.tree, "switch", "-q", "-")
         with patch.object(contribution_vcs, "fork_default_head", lambda repository: fork_main):
@@ -166,11 +165,22 @@ class ForkStagingTest(unittest.TestCase):
             ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-ready"],
             ["gh", "pr", "edit", "7", "--repo", FORK, "--title", "fix(web): a", "--body", "-starts with a dash"],
             ["gh", "issue", "create", "--repo", FORK, "--title", "bug", "--body", "b", "--label", "upstream-issue"],
-            ["gh", "issue", "create", "--repo", FORK, "--title", "Comment on #42", "--body", "b", "--label", "upstream-comment"],
             ["gh", "issue", "edit", "4", "-R", FORK, "--body", "b"],
         ):
             with self.subTest(command=command):
                 self.assertAllowed(command)
+
+    def test_denies_comment_drafts(self):
+        for command in (
+            ["gh", "issue", "create", "--repo", FORK, "--title", "Comment on #42", "--body", "b", "--label", "upstream-comment"],
+            ["gh", "issue", "create", "--repo", FORK, "--title", "t", "--body", "b", "-l", "Upstream-Comment"],
+            ["gh", "issue", "create", "--repo", FORK, "--title", "t", "--body", "b", "--label", "bug, upstream-comment"],
+            ["gh", "issue", "edit", "4", "--repo", FORK, "--add-label", "upstream-comment"],
+            ["gh", "pr", "edit", "7", "--repo", FORK, "--add-label", "upstream-comment"],
+        ):
+            with self.subTest(command=command):
+                self.assertDenied(command)
+                self.assertIn("comment drafts are off", self.evaluate(command)["reason"])
 
     def test_denies_gh_writes_without_the_fork_repo(self):
         for command in (

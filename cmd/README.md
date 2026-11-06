@@ -53,14 +53,79 @@ All except `LISTEN_ADDR` are required.
 
 ## contribution-approver
 
-Signal remote control for the contribution fork's publish gate (`docs/contribution-fork.md`). Every 60 s it reads `publish/contribution.json` from each fork's default branch, checks the token belongs to the fork owner, and lists open pull requests on the default branch. A pull request labelled `upstream-ready`, with its head in the fork and green CI on the head (the gate's rule), is announced once per head SHA to the Signal group: title, a body excerpt, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes. Before announcing it runs the gate's own refusals: a title that doesn't follow `title_format`, or an upstream diff (compare against the upstream default branch) that is empty, too large or touches `.github/` or `publish/`, is logged once per head and not announced. A new head SHA replaces the code; a pull request that stops being ready loses it. A head the owner already approved or requested changes on is not announced. Codes live in memory, so a restart announces again with new codes.
+Publishes owner-approved contributions from the contribution forks upstream, and turns the owner's Signal replies into reviews (`docs/contribution-fork.md`). It is the only cluster component that holds the owner's PAT.
 
-`POST /v1/decisions` (`{"action":"approve"|"reject","code":"<8 digits>"}`, `Authorization: Bearer <APPROVER_TOKEN>`, compared in constant time) consumes the code, re-reads the pull request and refuses with 409 (announcing it again if it is still ready) when its head, title, body or `upstream-ready` label changed since the announcement, so the approval is bound to what the owner read. Otherwise it submits the owner's review pinned to the announced SHA: `APPROVE` for approve, which triggers the fork's `publish-upstream`, `REQUEST_CHANGES` for reject. Unknown, used or expired codes make no GitHub call. An expired code stays recognisable for 24 hours: replying with it once makes the next poll announce the pull request again with a fresh code, but only if it is still ready on the same head; otherwise the reply says it changed. Unknown and used codes trigger nothing, and a used code never brings the same head back. If GitHub refuses the review, the pull request is announced again with a new code. The result goes back to the Signal group; an approval links the fork's `publish-upstream` runs, where the gate's outcome shows. `GET /healthz` for probes. Logs never contain the token, the owner number or the group.
+Fork settings come from `forks.json`. It is embedded in the binary and rendered from `config/public-contributions.yaml` by `templates/render_approver_config.py` (`go generate`; a test fails on drift), so a registry change ships with the next release.
+
+**Poll loop.** Every 60 s, and early after a Signal decision, the approver polls each fork with a 45 s timeout:
+
+- It checks that the token belongs to the fork owner, and that GitHub reports the fork as owned by that owner with the registry upstream as its parent.
+- It lists open pull requests on the default branch. A pull request is ready when it is labelled `upstream-ready`, its head is a fork branch other than `upstream/*`, and its base is the fork's default branch. Each ready pull request gets 20 s.
+- It then polls issue drafts in their own 45 s window, 20 s per draft, so a stalled fork can hold one iteration for up to 90 s.
+- Only the poll loop publishes. Every list is read to the end; when publishing, more pages than the cap refuse.
+
+**Announcements.** A ready pull request is announced once per head SHA to the Signal group: title, the first 300 runes of the body, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes.
+
+- It is announced only when every CI run on the head completed with `success`. A title that doesn't follow `title_format`, a changed base, or an upstream diff that is empty, too large, touches `.github/` or differs from the fork-relative diff is logged once per head and not announced.
+- A new head SHA replaces the code. A pull request that stops being ready loses it.
+- A head the owner already reviewed is not announced, unless the approval can't be bound to an announcement (after a restart, or when the text changed). Then it is announced once more.
+- Codes live in memory, so a restart announces again with new codes. That skips a pull request whose approved commit is already on its upstream pull request, or was carried by a closed or merged one.
+- If listing the reviews after an announcement fails, the announcement is retried on the next poll, then at most every 30 minutes, doubling up to a day. A new head is announced at once.
+
+**Decisions.** `POST /v1/decisions` (`{"action":"approve"|"reject","code":"<8 digits>"}`, `Authorization: Bearer <APPROVER_TOKEN>`, compared in constant time):
+
+- It consumes the code and re-reads the pull request. If its head, title, body or `upstream-ready` label changed since the announcement, it answers 409 and announces again if the pull request is still ready.
+- Otherwise it submits the owner's review pinned to the announced SHA (`APPROVE` or `REQUEST_CHANGES`) and wakes the poll loop. If GitHub refuses the review, the pull request is announced again with a new code.
+- Unknown, used and expired codes make no GitHub call. An expired code stays recognisable for 24 hours: replying with it once makes the next poll announce the pull request again, if it is still ready on the same head. A used code never brings the same head back.
+- The reply goes to the Signal group. An approval says publishing follows.
+
+**Publishing pull requests.** On every poll the owner's newest `APPROVED`, `CHANGES_REQUESTED` or `DISMISSED` review decides. Only `APPROVED` publishes, exactly its `commit_id`. It publishes only when all of these hold:
+
+- the approval came after the announcement of that commit, and the title and body are unchanged since (the review ID is greater than the newest review when the announcement went out);
+- the title wasn't renamed and the body wasn't edited at or after the review, by the GraphQL edit history;
+- the pull request is open, labelled and was never closed and reopened after the review, and its base was never changed;
+- every CI run and check run on the commit completed with `success`; any other conclusion refuses;
+- the fork-relative and upstream-relative diffs list the same files and blobs, and neither touches `.github/`.
+
+An approval before the announcement fails the first rule, so the owner approves after the announcement, which comes once CI is green. CI re-run after the announcement is a transient refusal: the approval waits for the run. A hard refusal dismisses the owner's approval with the reason, which spends it. Transient refusals retry on the next poll.
+
+The write points `upstream/pr-<N>` at the commit, then opens the upstream pull request (`maintainer_can_modify: false`), or, if one is open, updates its title and body after the branch move. Once the branch matches, the text is never written again.
+
+- Upstream pull requests count only when their author is the owner and their head repository is the fork; they are listed with `state=all`.
+- A commit that a closed or merged upstream pull request carried is never republished. A different commit needs an owner approval newer than the close.
+- A 422 "A pull request already exists" or `head invalid` on opening waits; other 422s refuse.
+- A branch move that GitHub refuses "without `workflow` scope" waits, and the group is told once per approval to sync the fork first.
+- Once a commit is upstream, later changes to the fork pull request never dismiss its approval; the group is told once that later changes are not published.
+- A settled pull request costs its reviews list and the pull request read; GETs revalidate with `If-None-Match`.
+
+**Issue drafts.** Open fork issues labelled `approved-upstream` (pull requests are ignored). A draft publishes only when all of these hold:
+
+- the newest `approved-upstream` label event is the owner's; a label applied by anyone else is removed silently;
+- it has `upstream-issue` and not `upstream-comment`, and its body is not blank;
+- its title and body don't contain `contribution-fork:` in any case;
+- no rename, body edit, deleted body revision or kind-label change happened at or after the label;
+- its three labels match a replay of its label events, and none of the three repository labels was edited at or after the label;
+- a draft whose body was never edited had no activity after the label (`updated_at` not after it).
+
+The draft becomes one upstream issue: its title, and its body followed by a blank line and `<!-- contribution-fork:<fork>#<n> -->`. Then the approver comments an owner record with the link on the fork issue, removes `approved-upstream` (spending the approval) and closes the issue.
+
+- Before posting and before refusing, it lists the owner's upstream issues updated since the draft was created, every page. An owner issue carrying this draft's exact marker is its publish and is recorded instead of posted again.
+- Within one process, a ledger keyed by draft remembers every upstream write until its record exists.
+- An unedited owner record on the draft (`updated_at` equal to `created_at`) means it was published. An edited one refuses the draft.
+- A hard refusal removes `approved-upstream`. Upstream 404, 410, 422 and a 403 that isn't a rate limit refuse; other errors retry.
+- The upstream write runs on its own 8 s deadline, and its link is told at once. Record, label and close share another 8 s deadline.
+
+**Comment drafts are off.** A draft carrying `upstream-comment` at the approval or now is refused, and the group is told to file it as an issue draft or post it by hand.
+
+**Owner notices.** Notices hold only fixed text, the fork, the number, a checked SHA and a shape-checked upstream link. Each is told once per approval and reason, and waits until Signal accepts it.
+
+**Shutdown.** On SIGTERM the approver starts no new draft, finishes the one in flight and exits within 25 s. This needs one replica, `strategy: Recreate` and a termination grace of at least 30 s.
+
+`GET /healthz` for probes. Logs never contain the token, the owner number or the group.
 
 | Variable | Meaning |
 | --- | --- |
-| `GITHUB_TOKEN` | The owner's classic PAT with only `public_repo`; reviews are submitted as its owner |
-| `CONTRIBUTION_FORKS` | Comma-separated forks, e.g. `lkshrk/omnigent` |
+| `GITHUB_TOKEN` | The owner's classic PAT with only `public_repo`; reviews, dismissals and upstream writes are made as its owner |
 | `APPROVER_TOKEN` | Shared token signal-shim sends, at least 32 characters |
 | `SIGNAL_REST_URL`, `SIGNAL_NUMBER`, `SIGNAL_RECIPIENT` | signal-cli-rest-api, the sender and the group (`group.<id>`) |
 | `GITHUB_API_URL` | Default `https://api.github.com` |
