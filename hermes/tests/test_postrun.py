@@ -571,6 +571,11 @@ class InfraViolationsTest(unittest.TestCase):
         self.assertEqual(self.landed(fake), [])
         self.assertIn(("content", old, "r1"), fake.asked)
 
+    def test_rename_across_directories_counts_as_added(self):
+        old = "kubernetes/apps/ai/other/app/helmrelease.yaml"
+        fake = self.agent_push([change(previous=old)], contents={(old, "base"): RELEASE, (APP, "h"): RELEASE})
+        self.assert_agent_violation(self.landed(fake), "changes spec.chartRef")
+
     def test_unreadable_content_is_violation(self):
         for state in ("larger than 1 MB", "not a file"):
             fake = self.agent_push([change()], contents={(APP, "h"): Content(state)})

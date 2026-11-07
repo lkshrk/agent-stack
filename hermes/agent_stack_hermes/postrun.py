@@ -640,7 +640,7 @@ def _content_problem(reads: InfraReads, change: FileChange, base: str, head: str
     after, why = _content(reads, change.filename, head)
     if why:
         return why
-    found = check_change(change.filename, before, after)
+    found = check_change(change.filename, before, after, previous=change.previous or None)
     return "; ".join(found[:3]) if found else None
 
 
