@@ -25,6 +25,7 @@ var (
 	bareDecisionText = regexp.MustCompile(`^(?i:(approve|reject))$`)
 	announcementCode = regexp.MustCompile(`(?m)^Reply "approve ([0-9]{8})" to publish this commit upstream or "reject ([0-9]{8})"`)
 	e164             = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
+	decisionShaped   = regexp.MustCompile(`^(?i:approve|reject)(\s|$)`)
 	uuidRe           = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 	envelopeKeys = map[string]bool{
@@ -80,7 +81,7 @@ func (a *approvalRoute) match(data []byte) (decision, bool) {
 	if reason == "" {
 		return d, true
 	}
-	if lower := strings.ToLower(strings.TrimSpace(text)); strings.HasPrefix(lower, "approve") || strings.HasPrefix(lower, "reject") {
+	if decisionShaped.MatchString(strings.TrimSpace(text)) {
 		log.Printf("signal-shim: approve/reject message not routed as a decision: %s", reason)
 	}
 	return decision{}, false

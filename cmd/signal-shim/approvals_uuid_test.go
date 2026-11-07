@@ -44,6 +44,7 @@ func TestApprovalMatchRecognisesTheOwnerByUUID(t *testing.T) {
 		{"empty uuid with an empty route uuid", &approvalRoute{owner: testOwner}, uuidEnvelope(nil, "", "", text), false},
 		{"other number and uuid, owner uuid in source", withUUID, uuidEnvelope("+4915559999", testOwnerUUID, otherUUID, text), false},
 		{"own account number", withUUID, uuidEnvelope(testAccount, testOwnerUUID, testOwnerUUID, text), false},
+		{"owner number from the own account uuid", withUUID, uuidEnvelope(testOwner, testOwner, testBotUUID, text), false},
 		{"own account uuid", &approvalRoute{owner: testOwner, ownerUUID: testOwnerUUID, shimUUID: testOwnerUUID}, uuidEnvelope(nil, testOwnerUUID, testOwnerUUID, text), false},
 	}
 	for _, tc := range cases {
@@ -111,6 +112,16 @@ func TestApprovalRouteReadsTheAccountUUIDs(t *testing.T) {
 	if err != nil || r == nil || !strings.EqualFold(r.ownerUUID, testOwnerUUID) || r.shimUUID != testBotUUID {
 		t.Fatalf("configured = %+v, %v", r, err)
 	}
+	t.Run("valid OWNER_UUID does not rescue an invalid OWNER_NUMBER", func(t *testing.T) {
+		logs := captureLog(t)
+		r, err := approvalRouteFromEnv(env(base(map[string]string{"OWNER_NUMBER": "owner", "OWNER_UUID": testOwnerUUID})))
+		if err != nil || r != nil {
+			t.Fatalf("= %+v, %v; want approvals disabled without an error", r, err)
+		}
+		if out := logs(); !strings.Contains(out, "OWNER_NUMBER is not exactly one E.164 number") || strings.Contains(out, testOwnerUUID) {
+			t.Fatalf("log = %q", out)
+		}
+	})
 	for _, key := range []string{"OWNER_UUID", "SHIM_ACCOUNT_UUID"} {
 		for _, bad := range []string{"not-a-uuid", testOwnerUUID + "," + testBotUUID, "{" + testOwnerUUID + "}", strings.ReplaceAll(testOwnerUUID, "-", ""), " " + testOwnerUUID, "0f1e2d3c-4b5a-4697-8877-66554433221g"} {
 			t.Run(key+" "+bad, func(t *testing.T) {
@@ -177,6 +188,9 @@ func TestOrdinaryChatAndDecisionsAreNotLogged(t *testing.T) {
 	route := &approvalRoute{owner: testOwner, ownerUUID: testOwnerUUID}
 	for _, data := range []string{
 		envelope(testOwner, groupText("hello hermes"), nil),
+		envelope(testOwner, groupText("approved, thanks"), nil),
+		envelope(testOwner, groupText("Rejected by CI"), nil),
+		envelope(testOwner, groupText("approver is down"), nil),
 		envelope("+4915559999", groupText("please approve 12345678"), nil),
 		envelope(testOwner, nil, map[string]any{"editMessage": map[string]any{"dataMessage": groupText("approve 12345678")}}),
 		envelope(testOwner, groupText("approve 12345678"), nil),
