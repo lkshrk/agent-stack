@@ -58,6 +58,10 @@ func announcementQuote(author, text string) map[string]any {
 func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 	route := &approvalRoute{owner: testOwner}
 	noSourceNumber, _ := json.Marshal(map[string]any{"account": testAccount, "envelope": map[string]any{"source": testOwner, "dataMessage": groupText("approve 12345678")}})
+	noAccount := func(quoted string) string {
+		raw, _ := json.Marshal(map[string]any{"envelope": map[string]any{"source": testOwner, "sourceNumber": testOwner, "dataMessage": with(groupText("approve"), "quote", map[string]any{"id": 1, "text": quoted})}})
+		return string(raw)
+	}
 	cases := []struct {
 		name, data string
 		want       *decision
@@ -77,6 +81,8 @@ func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 		{"bare Reject quoting the announcement", envelope(testOwner, with(groupText(" Reject\n"), "quote", announcementQuote(testAccount, announcementText("87654321"))), nil), &decision{Action: "reject", Code: "87654321"}},
 		{"bare approve quoting by author only", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorUuid": "uuid-bot", "text": announcementText("12345678"), "attachments": []any{}, "mentions": []any{}, "textStyles": []any{map[string]any{"style": "BOLD"}}}), nil), &decision{Action: "approve", Code: "12345678"}},
 		{"bare approve quoting with a null authorNumber", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorNumber": nil, "text": announcementText("12345678")}), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"bare approve, no account, authorless quote", noAccount("x"), nil},
+		{"bare approve, no account, authorless announcement quote", noAccount(announcementText("12345678")), nil},
 		{"bare approve quoting someone else", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote("+4915559999", announcementText("12345678"))), nil), nil},
 		{"bare approve quoting a spoofed author", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorNumber": "+4915559999", "text": announcementText("12345678")}), nil), nil},
 		{"bare approve quoting a non-announcement", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, "Published upstream: https://example.invalid/pr/1")), nil), nil},

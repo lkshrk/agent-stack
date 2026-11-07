@@ -181,6 +181,7 @@ Prove each of these before the first real contribution, and approve nothing real
 - [ ] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected.
 - [ ] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
 - [ ] A fork PR approved in GitHub and one approved over Signal each publish once.
+- [ ] A quote reply of just `approve` to a real announcement with a long body reaches the approver (Signal clients may truncate quoted text or name the author by UUID only).
 - [ ] A non-owner review publishes nothing, and a stale code publishes nothing.
 - [ ] A commit pushed after the review isn't published.
 - [ ] A body edit after the review is refused, and the approval is dismissed.
