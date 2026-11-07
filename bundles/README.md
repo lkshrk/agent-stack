@@ -25,7 +25,7 @@ Sandbox pod (`omnigent.ai/agent: infra`):
 | Kyverno `agent-github-tokens` token keys | `infra → [hcloud, knowledge]` |
 | Kyverno `gitKey` | `hcloud`, so the host gets `GH_TOKEN_FILE=/agent-secrets/github/hcloud` and `GIT_TOKEN` from the `hcloud` key, and `KNOWLEDGE_TOKEN_FILE=/agent-secrets/github/knowledge` |
 | `land_renovate_pr` token | `HCLOUD_TOKEN_FILE`, default `/agent-secrets/github/hcloud`; no env needed when the key is mounted there |
-| `hcloud` token | octo-sts trust policy `agent-stack-infra-hcloud` (`TOKENS += hcloud=lkshrk@agent-stack-infra-hcloud`): `lkshrk/h-cloud` contents write, pull_requests write, issues write, workflows write, actions read, checks read, statuses read (as merged in `lkshrk/.github`) |
+| `hcloud` token | octo-sts trust policy `agent-stack-infra-hcloud` (`TOKENS += hcloud=lkshrk@agent-stack-infra-hcloud`): `lkshrk/h-cloud` contents write, pull_requests write, issues write, workflows write, actions read, checks read, statuses read (as merged in `lkshrk/.github`). `workflows: write` stays: merging a Renovate PR that touches `.github/workflows` with an App token needs it |
 | Cluster identity | Kyverno sets `serviceAccountName: omnigent-infra` and projects its token (3600 s), `kube-root-ca.crt` and the namespace at `/var/run/secrets/kubernetes.io/serviceaccount` in the `host` container, so `kubectl` and `flux` use in-cluster config; or a `KUBECONFIG` |
 | `omnigent-infra` RBAC | get/list/watch on everything except Secrets; `patch` on Flux Kustomizations, HelmReleases and sources |
 | Admission | a ValidatingAdmissionPolicy that lets `system:serviceaccount:omnigent-sandboxes:omnigent-infra` patch those Flux objects only in `metadata.annotations["reconcile.fluxcd.io/requestedAt"]`. `infra_cluster` is a guardrail; the RBAC `patch` verb alone allows any patch |
@@ -35,7 +35,7 @@ Hermes runner (`omnigent-runner` profile):
 | Variable | Value |
 | --- | --- |
 | `GITHUB_RO_TOKEN_FILES` | `routivo=/var/run/agent/github/review,lkshrk=/var/run/agent/github/hcloud-ro` |
-| `hcloud-ro` token | trust policy `agent-stack-runner-ro` (`TOKENS += hcloud-ro=lkshrk@agent-stack-runner-ro`): `lkshrk/h-cloud` contents, pull_requests, metadata and actions read. `actions: read` is required for the monthly-tag proof (`actions/workflows/tag.yaml/runs`) and is missing from the policy in `lkshrk/.github` today |
+| `hcloud-ro` token | trust policy `agent-stack-runner-ro` (`TOKENS += hcloud-ro=lkshrk@agent-stack-runner-ro`): `lkshrk/h-cloud` contents, pull_requests, metadata and actions read (`actions: read` for the monthly-tag proof, `actions/workflows/tag.yaml/runs`); the policy comes from `lkshrk/.github` PR #16, not merged yet |
 | `GITHUB_AGENT_ACTORS` | `h-cloud-npa[bot]`, the octo-sts GitHub App (id 5184450) whose installation tokens the agents push and merge with |
 | `GITHUB_TRUSTED_ACTORS` | `renovate-master[bot],lkshrk`: pushes to a `renovate/` branch by these are not content-checked |
 | `GITHUB_TRUSTED_MAIN_ACTORS` | `h-cloud-workflow[bot]`: workflow bots that push `main` themselves (image updates, model refreshes). Every other move of `main` during an infra run, an unattributed one included, must be a Renovate merge by an agent |
