@@ -1,5 +1,5 @@
 #!/usr/bin/env -S python3 -I
-"""Set up the owner's contribution fork of a registered upstream: labels, both rulesets, the contribution-ci workflow and the Actions settings. With --check, report drift and write nothing. Run it as the owner with your own gh login, from a clean release tag checkout."""
+"""Set up the owner's contribution fork of a registered upstream: issues, labels, both rulesets, the contribution-ci workflow and the Actions settings. With --check, report drift and write nothing. Run it as the owner with your own gh login, from a clean release tag checkout."""
 
 import os
 import sys
@@ -231,6 +231,7 @@ class Setup:
         self.confirm = confirm
         self.sleep = sleep
         self.changes = 0
+        self.has_issues = False
         self.rulesets = {
             "contribution-default-branch": f"refs/heads/{self.branch}",
             "contribution-upstream-branches": "refs/heads/upstream/**",
@@ -261,6 +262,7 @@ class Setup:
             raise SetupError(f"{self.fork} is not a fork of the registry upstream {self.upstream}")
         if repo.get("default_branch") != self.branch:
             raise SetupError(f"{self.fork}'s default branch is not the registry's {self.branch}")
+        self.has_issues = repo.get("has_issues") is True
 
     def label_changes(self) -> list[tuple[str, str | None]]:
         labels = self.gh.paginate(f"{self.repo}/labels", "labels")
@@ -324,7 +326,7 @@ class Setup:
         ]
 
     def drift(self) -> tuple[list[str], list[str]]:
-        found = []
+        found = [] if self.has_issues else ["issues are disabled"]
         for name, current in self.label_changes():
             found.append(f"label {name} is missing" if current is None else f"label {name} differs in name or colour ({current})")
         for name, (ruleset_id, matches) in self.ruleset_state().items():
@@ -345,8 +347,16 @@ class Setup:
             found.append("workflow permissions are not read-only with PR approvals off")
         return found, self.dynamic_notes(workflows)
 
+    def disable_active_others(self, workflows: list[dict]) -> None:
+        for workflow in self.other_workflows(workflows):
+            if workflow.get("state") == "active":
+                self.write("PUT", f"{self.repo}/actions/workflows/{_workflow_id(workflow)}/disable", None, f"disabled workflow {workflow.get('path')}")
+
     def apply(self) -> None:
-        for name, current in self.label_changes():
+        labels = self.label_changes()
+        if not self.has_issues:
+            self.write("PATCH", self.repo, {"has_issues": True}, "enabled issues")
+        for name, current in labels:
             color, description = LABELS[name]
             if current is None:
                 self.write("POST", f"{self.repo}/labels", {"name": name, "color": color, "description": description}, f"created label {name}")
@@ -369,7 +379,7 @@ class Setup:
             except (EOFError, KeyboardInterrupt):
                 answer = ""
             if answer.strip().lower() not in ("y", "yes"):
-                raise SetupError(f"{self.ci_path} not committed; stopped after the labels and rulesets")
+                raise SetupError(f"{self.ci_path} not committed; stopped after issues, labels and rulesets")
             body = {
                 "message": f"ci: {'update' if current is not None else 'add'} contribution-ci",
                 "content": base64.b64encode(self.rendered.encode()).decode(),
@@ -378,9 +388,6 @@ class Setup:
             if sha is not None:
                 body["sha"] = sha
             self.write("PUT", f"{self.repo}/contents/{quote(self.ci_path)}", body, f"committed {self.ci_path} to {self.branch}")
-
-        if not self.actions_enabled():
-            self.write("PUT", f"{self.repo}/actions/permissions", {"enabled": True}, "enabled Actions")
 
         for attempt in range(CI_WAIT_ATTEMPTS):
             workflows = self.workflows()
@@ -394,11 +401,13 @@ class Setup:
         for workflow in ci:
             if workflow.get("state") != "active":
                 self.write("PUT", f"{self.repo}/actions/workflows/{_workflow_id(workflow)}/enable", None, f"enabled workflow {self.ci_path}")
+        self.disable_active_others(workflows)
         for note in self.dynamic_notes(workflows):
             self.say(note)
-        for workflow in self.other_workflows(workflows):
-            if workflow.get("state") == "active":
-                self.write("PUT", f"{self.repo}/actions/workflows/{_workflow_id(workflow)}/disable", None, f"disabled workflow {workflow.get('path')}")
+
+        if not self.actions_enabled():
+            self.disable_active_others(self.workflows())
+            self.write("PUT", f"{self.repo}/actions/permissions", {"enabled": True}, "enabled Actions")
 
         if self.workflow_permissions() != WORKFLOW_PERMISSIONS:
             self.write("PUT", f"{self.repo}/actions/permissions/workflow", WORKFLOW_PERMISSIONS, "set read-only workflow permissions, PR approvals off")

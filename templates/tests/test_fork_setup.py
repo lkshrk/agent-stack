@@ -43,6 +43,7 @@ class FakeFork:
             "fork": True,
             "parent": {"full_name": "omnigent-ai/omnigent"},
             "default_branch": "main",
+            "has_issues": False,
         }
         self.labels = [{"name": "bug"}, {"name": "enhancement"}]
         self.rulesets: dict[int, dict] = {}
@@ -55,6 +56,8 @@ class FakeFork:
         ]
         self.ci_state = "disabled_manually"
         self.hide_ci_lists = 0
+        self.workflow_lists = 0
+        self.late_workflows: dict[int, list[dict]] = {}
         self.workflow_permissions = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
         self.fail: tuple[str, str] | None = None
         self.fail_answer: tuple[int, dict] = (500, {"message": "Server Error"})
@@ -62,6 +65,7 @@ class FakeFork:
         routes = [
             ("GET", r"/user", self.user),
             ("GET", API, lambda m, q, b: (200, self.repo)),
+            ("PATCH", API, self.update_repo),
             ("GET", API + r"/labels", lambda m, q, b: self.page(self.labels, q)),
             ("POST", API + r"/labels", self.create_label),
             ("PATCH", API + r"/labels/([^/]+)", self.update_label),
@@ -101,6 +105,10 @@ class FakeFork:
         page = int(query.get("page", ["1"])[0])
         chunk = items[(page - 1) * per_page : page * per_page]
         return 200, ({"total_count": len(items), key: chunk} if key else chunk)
+
+    def update_repo(self, match, query, body):
+        self.repo.update(body)
+        return 200, self.repo
 
     def create_label(self, match, query, body):
         if any(label["name"].lower() == body["name"].lower() for label in self.labels):
@@ -151,6 +159,9 @@ class FakeFork:
         return 204, None
 
     def list_workflows(self, match, query, body):
+        if query.get("page", ["1"]) == ["1"]:
+            self.workflow_lists += 1
+            self.workflows += self.late_workflows.pop(self.workflow_lists, [])
         if self.hide_ci_lists:
             self.hide_ci_lists -= 1
             return self.page([w for w in self.workflows if w["path"] != CI_PATH], query, "workflows")
@@ -258,6 +269,8 @@ def checkout(tagged: bool = True) -> tempfile.TemporaryDirectory:
 
 def step(method: str, path: str) -> str:
     suffix = path.removeprefix("/repos/" + FORK)
+    if method == "PATCH" and suffix == "":
+        return "issues"
     if suffix == "/labels":
         return "labels"
     if suffix.startswith("/rulesets"):
@@ -320,10 +333,10 @@ class ForkSetupTest(unittest.TestCase):
         code, out, err = self.run_setup()
 
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.steps(), ["labels", "rulesets", "commit", "actions", "enable-ci", "disable", "permissions"])
+        self.assertEqual(self.steps(), ["issues", "labels", "rulesets", "commit", "enable-ci", "disable", "actions", "permissions"])
         self.assertEqual(len(self.prompts), 1)
         writes_before_prompt = self.gh.writes()[: self.prompts[0][1]]
-        self.assertEqual(self.steps(writes_before_prompt), ["labels", "rulesets"])
+        self.assertEqual(self.steps(writes_before_prompt), ["issues", "labels", "rulesets"])
         self.assertIn("+name: contribution-ci", out)
 
     def test_creates_the_labels_the_approver_reads(self):
@@ -355,6 +368,88 @@ class ForkSetupTest(unittest.TestCase):
         disabled = [path for method, path, _ in self.gh.writes() if path.endswith("/disable")]
         self.assertEqual(disabled, [f"/repos/{FORK}/actions/workflows/11/disable", f"/repos/{FORK}/actions/workflows/12/disable"])
 
+    def test_enables_issues_on_a_fork_that_has_them_off(self):
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertIs(self.fork.repo["has_issues"], True)
+        self.assertIn(("PATCH", f"/repos/{FORK}", {"has_issues": True}), self.gh.writes())
+        self.assertIn("enabled issues", out)
+
+    def test_leaves_issues_alone_when_they_are_on(self):
+        self.fork.repo["has_issues"] = True
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertNotIn(f"/repos/{FORK}", [path for _, path, _ in self.gh.writes()])
+        self.assertNotIn("enabled issues", out)
+
+    def test_check_flags_disabled_issues_alone_and_writes_nothing(self):
+        self.run_setup()
+        self.fork.repo["has_issues"] = False
+        written = len(self.gh.writes())
+
+        code, out, err = self.run_setup("omnigent", "--check")
+
+        self.assertEqual(code, 1)
+        self.assertEqual(self.drift_lines(out), ["drift: issues are disabled"])
+        self.assertEqual(len(self.gh.writes()), written)
+
+    def test_every_upstream_workflow_is_disabled_before_actions_are_enabled(self):
+        self.run_setup()
+        paths = [path for _, path, _ in self.gh.writes()]
+        actions = paths.index(f"/repos/{FORK}/actions/permissions")
+        disables = [i for i, path in enumerate(paths) if path.endswith("/disable")]
+        self.assertEqual(len(disables), 2)
+        self.assertLess(max(disables), actions)
+
+    def test_a_failed_workflow_disable_stops_before_actions_are_enabled(self):
+        self.fork.fail = ("PUT", API + r"/actions/workflows/(\d+)/(enable|disable)")
+        self.fork.ci_state = "active"
+        permissions = dict(self.fork.workflow_permissions)
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 1)
+        self.assertIn("disable", err)
+        self.assertIs(self.fork.actions["enabled"], False)
+        self.assertEqual(self.fork.workflow_permissions, permissions)
+        self.assertNotIn(f"/repos/{FORK}/actions/permissions/workflow", [p for _, p, _ in self.gh.writes()])
+        self.assertNotIn(("PUT", f"/repos/{FORK}/actions/permissions"), [(m, p) for m, p, _ in self.gh.writes()])
+
+    def test_a_run_that_failed_to_enable_actions_finishes_on_the_next_run(self):
+        self.fork.fail = ("PUT", API + r"/actions/permissions")
+        self.assertEqual(self.run_setup()[0], 1)
+        self.assertIs(self.fork.actions["enabled"], False)
+        self.fork.fail = None
+        first = len(self.gh.writes())
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertIs(self.fork.actions["enabled"], True)
+        self.assertEqual([p for _, p, _ in self.gh.writes()[first:] if p.endswith("/disable")], [])
+
+    def test_a_workflow_github_lists_late_is_disabled_before_actions_are_enabled(self):
+        self.fork.late_workflows[2] = [{"id": 30, "name": "deploy", "path": ".github/workflows/deploy.yml", "state": "active"}]
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual({w["path"]: w["state"] for w in self.fork.workflows}[".github/workflows/deploy.yml"], "disabled_manually")
+        paths = [p for _, p, _ in self.gh.writes()]
+        self.assertLess(paths.index(f"/repos/{FORK}/actions/workflows/30/disable"), paths.index(f"/repos/{FORK}/actions/permissions"))
+        self.assertEqual(len([p for p in paths if p.endswith("/disable")]), 3)
+
+    def test_workflows_are_listed_once_when_actions_are_already_on(self):
+        self.fork.actions["enabled"] = True
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fork.workflow_lists, 1)
+
     def test_second_run_writes_nothing_and_asks_nothing(self):
         self.assertEqual(self.run_setup()[0], 0)
         first = len(self.gh.writes())
@@ -371,7 +466,7 @@ class ForkSetupTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.gh.writes(), [])
         self.assertEqual(self.prompts, [])
-        for expected in ("upstream-ready", "ruleset", CI_PATH, "Actions", "ci.yml", "release.yml", "workflow permissions"):
+        for expected in ("issues are disabled", "upstream-ready", "ruleset", CI_PATH, "Actions", "ci.yml", "release.yml", "workflow permissions"):
             self.assertIn(expected, out)
         self.assertNotIn("stale.yml", out)
 
@@ -435,7 +530,8 @@ class ForkSetupTest(unittest.TestCase):
         code, out, err = self.run_setup()
 
         self.assertEqual(code, 1)
-        self.assertEqual(self.steps(), ["labels", "rulesets"])
+        self.assertIn("issues", err)
+        self.assertEqual(self.steps(), ["issues", "labels", "rulesets"])
         self.assertNotIn(CI_PATH, self.fork.files)
 
     def test_waits_for_github_to_list_the_new_ci_workflow(self):
@@ -621,7 +717,7 @@ class ForkSetupTest(unittest.TestCase):
         self.assertIn("307", err)
         self.assertEqual(len([w for w in self.gh.writes() if w[0] == "PUT" and "/contents/" in w[1]]), 1)
         self.assertNotIn(CI_PATH, self.fork.files)
-        self.assertEqual(self.steps(), ["labels", "rulesets", "commit"])
+        self.assertEqual(self.steps(), ["issues", "labels", "rulesets", "commit"])
 
     def test_control_characters_in_the_fork_ci_are_escaped_in_the_diff(self):
         self.fork.files[CI_PATH] = ("name: contribution-ci\x1b[2K\rlooks: fine\x07\n", "old")
@@ -810,7 +906,7 @@ class ForkSetupTest(unittest.TestCase):
 
         self.assertEqual(self.run_setup()[0], 0)
 
-        self.assertNotIn("PATCH", [method for method, _, _ in self.gh.writes()])
+        self.assertNotIn("PATCH", [method for method, path, _ in self.gh.writes() if "/labels" in path])
         self.assertIn("approved-upstream", [b["name"] for m, p, b in self.gh.writes() if m == "POST" and p.endswith("/labels")])
         self.assertIn("approved-up\u017ftream", [label["name"] for label in self.fork.labels])
         code, out, err = self.run_setup("omnigent", "--check")

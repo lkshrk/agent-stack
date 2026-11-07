@@ -56,15 +56,16 @@ It then runs these steps:
 
 | Step | What it does |
 | --- | --- |
-| 1 | Creates or fixes the labels `upstream-ready`, `approved-upstream`, `upstream-issue` and `upstream-comment` |
-| 2 | Creates or fixes the rulesets `contribution-default-branch` and `contribution-upstream-branches`: creation, update, deletion and force push restricted, the admin role as the only bypass |
-| 3 | Shows the diff between the fork's `contribution-ci.yml` and the registry render and asks `[y/N]`; "no" stops here |
-| 4 | Commits `contribution-ci.yml` to the fork's default branch |
-| 5 | Enables Actions and the CI workflow |
-| 6 | Disables every other workflow; GitHub's `dynamic/` workflows are only reported |
-| 7 | Sets read-only default workflow permissions and turns off "Allow GitHub Actions to create and approve pull requests" |
+| 1 | Turns on issues. GitHub turns them off on new forks, and issue drafts are fork issues |
+| 2 | Creates or fixes the labels `upstream-ready`, `approved-upstream`, `upstream-issue` and `upstream-comment` |
+| 3 | Creates or fixes the rulesets `contribution-default-branch` and `contribution-upstream-branches`: creation, update, deletion and force push restricted, the admin role as the only bypass |
+| 4 | Shows the diff between the fork's `contribution-ci.yml` and the registry render and asks `[y/N]`; "no" stops here |
+| 5 | Commits `contribution-ci.yml` to the fork's default branch |
+| 6 | Waits for GitHub to list the CI workflow, enables it and disables every other workflow; GitHub's `dynamic/` workflows are only reported |
+| 7 | When Actions are off, lists the workflows again, disables any other workflow GitHub listed late, then enables Actions, so upstream workflows are already off when Actions come on |
+| 8 | Sets read-only default workflow permissions and turns off "Allow GitHub Actions to create and approve pull requests" |
 
-A second run changes nothing. If the setup says GitHub doesn't list the CI workflow yet, run it again a minute later.
+A second run changes nothing. The disable-before-Actions order only protects a fresh fork: on a re-run with Actions on, such as after "Sync fork", upstream workflows that arrived stay active until the setup disables them. If the setup says GitHub doesn't list the CI workflow yet, run it again a minute later.
 
 ## Owner's flows
 
@@ -172,11 +173,11 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 Prove each of these before the first real contribution, and approve nothing real until the list is done. Run this phase only after the first fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
 
 - [ ] The setup clears the fork's "Actions disabled" banner through the API.
-- [ ] Disabling a workflow works before Actions are enabled. If it does, the setup can disable upstream workflows before it enables Actions.
+- [ ] Disabling a workflow works before Actions are enabled. The setup relies on it: it disables upstream workflows before it enables Actions.
 - [ ] GitHub lists a newly committed workflow while Actions are disabled.
 - [ ] GitHub allows disabling a `dynamic/` workflow, or refuses it.
 - [ ] `gh` OAuth tokens send `X-OAuth-Scopes`, so the setup's scope check works.
-- [ ] A setup that fails at step 6 leaves Actions on, with upstream workflows active, until it runs again: note how that looks and how to spot it.
+- [ ] A setup that fails at step 6 on a fresh fork leaves Actions off until it runs again: note how that looks and how to spot it.
 - [ ] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected.
 - [ ] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
 - [ ] A fork PR approved in GitHub and one approved over Signal each publish once.
