@@ -1,4 +1,5 @@
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Protocol
 
@@ -11,6 +12,7 @@ DEFAULT_INPUT = {"infra": "Run the Renovate sweep on lkshrk/h-cloud."}
 CLOSED = ("done", "archived")
 EXIT_OPEN = 3
 EXIT_USAGE = 2
+MAX_INPUT_BYTES = 4096
 
 
 class RunnerCards(Protocol):
@@ -25,11 +27,19 @@ def bundle_of(body: str | None) -> str | None:
     return spec.bundle if spec else None
 
 
+def clean_request(text: str | None) -> str:
+    text = text or ""
+    if len(text.encode("utf-8", "surrogatepass")) > MAX_INPUT_BYTES:
+        raise ValueError(f"request text is longer than {MAX_INPUT_BYTES} bytes")
+    kept = (" " if c.isspace() else c for c in text if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf", "Cs"))
+    return " ".join("".join(kept).split())
+
+
 def card_body(bundle: str, text: str | None) -> str:
     repo = REPOS.get(bundle)
     if repo is None:
         raise ValueError(f"bundle {bundle!r} has no pinned repository")
-    request = (text or "").strip() or DEFAULT_INPUT.get(bundle) or f"Run {bundle} on {repo}."
+    request = clean_request(text) or DEFAULT_INPUT.get(bundle) or f"Run {bundle} on {repo}."
     return render_card_body(None, RunSpec(bundle, repo, REF, request), "")
 
 
@@ -65,7 +75,11 @@ def main(argv: list[str], cards: RunnerCards | None = None) -> int:
         print(f"usage: runner-start <{'|'.join(sorted(REPOS))}> [request text]", file=sys.stderr)
         return EXIT_USAGE
     bundle = argv[0]
-    outcome = start(cards or HermesRunnerCards(), bundle, " ".join(argv[1:]))
+    try:
+        outcome = start(cards or HermesRunnerCards(), bundle, " ".join(argv[1:]))
+    except ValueError as exc:
+        print(f"runner-start: {exc}", file=sys.stderr)
+        return EXIT_USAGE
     if outcome["started"]:
         print(f"started {bundle} card {outcome['card']} ({outcome['status']})")
         return 0
