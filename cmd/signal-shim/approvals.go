@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -24,6 +25,8 @@ var (
 	bareDecisionText = regexp.MustCompile(`^(?i:(approve|reject))$`)
 	announcementCode = regexp.MustCompile(`(?m)^Reply "approve ([0-9]{8})" to publish this commit upstream or "reject ([0-9]{8})"`)
 	e164             = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
+	decisionShaped   = regexp.MustCompile(`^(?i:approve|reject)(\s|$)`)
+	uuidRe           = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 	envelopeKeys = map[string]bool{
 		"source": true, "sourceNumber": true, "sourceUuid": true, "sourceName": true, "sourceDevice": true,
@@ -42,8 +45,9 @@ type decision struct {
 var approverAnswers = map[int]bool{http.StatusOK: true, http.StatusNotFound: true, http.StatusGone: true, http.StatusConflict: true, http.StatusBadGateway: true}
 
 type approvalRoute struct {
-	owner, url, token string
-	http              *http.Client
+	owner, ownerUUID, shimUUID string
+	url, token                 string
+	http                       *http.Client
 }
 
 func approvalRouteFromEnv(getenv func(string) string) (*approvalRoute, error) {
@@ -60,82 +64,142 @@ func approvalRouteFromEnv(getenv func(string) string) (*approvalRoute, error) {
 		log.Printf("signal-shim: OWNER_NUMBER is not exactly one E.164 number; contribution approvals disabled, messages still reach Hermes")
 		return nil, nil
 	}
-	return &approvalRoute{owner: owner, url: url, token: token, http: &http.Client{Timeout: approverTimeout}}, nil
+	r := &approvalRoute{owner: owner, url: url, token: token, http: &http.Client{Timeout: approverTimeout}}
+	for key, field := range map[string]*string{"OWNER_UUID": &r.ownerUUID, "SHIM_ACCOUNT_UUID": &r.shimUUID} {
+		v := getenv(key)
+		if v != "" && !uuidRe.MatchString(v) {
+			log.Printf("signal-shim: %s is not exactly one UUID; contribution approvals disabled, messages still reach Hermes", key)
+			return nil, nil
+		}
+		*field = v
+	}
+	return r, nil
 }
 
 func (a *approvalRoute) match(data []byte) (decision, bool) {
+	d, reason, text := a.classify(data)
+	if reason == "" {
+		return d, true
+	}
+	if decisionShaped.MatchString(strings.TrimSpace(text)) {
+		log.Printf("signal-shim: approve/reject message not routed as a decision: %s", reason)
+	}
+	return decision{}, false
+}
+
+func (a *approvalRoute) classify(data []byte) (d decision, reason, text string) {
 	var msg map[string]any
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return decision{}, false
-	}
-	for k, v := range msg {
-		if k != "envelope" && k != "account" && !empty(v) {
-			return decision{}, false
-		}
+		return d, "not JSON", ""
 	}
 	env, _ := msg["envelope"].(map[string]any)
-	if env == nil || !onlyKnown(env, envelopeKeys) {
-		return decision{}, false
-	}
-	source := str(env["source"])
-	if v, ok := env["sourceNumber"]; ok {
-		source = str(v)
-	}
-	if source != a.owner || source == str(msg["account"]) {
-		return decision{}, false
-	}
 	dm, _ := env["dataMessage"].(map[string]any)
-	if dm == nil || !onlyKnown(dm, dataMessageKeys) {
-		return decision{}, false
+	text, _ = dm["message"].(string)
+	for _, k := range sortedKeys(msg) {
+		if k != "envelope" && k != "account" && !empty(msg[k]) {
+			return d, "unknown message key " + k, text
+		}
 	}
-	text, ok := dm["message"].(string)
-	if !ok {
-		return decision{}, false
+	if env == nil {
+		return d, "no envelope", text
 	}
-	action, code, ok := decisionIn(strings.TrimSpace(text), dm["quote"], str(msg["account"]))
-	if !ok {
-		return decision{}, false
+	if k := unknownKey(env, envelopeKeys); k != "" {
+		return d, "unknown envelope key " + k, text
 	}
-	d := decision{Action: action, Code: code, account: str(msg["account"]), recipient: a.owner}
+	account := str(msg["account"])
+	number, uuid := str(env["sourceNumber"]), str(env["sourceUuid"])
+	if source := str(env["source"]); number == "" && e164.MatchString(source) {
+		number = source
+	} else if uuid == "" && uuidRe.MatchString(source) {
+		uuid = source
+	}
+	if (number != "" && number == account) || sameUUID(uuid, a.shimUUID) {
+		return d, "message is from this account", text
+	}
+	if (number == "" || number != a.owner) && !sameUUID(uuid, a.ownerUUID) {
+		return d, fmt.Sprintf("sender is not the owner (number present: %t, uuid present: %t)", number != "", uuid != ""), text
+	}
+	if dm == nil {
+		return d, "no dataMessage", text
+	}
+	if k := unknownKey(dm, dataMessageKeys); k != "" {
+		return d, "unknown dataMessage key " + k, text
+	}
+	if _, ok := dm["message"].(string); !ok {
+		return d, "message is not text", text
+	}
+	action, code, reason := a.decisionIn(strings.TrimSpace(text), dm["quote"], account)
+	if reason != "" {
+		return d, reason, text
+	}
+	d = decision{Action: action, Code: code, account: account, recipient: a.owner}
 	if g, _ := dm["groupInfo"].(map[string]any); g != nil {
 		if id := str(g["groupId"]); id != "" {
 			d.recipient = "group." + base64.StdEncoding.EncodeToString([]byte(id))
 		}
 	}
-	return d, true
+	return d, "", text
 }
 
-func decisionIn(text string, quote any, account string) (action, code string, ok bool) {
+func (a *approvalRoute) decisionIn(text string, quote any, account string) (action, code, reason string) {
 	if m := decisionText.FindStringSubmatch(text); m != nil {
-		return strings.ToLower(m[1]), m[2], true
+		return strings.ToLower(m[1]), m[2], ""
 	}
 	m := bareDecisionText.FindStringSubmatch(text)
+	if m == nil {
+		return "", "", "text does not match"
+	}
 	q, _ := quote.(map[string]any)
-	if m == nil || q == nil || account == "" {
-		return "", "", false
-	}
-	author := str(q["authorNumber"])
-	if author == "" {
-		author = str(q["author"])
-	}
-	if author != account {
-		return "", "", false
+	switch {
+	case q == nil:
+		return "", "", "bare reply without a quote"
+	case account == "" && a.shimUUID == "":
+		return "", "", "no account"
+	case !a.quotedByThisAccount(q, account):
+		return "", "", "quote is not by this account"
 	}
 	quoted, _ := q["text"].(string)
 	codes := announcementCode.FindAllStringSubmatch(quoted, -1)
 	if len(codes) != 1 || codes[0][1] != codes[0][2] {
-		return "", "", false
+		return "", "", "quote is not an announcement by this account"
 	}
-	return strings.ToLower(m[1]), codes[0][1], true
+	return strings.ToLower(m[1]), codes[0][1], ""
 }
 
-func onlyKnown(obj map[string]any, known map[string]bool) bool {
-	for k, v := range obj {
-		if !known[k] && !empty(v) {
-			return false
+func (a *approvalRoute) quotedByThisAccount(q map[string]any, account string) bool {
+	author := str(q["authorNumber"])
+	if author == "" {
+		author = str(q["author"])
+	}
+	if account != "" && author == account {
+		return true
+	}
+	for _, k := range []string{"authorUuid", "authorAci", "authorServiceId", "author"} {
+		if sameUUID(str(q[k]), a.shimUUID) {
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+func sameUUID(got, want string) bool { return want != "" && strings.EqualFold(got, want) }
+
+func sortedKeys(obj map[string]any) []string {
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func unknownKey(obj map[string]any, known map[string]bool) string {
+	for _, k := range sortedKeys(obj) {
+		if !known[k] && !empty(obj[k]) {
+			return k
+		}
+	}
+	return ""
 }
 
 func empty(v any) bool {

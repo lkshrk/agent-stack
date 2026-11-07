@@ -83,7 +83,7 @@ A second run changes nothing. The disable-before-Actions order only protects a f
 3. Open the link and read the whole body: the announcement shows only an excerpt, but the whole body is published.
 4. After the announcement, the owner approves in one of two ways:
    - submit an approving review on the fork PR in GitHub, or
-   - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead. A quote reply to the announcement with just `approve` or `reject` works too.
+   - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead. A quote reply to the announcement with just `approve` or `reject` works too. If the owner's number is hidden in Signal ("Who can see my number: Nobody"), the signal-shim needs `OWNER_UUID`, and `SHIM_ACCOUNT_UUID` for the quote reply (`cmd/README.md`); otherwise the reply reaches Hermes instead.
 5. The approver publishes on its next poll, within about a minute.
 
 The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. An approving review in GitHub doesn't need the code.
