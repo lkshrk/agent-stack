@@ -47,6 +47,13 @@ func with(dm map[string]any, key string, v any) map[string]any {
 	return dm
 }
 
+func cliFlags(dm map[string]any) map[string]any {
+	for k, v := range map[string]any{"hasProfileKey": true, "isExpirationUpdate": false, "isEndSession": false, "isProfileKeyUpdate": false} {
+		dm[k] = v
+	}
+	return dm
+}
+
 func announcementText(code string) string {
 	return "Ready to publish upstream: Fix the thing\nhttps://example.invalid/pr/1\n\nReply \"approve " + code + "\" to publish this commit upstream or \"reject " + code + "\" to request changes. The code works once and expires in 30 minutes."
 }
@@ -112,6 +119,17 @@ func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 		{"other verb", envelope(testOwner, groupText("merge 12345678"), nil), nil},
 		{"receipt", envelope(testOwner, nil, map[string]any{"receiptMessage": map[string]any{"isRead": true}}), nil},
 		{"not json", "not json", nil},
+		{"hasProfileKey", envelope(testOwner, cliFlags(groupText("approve 12345678")), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"bare reply with hasProfileKey", envelope(testOwner, with(cliFlags(groupText("reject")), "quote", announcementQuote(testAccount, announcementText("12345678"))), nil), &decision{Action: "reject", Code: "12345678"}},
+		{"hasProfileKey with attachment", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "attachments", []any{map[string]any{"id": "a"}}), nil), nil},
+		{"hasProfileKey with mention", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "mentions", []any{map[string]any{"start": 0}}), nil), nil},
+		{"hasProfileKey with sticker", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "sticker", map[string]any{"packId": "p"}), nil), nil},
+		{"hasProfileKey with reaction", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "reaction", map[string]any{"emoji": "x", "targetSentTimestamp": 1}), nil), nil},
+		{"hasProfileKey with textStyles", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "textStyles", []any{map[string]any{"style": "BOLD"}}), nil), nil},
+		{"hasProfileKey with viewOnce", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "viewOnce", true), nil), nil},
+		{"expiration update", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "isExpirationUpdate", true), nil), nil},
+		{"profile key update", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "isProfileKeyUpdate", true), nil), nil},
+		{"end session", envelope(testOwner, with(cliFlags(groupText("approve 12345678")), "isEndSession", true), nil), nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
