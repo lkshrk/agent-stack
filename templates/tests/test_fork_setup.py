@@ -56,6 +56,8 @@ class FakeFork:
         ]
         self.ci_state = "disabled_manually"
         self.hide_ci_lists = 0
+        self.workflow_lists = 0
+        self.late_workflows: dict[int, list[dict]] = {}
         self.workflow_permissions = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
         self.fail: tuple[str, str] | None = None
         self.fail_answer: tuple[int, dict] = (500, {"message": "Server Error"})
@@ -157,6 +159,9 @@ class FakeFork:
         return 204, None
 
     def list_workflows(self, match, query, body):
+        if query.get("page", ["1"]) == ["1"]:
+            self.workflow_lists += 1
+            self.workflows += self.late_workflows.pop(self.workflow_lists, [])
         if self.hide_ci_lists:
             self.hide_ci_lists -= 1
             return self.page([w for w in self.workflows if w["path"] != CI_PATH], query, "workflows")
@@ -398,6 +403,49 @@ class ForkSetupTest(unittest.TestCase):
         disables = [i for i, path in enumerate(paths) if path.endswith("/disable")]
         self.assertEqual(len(disables), 2)
         self.assertLess(max(disables), actions)
+
+    def test_a_failed_workflow_disable_stops_before_actions_are_enabled(self):
+        self.fork.fail = ("PUT", API + r"/actions/workflows/(\d+)/(enable|disable)")
+        self.fork.ci_state = "active"
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 1)
+        self.assertIn("disable", err)
+        self.assertIs(self.fork.actions["enabled"], False)
+        self.assertNotIn(("PUT", f"/repos/{FORK}/actions/permissions"), [(m, p) for m, p, _ in self.gh.writes()])
+
+    def test_a_run_that_failed_to_enable_actions_finishes_on_the_next_run(self):
+        self.fork.fail = ("PUT", API + r"/actions/permissions")
+        self.assertEqual(self.run_setup()[0], 1)
+        self.assertIs(self.fork.actions["enabled"], False)
+        self.fork.fail = None
+        first = len(self.gh.writes())
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertIs(self.fork.actions["enabled"], True)
+        self.assertEqual([p for _, p, _ in self.gh.writes()[first:] if p.endswith("/disable")], [])
+
+    def test_a_workflow_github_lists_late_is_disabled_before_actions_are_enabled(self):
+        self.fork.late_workflows[2] = [{"id": 30, "name": "deploy", "path": ".github/workflows/deploy.yml", "state": "active"}]
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual({w["path"]: w["state"] for w in self.fork.workflows}[".github/workflows/deploy.yml"], "disabled_manually")
+        paths = [p for _, p, _ in self.gh.writes()]
+        self.assertLess(paths.index(f"/repos/{FORK}/actions/workflows/30/disable"), paths.index(f"/repos/{FORK}/actions/permissions"))
+        self.assertEqual(len([p for p in paths if p.endswith("/disable")]), 3)
+
+    def test_workflows_are_listed_once_when_actions_are_already_on(self):
+        self.fork.actions["enabled"] = True
+
+        code, out, err = self.run_setup()
+
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fork.workflow_lists, 1)
 
     def test_second_run_writes_nothing_and_asks_nothing(self):
         self.assertEqual(self.run_setup()[0], 0)

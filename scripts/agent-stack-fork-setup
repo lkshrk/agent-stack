@@ -347,6 +347,13 @@ class Setup:
             found.append("workflow permissions are not read-only with PR approvals off")
         return found, self.dynamic_notes(workflows)
 
+    def disable_active_others(self, workflows: list[dict], disabled: set[int]) -> None:
+        for workflow in self.other_workflows(workflows):
+            workflow_id = _workflow_id(workflow)
+            if workflow.get("state") == "active" and workflow_id not in disabled:
+                self.write("PUT", f"{self.repo}/actions/workflows/{workflow_id}/disable", None, f"disabled workflow {workflow.get('path')}")
+                disabled.add(workflow_id)
+
     def apply(self) -> None:
         labels = self.label_changes()
         if not self.has_issues:
@@ -374,7 +381,7 @@ class Setup:
             except (EOFError, KeyboardInterrupt):
                 answer = ""
             if answer.strip().lower() not in ("y", "yes"):
-                raise SetupError(f"{self.ci_path} not committed; stopped after the labels and rulesets")
+                raise SetupError(f"{self.ci_path} not committed; stopped after issues, labels and rulesets")
             body = {
                 "message": f"ci: {'update' if current is not None else 'add'} contribution-ci",
                 "content": base64.b64encode(self.rendered.encode()).decode(),
@@ -396,13 +403,13 @@ class Setup:
         for workflow in ci:
             if workflow.get("state") != "active":
                 self.write("PUT", f"{self.repo}/actions/workflows/{_workflow_id(workflow)}/enable", None, f"enabled workflow {self.ci_path}")
-        for workflow in self.other_workflows(workflows):
-            if workflow.get("state") == "active":
-                self.write("PUT", f"{self.repo}/actions/workflows/{_workflow_id(workflow)}/disable", None, f"disabled workflow {workflow.get('path')}")
+        disabled: set[int] = set()
+        self.disable_active_others(workflows, disabled)
         for note in self.dynamic_notes(workflows):
             self.say(note)
 
         if not self.actions_enabled():
+            self.disable_active_others(self.workflows(), disabled)
             self.write("PUT", f"{self.repo}/actions/permissions", {"enabled": True}, "enabled Actions")
 
         if self.workflow_permissions() != WORKFLOW_PERMISSIONS:

@@ -62,10 +62,10 @@ It then runs these steps:
 | 4 | Shows the diff between the fork's `contribution-ci.yml` and the registry render and asks `[y/N]`; "no" stops here |
 | 5 | Commits `contribution-ci.yml` to the fork's default branch |
 | 6 | Waits for GitHub to list the CI workflow, enables it and disables every other workflow; GitHub's `dynamic/` workflows are only reported |
-| 7 | Enables Actions, so upstream workflows are already off when Actions come on |
+| 7 | Lists the workflows again, disables any other workflow GitHub listed late, then enables Actions, so upstream workflows are already off when Actions come on |
 | 8 | Sets read-only default workflow permissions and turns off "Allow GitHub Actions to create and approve pull requests" |
 
-A second run changes nothing. If the setup says GitHub doesn't list the CI workflow yet, run it again a minute later.
+A second run changes nothing. The disable-before-Actions order only protects a fresh fork: on a re-run with Actions on, such as after "Sync fork", upstream workflows that arrived stay active until the setup disables them. If the setup says GitHub doesn't list the CI workflow yet, run it again a minute later.
 
 ## Owner's flows
 
