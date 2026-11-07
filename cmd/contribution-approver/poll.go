@@ -198,8 +198,12 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		return err
 	}
 	if err := p.notify.Notify(ctx, announcement(cfg, pr, sha, runs, code)); err != nil {
-		p.codes.forget(k)
+		p.codes.withdraw(code)
 		return err
+	}
+	if !p.codes.markAnnounced(k, sha, code) {
+		log.Printf("contribution-approver: %s#%d at %s: the code was dropped while announcing; the next poll announces again if still ready", cfg.Fork, k.number, sha)
+		return nil
 	}
 	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
 	if err != nil {

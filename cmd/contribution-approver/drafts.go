@@ -19,6 +19,8 @@ const (
 	issueLabel    = "upstream-issue"
 	commentLabel  = "upstream-comment"
 	issueMarker   = "<!-- contribution-fork:upstream-issue -->"
+
+	commentDraftsOff = "comment drafts are not published yet; file it as an issue draft or post it by hand"
 )
 
 type ghUser struct {
@@ -235,7 +237,7 @@ func (g *githubClient) evaluateDraft(ctx context.Context, cfg forkConfig, number
 		return d.refuse(hard("the draft contains reserved marker text"))
 	}
 	if is.hasLabel(commentLabel) || labelledAt(events, at, commentLabel) {
-		return d.refuse(hard("comment drafts are not published yet; file it as an issue draft or post it by hand"))
+		return d.refuse(hard(commentDraftsOff))
 	}
 	if err := checkDraftEvents(cfg, events, at); err != nil {
 		return d.refuse(err)
@@ -608,6 +610,9 @@ func (p *poller) reportDraft(ctx context.Context, cfg forkConfig, k prKey, res d
 		p.tellOnce(ctx, k, fmt.Sprintf("draft\x00wait\x00%d", d.approval), "Not publishing "+name+" yet: "+res.reason+". Upstream cannot be searched for an earlier copy right now, so the approval label stays until it can.")
 	case draftRefused:
 		note := "The approval label was removed; add it again to publish."
+		if res.reason == commentDraftsOff {
+			note = "The approval label was removed."
+		}
 		if !res.unlabeled {
 			note = "The approval label could not be removed yet; the approver keeps trying."
 		}

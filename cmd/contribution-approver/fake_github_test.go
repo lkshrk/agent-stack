@@ -54,6 +54,7 @@ type fakeGitHub struct {
 	billed         int
 	nextID         int64
 	routes         []fakeRoute
+	before         map[string]func()
 }
 
 // fakeFailure fails matching calls after the first Skip, Times of them (0 = all); After applies the write before failing.
@@ -182,7 +183,24 @@ func (g *fakeGitHub) billedRequests() int {
 	return g.billed
 }
 
+// beforeNext runs hook once, outside the lock, before the next call to method and path is served.
+func (g *fakeGitHub) beforeNext(method, path string, hook func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.before == nil {
+		g.before = map[string]func(){}
+	}
+	g.before[method+" "+path] = hook
+}
+
 func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
+	g.mu.Lock()
+	hook := g.before[r.Method+" "+r.URL.Path]
+	delete(g.before, r.Method+" "+r.URL.Path)
+	g.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.requests = append(g.requests, r.Method+" "+r.URL.Path)

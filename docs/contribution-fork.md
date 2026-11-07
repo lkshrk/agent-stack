@@ -86,7 +86,18 @@ A second run changes nothing. The disable-before-Actions order only protects a f
    - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead. A quote reply to the announcement with just `approve` or `reject` works too. If the owner's number is hidden in Signal ("Who can see my number: Nobody"), the signal-shim needs `OWNER_UUID`, and `SHIM_ACCOUNT_UUID` for the quote reply (`cmd/README.md`); otherwise the reply reaches Hermes instead.
 5. The approver publishes on its next poll, within about a minute.
 
-The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. An approving review in GitHub doesn't need the code.
+The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. A newer announcement of the same fork PR replaces its code. An approving review in GitHub doesn't need the code.
+
+A retry announcement, for example after a failed review read, also replaces the code, so a reply with the older code gets the outdated text; use the newest announcement.
+
+Replies to a code that submit nothing:
+
+| Notice | Meaning |
+| --- | --- |
+| That code is unknown or already used. Nothing was submitted. | The code was used, never issued, or is more than a day old |
+| That announcement is outdated: `<fork>#<n>` has a newer announcement. Nothing was submitted. | A newer announcement replaced the code within the last day; reply to the newest one |
+| That code expired. Nothing was submitted; a new code for … follows within a minute if it is still ready. | The code is more than 30 minutes old; the fork PR is announced again |
+| That code expired and … has changed or been decided since. Nothing was submitted; … | The code expired and the head changed or was decided; the normal poll announces any new ready head |
 
 The owner's newest approving, changes-requested or dismissed review decides. Only an approval publishes, and it publishes exactly the commit it was given on. An approval counts only if it came after the announcement of that commit, with the title and body unchanged since. An approval given before the announcement, for example while CI still runs, is ignored: approve again after the announcement. After an approver restart no announcement is known, so the fork PR is announced again and needs a new approval.
 
@@ -143,6 +154,7 @@ Owner notices for issue drafts:
 | The draft … is already upstream: `<link>`; later changes are not published. | An upstream issue with this draft's marker exists from an earlier approval, and the draft changed since |
 | The draft … already has a publish record, so it was not published again. | An unedited publish record was on the draft; the draft was closed and nothing was posted |
 | Not publishing the draft …: `<reason>`. The approval label was removed; add it again to publish. | A hard refusal; the approval is spent |
+| Not publishing the draft …: comment drafts are not published yet; file it as an issue draft or post it by hand. The approval label was removed. | A comment draft; approving it again is refused again |
 | Not publishing the draft …: `<reason>`. The approval label could not be removed yet; the approver keeps trying. | A hard refusal whose label removal failed; the removal is retried |
 | Not publishing the draft … yet: `<reason>`. Upstream cannot be searched for an earlier copy right now, so the approval label stays until it can. | The refusal waits until the approver can check upstream for this draft's marker |
 | Not publishing the draft …: a publish record on the draft was edited; delete the edited publish record comment on the draft, then approve again. | Delete that comment, then add the label again |
@@ -166,40 +178,44 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 - **A draft edited while the owner reads a stale page.** The label approves the draft's content at the moment it is applied, not what the owner read. If an agent edits the draft after the owner opened it and before the owner adds the label, the edited text is published. Reload the draft right before adding the label.
 - **Label denials apply only inside a contribution checkout.** The agent policy refuses `upstream-comment` and `approved-upstream` only for `gh` calls made inside a registered contribution checkout. From any other directory, an agent can still set either label on a fork issue with `-R`. The approver bounds it: it refuses comment drafts with a notice, and it counts only the owner's own `approved-upstream` label.
 - **The unedited check on publish records works at second precision.** A publish record counts as unedited when its `updated_at` equals its `created_at`. An edit in the same second the approver wrote the record passes as unedited. An agent would have to beat the approver's own write.
+- **A reply right after an announcement arrives.** A reply in the second after an announcement is delivered, while the approver is still binding it, can be refused as changed. A new announcement follows within a minute.
+- **A 404 on the publish branch.** If publishing fails with a GitHub 404 on `upstream/pr-<N>`, sync the fork (see Upkeep). The approved commit may not be in the fork yet, and the approver can't tell this 404 from others.
 - **A second refusal notice for one approval.** If removing `approved-upstream` after a refusal fails and an agent then removes `upstream-comment`, the owner gets a second, different refusal notice for the same approval. Both refusals are true.
 
 ## Go-live checks
 
-Prove each of these before the first real contribution, and approve nothing real until the list is done. Run this phase only after the first fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
+These checks ran on 2026-11-07 against a stand-in. The ticked items were proven live. The owner accepted the open items as residuals, for the reasons given with each. Real contributions may start.
 
-- [ ] The setup clears the fork's "Actions disabled" banner through the API.
-- [ ] Disabling a workflow works before Actions are enabled. The setup relies on it: it disables upstream workflows before it enables Actions.
-- [ ] GitHub lists a newly committed workflow while Actions are disabled.
-- [ ] GitHub allows disabling a `dynamic/` workflow, or refuses it.
-- [ ] `gh` OAuth tokens send `X-OAuth-Scopes`, so the setup's scope check works.
-- [ ] A setup that fails at step 6 on a fresh fork leaves Actions off until it runs again: note how that looks and how to spot it.
-- [ ] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected.
-- [ ] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
-- [ ] A fork PR approved in GitHub and one approved over Signal each publish once.
-- [ ] A quote reply of just `approve` to a real announcement with a long body reaches the approver (Signal clients may truncate quoted text or name the author by UUID only).
-- [ ] A non-owner review publishes nothing, and a stale code publishes nothing.
-- [ ] A commit pushed after the review isn't published.
-- [ ] A body edit after the review is refused, and the approval is dismissed.
-- [ ] A later reject or dismissal stops a republish.
-- [ ] Closing the upstream pull request doesn't reopen it.
-- [ ] One issue draft publishes, and a comment draft is refused with the comment-drafts notice.
-- [ ] A draft's `updated_at` equals the second of its `approved-upstream` labeled event.
-- [ ] GitHub never drops `userContentEdits` revision nodes. If it does, issue drafts don't go live: draft approvals must first be bound to a Signal announcement of the draft's content.
-- [ ] `Label.updatedAt` when a label is created and applied in the same second.
-- [ ] A collaborator's edit of an owner comment bumps its `updated_at`.
-- [ ] Reactions on a comment, or hiding it, bump its `updated_at`.
-- [ ] The HTML comment marker survives edits in GitHub's web editor.
-- [ ] The issues list with `since` includes closed issues.
-- [ ] Renaming a repository label rewrites the name in past `labeled` events.
-- [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice.
-- [ ] Opening an upstream pull request on a head that another open pull request uses, and right after creating the branch, fails with "A pull request already exists" or `field: head, code: invalid`. The approver waits on those texts; other wording would count as a hard refusal and dismiss a valid approval.
-- [ ] In h-cloud, `CONTRIBUTION_FORKS` is dropped in the same change as the `agent-tools` pin bump, because 1.22.0 exits without it.
-- [ ] Afterwards, remove the stand-in's policy line, wait for a token-minter run that starts at least 5 minutes after that merge and succeeds, and only then delete both repositories. Then drop the stand-in from the registry, release, and pin `agent-tools` in h-cloud again; until then the approver logs a fork check error on every poll.
+To run them again, wait until the fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
+
+- [ ] The setup clears the fork's "Actions disabled" banner through the API. The 2026-11-06 rollout reported it cleared on lkshrk/omnigent, but no log was kept; the stand-in checks only tested an upstream with Actions turned off.
+- [x] Disabling a workflow works before Actions are enabled. The setup relies on it: it disables upstream workflows before it enables Actions.
+- [x] GitHub lists a newly committed workflow while Actions are disabled.
+- [x] GitHub allows disabling a `dynamic/` workflow, or refuses it. It refuses with 422 "Unable to disable this workflow."; the setup skips `dynamic/`.
+- [x] `gh` OAuth tokens send `X-OAuth-Scopes`, so the setup's scope check works.
+- [ ] A setup that fails at step 6 on a fresh fork leaves Actions off until it runs again: note how that looks and how to spot it. Read from the code only: `--check` reports `drift: workflow <path> is active`; no stand-in had upstream workflows to show it live.
+- [x] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected. Proven live: pushes to `main`, creating `upstream/pr-9100` and a branch adding `.github/workflows/` were rejected, and a REST move of `main` got 422; updating an existing `upstream/**` branch was not tested.
+- [x] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
+- [x] A fork PR approved in GitHub and one approved over Signal each publish once.
+- [ ] A quote reply of just `approve` to a real announcement with a long body reaches the approver (Signal clients may truncate quoted text or name the author by UUID only). Only short bodies were tested.
+- [ ] A non-owner review publishes nothing, and a stale code publishes nothing. The stale code was proven. The bot can't approve its own PR, so a non-owner review needs a second account; unit tests cover the owner-only rule.
+- [x] A commit pushed after the review isn't published.
+- [x] A body edit after the review is refused, and the approval is dismissed.
+- [x] A later reject or dismissal stops a republish. A later reject stopped a republish; a dismissal was not tested live.
+- [x] Closing the upstream pull request doesn't reopen it.
+- [x] One issue draft publishes, and a comment draft is refused with the comment-drafts notice.
+- [x] A draft's `updated_at` equals the second of its `approved-upstream` labeled event.
+- [x] GitHub never drops `userContentEdits` revision nodes. If it does, issue drafts don't go live: draft approvals must first be bound to a Signal announcement of the draft's content.
+- [x] `Label.updatedAt` when a label is created and applied in the same second. It equals the approval second, so the approver refuses; the setup creates the labels beforehand.
+- [x] A collaborator's edit of an owner comment bumps its `updated_at`.
+- [x] Reactions on a comment, or hiding it, bump its `updated_at`. A reaction doesn't; hiding and unhiding do, so a hidden publish record reads as edited.
+- [x] The HTML comment marker survives edits in GitHub's web editor.
+- [x] The issues list with `since` includes closed issues.
+- [x] Renaming a repository label rewrites the name in past `labeled` events. It doesn't, but it bumps `Label.updatedAt`, which the approver checks.
+- [ ] Moving `upstream/pr-<N>` onto a commit whose history adds a workflow the fork lacks fails with a message containing "without `workflow` scope", which the approver matches to send the sync notice. `git push` shows that text. A REST ref create or update onto a commit not in the fork returns 404 with or without the scope; a commit already in the fork is unproven.
+- [x] Opening an upstream pull request on a head that another open pull request uses, and right after creating the branch, fails with "A pull request already exists" or `field: head, code: invalid`. The approver waits on those texts; other wording would count as a hard refusal and dismiss a valid approval. Both texts were seen; the race right after creating the branch didn't reproduce in 3 tries.
+- [x] In h-cloud, `CONTRIBUTION_FORKS` is dropped in the same change as the `agent-tools` pin bump, because 1.22.0 exits without it.
+- [x] Afterwards, remove the stand-in's policy line, wait for a token-minter run that starts at least 5 minutes after that merge and succeeds, and only then delete both repositories. Then drop the stand-in from the registry, release, and pin `agent-tools` in h-cloud again; until then the approver logs a fork check error on every poll.
 
 ## Working on a contribution
 

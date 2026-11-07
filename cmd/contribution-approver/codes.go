@@ -22,9 +22,11 @@ type prKey struct {
 }
 
 type pending struct {
-	pr      prKey
-	sha     string
-	expires time.Time
+	pr         prKey
+	sha        string
+	expires    time.Time
+	delivered  bool
+	superseded bool
 }
 
 type sentAnnouncement struct {
@@ -45,6 +47,7 @@ const (
 	codeUnknown codeStatus = iota
 	codeExpired
 	codeExpiredStale
+	codeSuperseded
 	codeValid
 )
 
@@ -147,13 +150,7 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	s.dropLive(k)
-	// Expired codes stay as tombstones so a late reply maps back to its pull request.
-	for code, p := range s.byCode {
-		if !now.Before(p.expires.Add(tombstoneTTL)) {
-			delete(s.byCode, code)
-		}
-	}
+	s.purgeLocked(now)
 	for range 16 {
 		n, err := rand.Int(rand.Reader, codeSpace)
 		if err != nil {
@@ -164,29 +161,78 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 			continue
 		}
 		s.byCode[code] = pending{pr: k, sha: sha, expires: now.Add(s.ttl)}
-		s.announced[k] = headState{sha: sha}
 		return code, nil
 	}
 	return "", fmt.Errorf("no free approval code")
 }
 
-func (s *codeStore) take(code string) (pending, codeStatus) {
+// Expired and superseded codes stay as tombstones so a late reply maps back to its pull request.
+func (s *codeStore) purgeLocked(now time.Time) {
+	for code, p := range s.byCode {
+		if !now.Before(p.expires.Add(tombstoneTTL)) {
+			delete(s.byCode, code)
+		}
+	}
+}
+
+// markAnnounced reports false if code was dropped while its announcement was sent.
+func (s *codeStore) markAnnounced(k prKey, sha, code string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.byCode[code]
 	if !ok {
+		return false
+	}
+	p.delivered = true
+	s.byCode[code] = p
+	now := s.now()
+	for c, o := range s.byCode {
+		if c != code && o.pr == k && !o.superseded && now.Before(o.expires) {
+			o.superseded = true
+			s.byCode[c] = o
+		}
+	}
+	s.announced[k] = headState{sha: sha}
+	return true
+}
+
+func (s *codeStore) withdraw(code string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.byCode, code)
+}
+
+func (s *codeStore) hasLiveLocked(k prKey) bool {
+	now := s.now()
+	for _, p := range s.byCode {
+		if p.pr == k && p.delivered && !p.superseded && now.Before(p.expires) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *codeStore) take(code string) (pending, codeStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.purgeLocked(now)
+	p, ok := s.byCode[code]
+	if !ok || !p.delivered {
 		return pending{}, codeUnknown
 	}
 	delete(s.byCode, code)
-	now := s.now()
-	if !now.Before(p.expires.Add(tombstoneTTL)) {
-		return pending{}, codeUnknown
+	if p.superseded {
+		return p, codeSuperseded
 	}
 	a, current := s.announced[p.pr]
 	current = current && a.sha == p.sha
 	if !now.Before(p.expires) {
 		if !current || a.consumed {
 			return p, codeExpiredStale
+		}
+		if s.hasLiveLocked(p.pr) {
+			return p, codeSuperseded
 		}
 		a.expired = true
 		s.announced[p.pr] = a
@@ -247,8 +293,9 @@ func (s *codeStore) live() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
+	now := s.now()
 	for _, p := range s.byCode {
-		if s.now().Before(p.expires) {
+		if p.delivered && !p.superseded && now.Before(p.expires) {
 			n++
 		}
 	}
@@ -258,7 +305,7 @@ func (s *codeStore) live() int {
 func (s *codeStore) dropLive(k prKey) {
 	now := s.now()
 	for code, p := range s.byCode {
-		if p.pr == k && now.Before(p.expires) {
+		if p.pr == k && !p.superseded && now.Before(p.expires) {
 			delete(s.byCode, code)
 		}
 	}

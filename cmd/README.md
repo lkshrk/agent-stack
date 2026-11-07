@@ -69,7 +69,7 @@ Fork settings come from `forks.json`. It is embedded in the binary and rendered 
 **Announcements.** A ready pull request is announced once per head SHA to the Signal group: title, the first 300 runes of the body, head SHA, files/additions/deletions, CI result, link and a single-use 8-digit code that expires after 30 minutes.
 
 - It is announced only when every CI run on the head completed with `success`. A title that doesn't follow `title_format`, a changed base, or an upstream diff that is empty, too large, touches `.github/` or differs from the fork-relative diff is logged once per head and not announced.
-- A new head SHA replaces the code. A pull request that stops being ready loses it.
+- A new announcement of the same pull request, such as for a new head SHA, replaces the code. A pull request that stops being ready loses it.
 - A head the owner already reviewed is not announced, unless the approval can't be bound to an announcement (after a restart, or when the text changed). Then it is announced once more.
 - Codes live in memory, so a restart announces again with new codes. That skips a pull request whose approved commit is already on its upstream pull request, or was carried by a closed or merged one.
 - If listing the reviews after an announcement fails, the announcement is retried on the next poll, then at most every 30 minutes, doubling up to a day. A new head is announced at once.
@@ -78,7 +78,8 @@ Fork settings come from `forks.json`. It is embedded in the binary and rendered 
 
 - It consumes the code and re-reads the pull request. If its head, title, body or `upstream-ready` label changed since the announcement, it answers 409 and announces again if the pull request is still ready.
 - Otherwise it submits the owner's review pinned to the announced SHA (`APPROVE` or `REQUEST_CHANGES`) and wakes the poll loop. If GitHub refuses the review, the pull request is announced again with a new code.
-- Unknown, used and expired codes make no GitHub call. An expired code stays recognisable for 24 hours: replying with it once makes the next poll announce the pull request again, if it is still ready on the same head. A used code never brings the same head back.
+- Unknown, used, replaced and expired codes make no GitHub call. An expired code stays recognisable for 24 hours: replying with it once makes the next poll announce the pull request again, if it is still ready on the same head. A used code never brings the same head back.
+- A replaced code also stays recognisable for 24 hours after it would have expired, once: the reply (410) says the announcement is outdated because the pull request has a newer one, and nothing is announced again. Used and unknown codes answer 404 "That code is unknown or already used".
 - The reply goes to the Signal group. An approval says publishing follows.
 
 **Publishing pull requests.** On every poll the owner's newest `APPROVED`, `CHANGES_REQUESTED` or `DISMISSED` review decides. Only `APPROVED` publishes, exactly its `commit_id`. It publishes only when all of these hold:

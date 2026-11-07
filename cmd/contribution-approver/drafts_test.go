@@ -1975,6 +1975,24 @@ func TestCommentDraftsAreRefused(t *testing.T) {
 	})
 }
 
+func TestOnlyTheCommentDraftRefusalLeavesOutTheRetryHint(t *testing.T) {
+	h := newDraft(t, commentLabel, "Comment on #42", commentBody)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 1)
+	if want := "Not publishing the draft " + testFork + "#9: " + commentsOff + ". The approval label was removed."; !slices.Equal(h.signal.messages(), []string{want}) {
+		t.Fatalf("messages = %q, want %q", h.signal.messages(), want)
+	}
+
+	h = newDraft(t, issueLabel, "bug(web): Contribution-Fork: note", draftBody)
+	approveDraft(h)
+	h.clock.advance(time.Minute)
+	pollTimes(h, 1)
+	if want := "Not publishing the draft " + testFork + "#9: the draft contains reserved marker text. The approval label was removed; add it again to publish."; !slices.Equal(h.signal.messages(), []string{want}) {
+		t.Fatalf("messages = %q, want %q", h.signal.messages(), want)
+	}
+}
+
 func TestAnIssueKindWithoutALabelEventIsRefused(t *testing.T) {
 	for name, at := range map[string]string{"renamed before the approval": "before", "renamed after the approval": "after"} {
 		t.Run(name, func(t *testing.T) {

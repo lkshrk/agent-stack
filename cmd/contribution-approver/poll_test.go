@@ -144,8 +144,8 @@ func TestANewHeadInvalidatesTheOlderCode(t *testing.T) {
 	if len(msgs) != 2 || !strings.Contains(msgs[1], shaB) {
 		t.Fatalf("announcements = %q, want a second one for the new head", msgs)
 	}
-	if _, st := h.codes.take(first); st != codeUnknown {
-		t.Fatal("the code for the older head still works")
+	if _, st := h.codes.take(first); st != codeSuperseded {
+		t.Fatal("the code for the older head is not reported as superseded")
 	}
 	if _, st := h.codes.take(codeIn(t, msgs[1])); st != codeValid {
 		t.Fatal("the code for the new head does not work")
@@ -203,6 +203,7 @@ func TestCodesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.markAnnounced(prKey{testFork, 1}, shaA, code)
 	c.advance(30*time.Minute + time.Second)
 	if _, st := s.take(code); st != codeExpired {
 		t.Fatal("an expired code was not reported as expired")

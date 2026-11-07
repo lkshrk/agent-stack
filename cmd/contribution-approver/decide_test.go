@@ -367,3 +367,347 @@ func TestADecisionIsRefusedWhenTheForkNoLongerMatchesTheRegistry(t *testing.T) {
 		})
 	}
 }
+
+const (
+	outdatedText = "That announcement is outdated: lkshrk/omnigent#7 has a newer announcement. Nothing was submitted."
+	unknownText  = "That code is unknown or already used. Nothing was submitted."
+)
+
+func announceNewHead(t *testing.T, h *harness) string {
+	t.Helper()
+	h.gh.update(func() { h.gh.prs[7].sha = shaB; h.gh.runs[shaB] = h.gh.runs[shaA] })
+	h.poller.poll(context.Background())
+	msgs := h.signal.messages()
+	return codeIn(t, msgs[len(msgs)-1])
+}
+
+func lastMessage(h *harness) string {
+	msgs := h.signal.messages()
+	return msgs[len(msgs)-1]
+}
+
+func TestASupersededCodeSaysTheAnnouncementIsOutdated(t *testing.T) {
+	for _, action := range []string{"approve", "reject"} {
+		t.Run(action, func(t *testing.T) {
+			h := newHarness(t)
+			old := announce(t, h, 7, shaA)
+			fresh := announceNewHead(t, h)
+			before := len(h.signal.messages())
+
+			rec := decide(h, "Bearer "+testShared, `{"action":"`+action+`","code":"`+old+`"}`)
+			h.poller.poll(context.Background())
+
+			msgs := h.signal.messages()
+			if rec.Code != http.StatusGone || len(msgs) != before+1 || msgs[before] != outdatedText {
+				t.Fatalf("reply = %d, messages = %q", rec.Code, msgs[before:])
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+			if again := approveWith(h, old); again.Code != http.StatusNotFound || lastMessage(h) != unknownText {
+				t.Fatalf("second reply = %d %q, want the unknown text", again.Code, lastMessage(h))
+			}
+			if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+				t.Fatalf("the newer code answered %d", rec.Code)
+			}
+		})
+	}
+}
+
+func TestASupersededCodeIsRememberedForADay(t *testing.T) {
+	for name, tc := range map[string]struct {
+		age    time.Duration
+		status int
+		text   string
+	}{
+		"within a day": {23 * time.Hour, http.StatusGone, outdatedText},
+		"after a day":  {codeTTL + tombstoneTTL + time.Second, http.StatusNotFound, unknownText},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			old := announce(t, h, 7, shaA)
+			announceNewHead(t, h)
+			h.clock.advance(tc.age)
+
+			rec := approveWith(h, old)
+
+			if rec.Code != tc.status || lastMessage(h) != tc.text {
+				t.Fatalf("reply = %d %q", rec.Code, lastMessage(h))
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+		})
+	}
+}
+
+func TestASupersededRecordIsPurgedWithTheOtherCodeMemory(t *testing.T) {
+	c := &clock{t: time.Now()}
+	s := newCodeStore(codeTTL, c.now)
+	k := prKey{testFork, 7}
+	old, err := s.issue(k, shaA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.markAnnounced(k, shaA, old)
+	fresh, err := s.issue(k, shaB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.markAnnounced(k, shaB, fresh)
+	if n := s.live(); n != 1 {
+		t.Fatalf("live codes = %d, want 1", n)
+	}
+	c.advance(codeTTL + tombstoneTTL)
+	if _, err := s.issue(prKey{testFork, 8}, shaA); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	_, kept := s.byCode[old]
+	s.mu.Unlock()
+	if kept {
+		t.Fatal("the superseded record outlived the code memory")
+	}
+}
+
+func TestAFailedRetryAnnouncementLeavesTheOlderCodeValid(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	if rec := approveWith(h, old); rec.Code != http.StatusOK {
+		t.Fatalf("the older code answered %d %q", rec.Code, lastMessage(h))
+	}
+	if r := h.gh.reviewCalls(); len(r) != 1 || r[0].body["commit_id"] != shaA {
+		t.Fatalf("reviews = %v, want one on %s", r, shaA)
+	}
+}
+
+func TestARetryAnnouncementReplacesTheCode(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.poller.poll(context.Background())
+	fresh := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, old); rec.Code != http.StatusGone || lastMessage(h) != outdatedText {
+		t.Fatalf("older code: reply = %d %q", rec.Code, lastMessage(h))
+	}
+	if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+		t.Fatalf("the newer code answered %d", rec.Code)
+	}
+}
+
+func TestAnExpiredCodeDoesNotReplaceANewerLiveCode(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.clock.advance(codeTTL + time.Second)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.poller.poll(context.Background())
+	fresh := codeIn(t, lastMessage(h))
+	before := announcements(h)
+
+	rec := approveWith(h, old)
+	h.poller.poll(context.Background())
+
+	if rec.Code != http.StatusGone || lastMessage(h) != outdatedText || announcements(h) != before {
+		t.Fatalf("reply = %d %q, announcements %d -> %d", rec.Code, lastMessage(h), before, announcements(h))
+	}
+	if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+		t.Fatalf("the live code answered %d", rec.Code)
+	}
+}
+
+func TestASupersededCodeSubmitsNothingAfterTheStoreForgetsThePullRequest(t *testing.T) {
+	for name, drop := range map[string]func(s *codeStore, k prKey){
+		"reviewed":  func(s *codeStore, k prKey) { s.markReviewed(k, shaB) },
+		"forgotten": func(s *codeStore, k prKey) { s.forget(k) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			old := announce(t, h, 7, shaA)
+			announceNewHead(t, h)
+			drop(h.codes, prKey{testFork, 7})
+
+			if rec := approveWith(h, old); rec.Code != http.StatusGone || lastMessage(h) != outdatedText {
+				t.Fatalf("reply = %d %q", rec.Code, lastMessage(h))
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+		})
+	}
+}
+
+func TestAForgetWhileTheAnnouncementIsSentAnnouncesAgain(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	h.signal.whenSent(func(string) { h.codes.forget(prKey{testFork, 7}) })
+	h.poller.poll(context.Background())
+	lost := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, lost); rec.Code != http.StatusNotFound {
+		t.Fatalf("the forgotten code answered %d", rec.Code)
+	}
+	h.poller.poll(context.Background())
+	if announcements(h) != 2 {
+		t.Fatalf("announcements = %d, want 2: %q", announcements(h), h.signal.messages())
+	}
+	if rec := approveWith(h, codeIn(t, lastMessage(h))); rec.Code != http.StatusOK {
+		t.Fatalf("the new code answered %d", rec.Code)
+	}
+}
+
+func TestACodeRepliedBeforeItsAnnouncementIsDeliveredDecidesNothing(t *testing.T) {
+	for name, setup := range map[string]func(h *harness){
+		"first announcement": func(h *harness) { h.gh.readyPR(7, shaA) },
+		"same head again": func(h *harness) {
+			announce(t, h, 7, shaA)
+			h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			setup(h)
+			var early *httptest.ResponseRecorder
+			h.signal.whenSent(func(msg string) { early = replyFromHook(t, h, msg) })
+			h.poller.poll(context.Background())
+
+			if early == nil || early.Code != http.StatusNotFound {
+				t.Fatalf("early reply = %v, want 404", early)
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+		})
+	}
+}
+
+// replyFromHook approves with msg's code from a fake server goroutine, so it must not call t.Fatal.
+func replyFromHook(t *testing.T, h *harness, msg string) *httptest.ResponseRecorder {
+	m := announcedCode.FindStringSubmatch(msg)
+	if m == nil {
+		t.Errorf("announcement has no code: %q", msg)
+		return nil
+	}
+	return approveWith(h, m[1])
+}
+
+func TestACodeRepliedWhileTheReviewsAreListedIsRefusedThenANewCodePublishes(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	var reply *httptest.ResponseRecorder
+	h.signal.whenSent(func(msg string) {
+		h.gh.beforeNext(http.MethodGet, "/repos/"+testFork+"/pulls/7/reviews", func() { reply = replyFromHook(t, h, msg) })
+	})
+	pollTimes(h, 1)
+
+	if reply == nil || reply.Code != http.StatusConflict {
+		t.Fatalf("reply = %v, want 409", reply)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	pollTimes(h, 1)
+	if readyMessages(h) != 2 {
+		t.Fatalf("messages = %q, want a second announcement", h.signal.messages())
+	}
+	if rec := approveWith(h, codeIn(t, lastMessage(h))); rec.Code != http.StatusOK {
+		t.Fatalf("the new code answered %d", rec.Code)
+	}
+	pollTimes(h, 1)
+
+	onlyUpstream(t, h)
+	if n := countContaining(h.signal.messages(), "Published "+testFork+"#7 at "+shaA); n != 1 {
+		t.Fatalf("messages = %q, want one publish notice", h.signal.messages())
+	}
+}
+
+func TestACodeWhoseReviewListingFailedIsRefusedAndAnnouncedAgain(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	reviews := "/repos/" + testFork + "/pulls/7/reviews"
+	h.signal.whenSent(func(string) { h.gh.fail(http.MethodGet, reviews, http.StatusBadGateway) })
+	h.poller.poll(context.Background())
+	h.gh.fail(http.MethodGet, reviews, 0)
+	code := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, code); rec.Code != http.StatusConflict {
+		t.Fatalf("reply = %d, want 409", rec.Code)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	h.poller.poll(context.Background())
+	if announcements(h) != 2 {
+		t.Fatalf("announcements = %d, want 2", announcements(h))
+	}
+}
+
+func TestAFailedAnnouncementOfANewHeadLeavesTheOlderCodeRefused(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.gh.update(func() { h.gh.prs[7].sha = shaB; h.gh.runs[shaB] = h.gh.runs[shaA] })
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	if rec := approveWith(h, old); rec.Code != http.StatusConflict {
+		t.Fatalf("the older code answered %d, want 409", rec.Code)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	h.poller.poll(context.Background())
+	if !strings.Contains(lastMessage(h), shaB) || announcements(h) != 2 {
+		t.Fatalf("messages = %q, want the new head announced", h.signal.messages())
+	}
+}
+
+func TestAFailedAnnouncementWithdrawsItsCode(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	h.codes.mu.Lock()
+	n := len(h.codes.byCode)
+	h.codes.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("codes kept after a failed announcement = %d, want 0", n)
+	}
+}
+
+func TestTakingACodePurgesOldRecords(t *testing.T) {
+	h := newHarness(t)
+	announce(t, h, 7, shaA)
+	announceNewHead(t, h)
+	h.clock.advance(codeTTL + tombstoneTTL)
+
+	approveWith(h, "00000000")
+
+	h.codes.mu.Lock()
+	n := len(h.codes.byCode)
+	h.codes.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("records kept past the day = %d, want 0", n)
+	}
+}
+
+func TestUsedAndUnknownCodesKeepTheirText(t *testing.T) {
+	h := newHarness(t)
+	code := announce(t, h, 7, shaA)
+	if rec := approveWith(h, code); rec.Code != http.StatusOK {
+		t.Fatalf("approve = %d", rec.Code)
+	}
+	announceNewHead(t, h)
+
+	for _, c := range []string{code, "00000000"} {
+		if rec := approveWith(h, c); rec.Code != http.StatusNotFound || lastMessage(h) != unknownText {
+			t.Fatalf("code %s: reply = %d %q", c, rec.Code, lastMessage(h))
+		}
+	}
+}
