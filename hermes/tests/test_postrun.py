@@ -164,18 +164,19 @@ RENOVATE_ONLY = [push(NULL_SHA, "h", RENOVATE, "branch_creation")]
 
 class FakeInfra:
     def __init__(self, pulls=None, pushes=None, changes=None, tag_commits=None, runs=None, trusted=None, since=1000.0,
-                 contents=None, statuses=None):
+                 contents=None, statuses=None, main_trusted=()):
         self.pulls, self.changes = pulls or {}, changes or {}
         self.contents, self.statuses = contents or {}, statuses or {}
         self.pushes = RENOVATE_ONLY if pushes is None else pushes
         self.tag_commits, self.runs = tag_commits or {}, runs or {}
         self.trusted = frozenset({RENOVATE}) if trusted is None else frozenset(trusted)
         self.since = since
+        self.main_trusted = frozenset(main_trusted)
         self.asked = []
 
     def reads(self):
         return InfraReads(self.merged, self.head_pushes, self.push_changes, self.file_content, self.tag_commit,
-                          self.tag_runs, self.trusted, self.since)
+                          self.tag_runs, self.trusted, self.since, self.main_trusted)
 
     def merged(self, sha):
         self.asked.append(("merged", sha))
@@ -455,10 +456,40 @@ class InfraViolationsTest(unittest.TestCase):
     def test_chain_of_agent_merges_and_owner_push_allowed(self):
         entries = [merge("a", "m1"), entry(MAIN, "lkshrk", "m1", "o"), merge("o", "m2")]
         fake = FakeInfra(pulls={"m1": [renovate_pull("m1", number=1)],
-                                "m2": [renovate_pull("m2", number=2, merged_by="H-Cloud-NPA[bot]")]})
+                                "m2": [renovate_pull("m2", number=2, merged_by="H-Cloud-NPA[bot]")]},
+                         trusted={RENOVATE, "lkshrk"})
         self.assertEqual(self.check({MAIN: "m2"}, entries, fake), [])
         self.assertEqual([o["pr"] for o in self.observed],
                          ["https://github.com/acme/app/pull/1", "https://github.com/acme/app/pull/2"])
+
+    def test_untrusted_main_moves_are_checked_like_agent_merges(self):
+        for actor in ("someone-else[bot]", "lkshrk", "h-cloud-workflow[bot]", ""):
+            with self.subTest(actor=actor):
+                out = self.check({MAIN: "m"}, [merge("a", "m", actor=actor, kind="push")], self.landed_ok())
+                self.assertEqual(len(out), 1, out)
+                self.assertTrue(out[0].startswith("ref moved by "), out)
+                self.assertIn("not a PR merge", out[0])
+
+    def test_agent_login_missing_from_agent_actors_is_still_checked(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m")], self.landed_ok(), agents=frozenset({"other-agent[bot]"}))
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("PR was not merged by an agent", out[0])
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m", kind="push")], self.landed_ok(),
+                                    agents=frozenset({"other-agent[bot]"}))[0][:13], "ref moved by ")
+
+    def test_workflow_bot_push_trusted_only_when_listed(self):
+        entries = [entry(MAIN, "h-cloud-workflow[bot]", "a", "w")]
+        self.assertTrue(self.check({MAIN: "w"}, entries, FakeInfra()))
+        self.assertEqual(self.check({MAIN: "w"}, entries, FakeInfra(main_trusted={"h-cloud-workflow[bot]"})), [])
+
+    def test_renovate_automerge_trusted(self):
+        for kind in ("pr_merge", "push"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m", actor=RENOVATE, kind=kind)], FakeInfra()), [])
+
+    def test_trusted_main_actor_that_is_an_agent_is_still_checked(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m", kind="push")], FakeInfra(main_trusted={AGENT}))
+        self.assert_agent_violation(out)
 
     def test_agent_push_is_violation(self):
         for kind in ("push", "force_push", "merge_queue_merge", ""):

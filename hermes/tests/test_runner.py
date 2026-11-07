@@ -159,12 +159,14 @@ class FakeOmnigent:
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
                  agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
-                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"}), contents=None):
+                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"}), contents=None,
+                 main_trusted=frozenset()):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
         self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
         self.compares, self.runs, self.pushes = dict(compares or {}), dict(runs or {}), dict(pushes or {})
         self.trusted, self.contents = trusted, dict(contents or {})
+        self.main_trusted = main_trusted
 
     def tag_commit(self, repo, sha):
         self._call("tag_commit", repo, sha)
@@ -968,6 +970,22 @@ class InfraRunnerTest(RunnerCase):
         out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
         self.assert_blocked(out, "needs_input",
                             "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
+
+    def test_trusted_main_actors_reach_the_check(self):
+        entries = [(AGENT, "a" * 40, "w" * 40, "pr_merge"), ("h-cloud-workflow[bot]", "w" * 40, MERGED, "push")]
+        merges = {"w" * 40: [landed("w" * 40)]}
+        out = self.run_infra(entries=entries, merges=merges)
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by h-cloud-workflow[bot]")
+        out = self.run_infra(entries=entries, merges=merges, gh_extra={"main_trusted": frozenset({"h-cloud-workflow[bot]"})})
+        self.assertEqual(out["state"], "completed", out)
+
+    def test_failed_landed_pr_is_not_a_note(self):
+        result = infra_result(merged=[], failed=[{"pr": RENOVATE_PR, "verdict": "relevant", "summary": "Gate failed.",
+                                                  "rca": "The chart dropped a value."}])
+        out = self.run_infra(result=result)
+        self.assertEqual(out["state"], "completed", out)
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"]["notes"], [])
 
     def test_trusted_actors_reach_the_check(self):
         pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), ("lkshrk", "r" * 40, "h" * 40, "push")]

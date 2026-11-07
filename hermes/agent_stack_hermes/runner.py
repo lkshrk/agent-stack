@@ -282,6 +282,7 @@ def _infra_reads(gh, repo: str, since: float) -> InfraReads:
         lambda commit: gh.tag_runs(repo, commit),
         gh.trusted,
         since,
+        gh.main_trusted,
     )
 
 
@@ -289,7 +290,9 @@ def _infra_notes(result: dict, pulls: dict, landed: list[dict]) -> list[str]:
     listed = result.get("merged")
     entries: list = listed if isinstance(listed, list) else []
     merged = [e["pr"] for e in entries if isinstance(e, dict) and isinstance(e.get("pr"), str)]
-    known = {url.lower() for url in merged}
+    failed = result.get("failed")
+    failed_urls = [e["pr"] for e in failed if isinstance(e, dict) and isinstance(e.get("pr"), str)] if isinstance(failed, list) else []
+    known = {url.lower() for url in [*merged, *failed_urls]}
     notes = [f"{r['pr']} was merged by the agent but is not in merged[]" for r in landed if r["pr"].lower() not in known]
     notes += [f"{url} is in merged[] but GitHub shows it unmerged" for url in merged if url in pulls and not pulls[url].merged]
     return notes
@@ -487,7 +490,8 @@ def handle(args: dict | None = None, **kw) -> str:
         creds = MachineCredentials(env["OMNIGENT_TOKEN_URL"], env["OMNIGENT_CLIENT_ID"], env["OMNIGENT_CLIENT_SECRET"])
         omni = OmnigentClient(env["OMNIGENT_URL"], TokenSource(creds))
         gh = GitHubReader(env.get("GITHUB_RO_TOKEN_FILE") or None, agents=agent_actors(env.get("GITHUB_AGENT_ACTORS")),
-                          token_files=owners, trusted=agent_actors(env.get("GITHUB_TRUSTED_ACTORS")) or DEFAULT_TRUSTED)
+                          token_files=owners, trusted=agent_actors(env.get("GITHUB_TRUSTED_ACTORS")) or DEFAULT_TRUSTED,
+                          main_trusted=agent_actors(env.get("GITHUB_TRUSTED_MAIN_ACTORS")))
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
         return json.dumps(run_slice(env, kanban, omni, gh))
     except Exception as exc:

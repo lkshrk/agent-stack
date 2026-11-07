@@ -138,6 +138,7 @@ class InfraReads:
     tag_runs: Callable[[str], list[WorkflowRun]]
     trusted: frozenset[str] = DEFAULT_TRUSTED
     since: float = 0.0
+    main_trusted: frozenset[str] = frozenset()
 
 
 def protected_path(path: str) -> bool:
@@ -198,9 +199,11 @@ class GitHubReader:
         token_files: dict[str, str] | None = None,
         sleep=time.sleep,
         trusted: frozenset[str] = DEFAULT_TRUSTED,
+        main_trusted: frozenset[str] = frozenset(),
     ):
         self._sleep = sleep
         self.trusted = frozenset(trusted)
+        self.main_trusted = frozenset(main_trusted)
         self._token_file = token_file
         self._token_files = {owner.lower(): path for owner, path in (token_files or {}).items()}
         self.agents = frozenset(agents)
@@ -578,20 +581,28 @@ def _by_agent(entries: list[Activity], agents: frozenset[str]) -> bool:
 Landed = Callable[[Activity], "tuple[str | None, dict | None]"]
 
 
+def _mover(entry: Activity, agents: frozenset[str]) -> str:
+    login = entry.actor.lower()
+    return "agent" if login in agents else entry.actor or "unknown actor"
+
+
 def _branch(
     ref: str, old: str, new: str, entries: list[Activity], agents: frozenset[str], landed: Landed | None,
-    observed: list[dict],
+    observed: list[dict], trusted: frozenset[str] | None = None,
 ) -> str | None:
     by_agent = [e for e in entries if e.actor and e.actor.lower() in agents]
     if by_agent and not landed:
         return f"ref moved by agent: {ref}"
-    if len(by_agent) > MAX_AGENT_MERGES:
+    checked = by_agent
+    if landed and trusted is not None:
+        checked = [e for e in entries if not e.actor or e.actor.lower() in agents or e.actor.lower() not in trusted]
+    if len(checked) > MAX_AGENT_MERGES:
         return f"ref moved by agent: {ref} (more than {MAX_AGENT_MERGES} agent merges)"
     seen: list[dict] = []
-    for e in by_agent:
+    for e in checked:
         why, record = landed(e) if landed else (None, None)
         if why:
-            return f"ref moved by agent: {ref} ({why})"
+            return f"ref moved by {_mover(e, agents)}: {ref} ({why})"
         seen.append(record or {})
     reason = _attributed(ref, old, new, entries)
     if not reason:
@@ -769,7 +780,9 @@ def violations(
     protected = {"refs/heads/" + name for name in heads}
     landed: Landed | None = None
     tag_fallback = None
+    trusted_main: frozenset[str] | None = None
     if bundle == "infra" and infra and default:
+        trusted_main = frozenset(a.lower() for a in infra.trusted | infra.main_trusted)
         landed = functools.partial(_renovate_merge, reads=infra, repo=repo, default=default, agents=agents)
         tag_fallback = functools.partial(_monthly_tag, activity=activity, reads=infra, agents=agents, default=default,
                                          repo=repo)
@@ -787,7 +800,8 @@ def violations(
             reason = _tag(ref, after.get(ref), release, agents, tag_fallback)
         else:
             on_default = ref == f"refs/heads/{default}"
-            reason = _branch(ref, old, new, activity(ref), agents, landed if on_default else None, observed)
+            reason = _branch(ref, old, new, activity(ref), agents, landed if on_default else None, observed,
+                             trusted_main if on_default else None)
         if reason:
             found.append(reason)
     if pull:
