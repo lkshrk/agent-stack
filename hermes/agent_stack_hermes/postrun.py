@@ -23,18 +23,42 @@ NULL_SHA = "0" * 40
 NO_TOKEN_STATUS = 401
 RENOVATE = "renovate-master[bot]"
 RENOVATE_PREFIX = "renovate/"
+DEFAULT_TRUSTED = frozenset({RENOVATE})
 PROTECTED_PATHS = (
     "kubernetes/apps/security/**",
     "kubernetes/apps/omnigent-sandboxes/**",
     "kubernetes/apps/ai/hermes/**",
     "kubernetes/apps/ai/contribution-approver/**",
+    "kubernetes/apps/actions-runner-system/**",
+    "kubernetes/apps/flux-system/**",
     "kubernetes/flux/**",
     ".github/**",
     "talos/**",
     "**/*.sops.yaml",
 )
-MONTHLY_TAG = re.compile(r"\d{4}\.\d{1,2}\.\d+")
-REACHABLE_STATUSES = ("ahead", "identical")
+AGENT_ALLOWED_ROOT = ("kubernetes", "apps")
+AGENT_ALLOWED_MIN_SEGMENTS = 5
+PRIVILEGED_KINDS = (
+    "ClusterRole",
+    "ClusterRoleBinding",
+    "Role",
+    "RoleBinding",
+    "ServiceAccount",
+    "MutatingPolicy",
+    "ValidatingPolicy",
+    "MutatingWebhookConfiguration",
+    "ValidatingWebhookConfiguration",
+    "ClusterPolicy",
+    "Policy",
+    "CiliumClusterwideNetworkPolicy",
+)
+_PRIVILEGED_LINE = re.compile(r"^\+\s*kind:\s*(" + "|".join(PRIVILEGED_KINDS) + r")\b", re.ASCII | re.MULTILINE)
+_TARGET_NAMESPACE_LINE = re.compile(r"^\+\s*targetNamespace:", re.ASCII | re.MULTILINE)
+MONTHLY_TAG = re.compile(r"[0-9]{4}\.[0-9]{1,2}\.[0-9]+", re.ASCII)
+TAG_WORKFLOW = "tag.yaml"
+MAX_UNTRUSTED_PUSHES = 20
+MAX_AGENT_MERGES = 50
+MAX_REPORTED_FILES = 50
 PULLS_RETRY_SECONDS = 5
 _OWNER = re.compile(r"[A-Za-z0-9-]+")
 
@@ -84,18 +108,31 @@ class MergedPull:
 
 
 @dataclass(frozen=True)
-class TagObject:
-    tagger: str
-    commit: str
+class FileChange:
+    filename: str
+    previous: str = ""
+    patch: str | None = None
+    changes: int = 0
+
+
+@dataclass(frozen=True)
+class WorkflowRun:
+    head_sha: str
+    head_branch: str
+    status: str
+    conclusion: str
+    updated: float
 
 
 @dataclass(frozen=True)
 class InfraReads:
     merged_pulls: Callable[[str], list[MergedPull]]
     head_pushes: Callable[[str, str], list[Activity] | None]
-    compare_files: Callable[[str, str], list[str]]
-    tag: Callable[[str], TagObject | None]
-    reachable: Callable[[str], bool]
+    push_changes: Callable[[str, str], list[FileChange]]
+    tag_commit: Callable[[str], str | None]
+    tag_runs: Callable[[str], list[WorkflowRun]]
+    trusted: frozenset[str] = DEFAULT_TRUSTED
+    since: float = 0.0
 
 
 def protected_path(path: str) -> bool:
@@ -106,6 +143,16 @@ def protected_path(path: str) -> bool:
         elif fnmatch.fnmatchcase(path, pattern.removeprefix("**/")):
             return True
     return False
+
+
+def agent_path_allowed(path: str) -> bool:
+    parts = path.split("/")
+    return (
+        len(parts) >= AGENT_ALLOWED_MIN_SEGMENTS
+        and tuple(parts[:2]) == AGENT_ALLOWED_ROOT
+        and all(part and part not in (".", "..") for part in parts)
+        and not protected_path(path)
+    )
 
 
 def agent_actors(value: str | None) -> frozenset[str]:
@@ -145,8 +192,10 @@ class GitHubReader:
         agents=frozenset(),
         token_files: dict[str, str] | None = None,
         sleep=time.sleep,
+        trusted: frozenset[str] = DEFAULT_TRUSTED,
     ):
         self._sleep = sleep
+        self.trusted = frozenset(trusted)
         self._token_file = token_file
         self._token_files = {owner.lower(): path for owner, path in (token_files or {}).items()}
         self.agents = frozenset(agents)
@@ -352,7 +401,29 @@ class GitHubReader:
                 raise GitHubError("pagination link leaves the API host")
         return None
 
-    def tag(self, repo: str, sha: str) -> TagObject | None:
+    def push_changes(self, repo: str, base: str, head: str) -> list[FileChange]:
+        spec = f"{urllib.parse.quote(base, safe='')}...{urllib.parse.quote(head, safe='')}"
+        body, _ = self._get(f"{self._api}/repos/{repo}/compare/{spec}", _owner(repo))
+        if not isinstance(body, dict) or not isinstance(body.get("files"), list):
+            raise GitHubError("compare response has the wrong shape")
+        files = body["files"]
+        if len(files) >= COMPARE_FILE_CAP:
+            raise GitHubError("compare file list may be truncated")
+        out: list[FileChange] = []
+        for entry in files:
+            if not isinstance(entry, dict):
+                raise GitHubError("compare file entry has the wrong shape")
+            patch = entry.get("patch")
+            if patch is not None and not isinstance(patch, str):
+                raise GitHubError("compare patch has the wrong shape")
+            changes = entry.get("changes", 0)
+            if not _is_int(changes):
+                raise GitHubError("compare changes has the wrong shape")
+            out.append(FileChange(_str(entry.get("filename"), "filename"),
+                                  _optional_str(entry.get("previous_filename"), "previous filename"), patch, changes))
+        return out
+
+    def tag_commit(self, repo: str, sha: str) -> str | None:
         try:
             body, _ = self._get(f"{self._api}/repos/{repo}/git/tags/{urllib.parse.quote(sha, safe='')}", _owner(repo))
         except GitHubError as exc:
@@ -361,20 +432,24 @@ class GitHubReader:
             raise
         if not isinstance(body, dict) or not isinstance(body.get("object"), dict):
             raise GitHubError("tag response has the wrong shape")
-        tagger = body.get("tagger")
-        if tagger is not None and not isinstance(tagger, dict):
-            raise GitHubError("tagger has the wrong shape")
-        name = _str(tagger.get("name"), "tagger name") if tagger else ""
         target = body["object"]
-        commit = _str(target.get("sha"), "tag object sha") if target.get("type") == "commit" else ""
-        return TagObject(name, commit)
+        sha_of = _str(target.get("sha"), "tag object sha")
+        return sha_of if target.get("type") == "commit" else ""
 
-    def reachable(self, repo: str, commit: str, branch: str) -> bool:
-        spec = f"{urllib.parse.quote(commit, safe='')}...{urllib.parse.quote(branch, safe='')}"
-        body, _ = self._get(f"{self._api}/repos/{repo}/compare/{spec}?per_page=1", _owner(repo))
-        if not isinstance(body, dict):
-            raise GitHubError("compare response has the wrong shape")
-        return _str(body.get("status"), "compare status") in REACHABLE_STATUSES
+    def tag_runs(self, repo: str, commit: str) -> list[WorkflowRun]:
+        query = urllib.parse.urlencode({"head_sha": commit, "per_page": 100})
+        url = f"{self._api}/repos/{repo}/actions/workflows/{TAG_WORKFLOW}/runs?{query}"
+        out: list[WorkflowRun] = []
+        for runs in self._pages(url, "workflow runs", _owner(repo), key="workflow_runs"):
+            for run in runs:
+                if not isinstance(run, dict):
+                    raise GitHubError("workflow run has the wrong shape")
+                out.append(WorkflowRun(_str(run.get("head_sha"), "run head sha"),
+                                       _optional_str(run.get("head_branch"), "run head branch"),
+                                       _str(run.get("status"), "run status"),
+                                       _optional_str(run.get("conclusion"), "run conclusion"),
+                                       _timestamp(run.get("updated_at"), "run updated_at")))
+        return out
 
 
 def _is_int(value) -> bool:
@@ -423,6 +498,17 @@ def _merged_pull(body) -> MergedPull:
     )
 
 
+def _timestamp(value, what: str) -> float:
+    stamp = _str(value, what)
+    try:
+        when = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        raise GitHubError(f"{what} unparseable") from None
+    if when.tzinfo is None:
+        raise GitHubError(f"{what} has no zone")
+    return when.timestamp()
+
+
 def _activity(item) -> Activity:
     if not isinstance(item, dict):
         raise GitHubError("activity entry has the wrong shape")
@@ -433,16 +519,9 @@ def _activity(item) -> Activity:
         login = _str(actor.get("login"), "activity actor login")
     else:
         raise GitHubError("activity actor has the wrong shape")
-    stamp = _str(item.get("timestamp"), "activity timestamp")
-    try:
-        when = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    except ValueError:
-        raise GitHubError("activity timestamp unparseable") from None
-    if when.tzinfo is None:
-        raise GitHubError("activity timestamp has no zone")
     return Activity(
         _str(item.get("ref"), "activity ref"),
-        when.timestamp(),
+        _timestamp(item.get("timestamp"), "activity timestamp"),
         login,
         _str(item.get("before"), "activity before sha"),
         _str(item.get("after"), "activity after sha"),
@@ -478,13 +557,14 @@ def _branch(
     ref: str, old: str, new: str, entries: list[Activity], agents: frozenset[str], landed: Landed | None,
     observed: list[dict],
 ) -> str | None:
+    by_agent = [e for e in entries if e.actor and e.actor.lower() in agents]
+    if by_agent and not landed:
+        return f"ref moved by agent: {ref}"
+    if len(by_agent) > MAX_AGENT_MERGES:
+        return f"ref moved by agent: {ref} (more than {MAX_AGENT_MERGES} agent merges)"
     seen: list[dict] = []
-    for e in entries:
-        if not (e.actor and e.actor.lower() in agents):
-            continue
-        if not landed:
-            return f"ref moved by agent: {ref}"
-        why, record = landed(e)
+    for e in by_agent:
+        why, record = landed(e) if landed else (None, None)
         if why:
             return f"ref moved by agent: {ref} ({why})"
         seen.append(record or {})
@@ -492,6 +572,62 @@ def _branch(
     if not reason:
         observed.extend(seen)
     return reason
+
+
+def _contiguous(pushes: list[Activity], head_sha: str) -> bool:
+    return (
+        bool(pushes)
+        and pushes[0].before == NULL_SHA
+        and all(a.after == b.before for a, b in zip(pushes, pushes[1:]))
+        and pushes[-1].after == head_sha
+    )
+
+
+def _untrusted(actor: str, reads: InfraReads, agents: frozenset[str]) -> bool:
+    login = actor.lower()
+    return not login or login in agents or login not in reads.trusted
+
+
+def _change_problem(change: FileChange) -> str | None:
+    for path in (change.filename, change.previous):
+        if path and not agent_path_allowed(path):
+            return f"changes {path} outside the allowed app paths"
+    if change.patch is None:
+        return None if change.previous and change.changes == 0 else f"has no patch for {change.filename}"
+    kind = _PRIVILEGED_LINE.search(change.patch)
+    if kind:
+        return f"adds kind {kind.group(1)} in {change.filename}"
+    if _TARGET_NAMESPACE_LINE.search(change.patch):
+        return f"sets targetNamespace in {change.filename}"
+    return None
+
+
+def _reported(push: Activity, changes: list[FileChange]) -> dict:
+    files = [c.filename for c in changes]
+    record: dict = {"before": push.before, "after": push.after, "files": files[:MAX_REPORTED_FILES]}
+    if len(files) > MAX_REPORTED_FILES:
+        record["files_omitted"] = len(files) - MAX_REPORTED_FILES
+    return record
+
+
+def _head_changes(pull: MergedPull, url: str, reads: InfraReads, agents: frozenset[str]) -> tuple[str | None, list]:
+    pushes = reads.head_pushes(pull.head_ref, pull.head_sha)
+    if pushes is None:
+        return f"{url}: head branch history of {pull.head_ref} not traceable to its creation", []
+    if not _contiguous(pushes, pull.head_sha):
+        return f"{url}: head branch history of {pull.head_ref} has a gap", []
+    untrusted = [p for p in pushes if _untrusted(p.actor, reads, agents)]
+    if len(untrusted) > MAX_UNTRUSTED_PUSHES:
+        return f"{url}: more than {MAX_UNTRUSTED_PUSHES} untrusted pushes to {pull.head_ref}", []
+    reported = []
+    for push in untrusted:
+        rewritten = push.before == NULL_SHA or push.activity_type == "force_push"
+        changes = reads.push_changes(pull.base_sha if rewritten else push.before, push.after)
+        problem = next((why for why in map(_change_problem, changes) if why), None)
+        if problem:
+            return f"{url}: agent push {push.before}..{push.after} {problem}", []
+        reported.append(_reported(push, changes))
+    return None, reported
 
 
 def _renovate_merge(
@@ -516,38 +652,34 @@ def _renovate_merge(
     if why:
         return why, None
     url = f"https://github.com/{repo}/pull/{pull.number}"
-    pushes = reads.head_pushes(pull.head_ref, pull.head_sha)
-    if pushes is None:
-        return f"{url}: head branch history of {pull.head_ref} not traceable to its creation", None
-    agent_pushes = []
-    for change in pushes:
-        if change.actor and change.actor.lower() not in agents:
-            continue
-        rewritten = change.before == NULL_SHA or change.activity_type == "force_push"
-        files = reads.compare_files(pull.base_sha if rewritten else change.before, change.after)
-        bad = next((path for path in files if protected_path(path)), None)
-        if bad:
-            return f"{url}: agent push {change.before}..{change.after} touches protected path {bad}", None
-        agent_pushes.append({"before": change.before, "after": change.after, "files": files})
-    return None, {"pr": url, "merge_commit_sha": entry.after, "agent_pushes": agent_pushes}
+    why, pushes = _head_changes(pull, url, reads, agents)
+    if why:
+        return why, None
+    return None, {"pr": url, "merge_commit_sha": entry.after, "agent_pushes": pushes}
 
 
 def _monthly_tag(
-    ref: str, sha: str, activity: Callable[[str], list[Activity]], reads: InfraReads, agents: frozenset[str]
+    ref: str, sha: str, activity: Callable[[str], list[Activity]], reads: InfraReads, agents: frozenset[str],
+    default: str,
 ) -> str | None:
     entries = activity(ref)
     if entries:
         if _by_agent(entries, agents):
             return f"ref moved by agent: {ref}"
         return _attributed(ref, NULL_SHA, sha, entries)
+    unattributed = f"ref moved (unattributed): {ref}"
     if not MONTHLY_TAG.fullmatch(ref.removeprefix("refs/tags/")):
-        return f"ref moved (unattributed): {ref}"
-    tag = reads.tag(sha)
-    if tag is None or not tag.tagger or not tag.commit:
-        return f"ref moved (unattributed): {ref}"
-    if tag.tagger.lower() in agents:
-        return f"ref moved by agent: {ref}"
-    return None if reads.reachable(tag.commit) else f"ref moved (unattributed): {ref}"
+        return unattributed
+    target = reads.tag_commit(sha)
+    commit = sha if target is None else target
+    if not commit:
+        return unattributed
+    proven = any(
+        run.head_sha == commit and run.head_branch == default and run.status == "completed"
+        and run.conclusion == "success" and run.updated >= reads.since
+        for run in reads.tag_runs(commit)
+    )
+    return None if proven else unattributed
 
 
 def _tag(
@@ -592,7 +724,7 @@ def violations(
     tag_fallback = None
     if bundle == "infra" and infra and default:
         landed = functools.partial(_renovate_merge, reads=infra, repo=repo, default=default, agents=agents)
-        tag_fallback = functools.partial(_monthly_tag, activity=activity, reads=infra, agents=agents)
+        tag_fallback = functools.partial(_monthly_tag, activity=activity, reads=infra, agents=agents, default=default)
     found = []
     for ref in sorted(set(before) | set(after) | protected):
         old, new = before.get(ref, NULL_SHA), after.get(ref, NULL_SHA)

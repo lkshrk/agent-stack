@@ -119,6 +119,12 @@ class PluginTest(unittest.TestCase):
         _, gh = self.handled_reader(configured())
         self.assertEqual((gh._token_file, gh._token_files), ("x", {}))
 
+    def test_handler_reads_trusted_actors_with_renovate_as_default(self):
+        _, gh = self.handled_reader(configured())
+        self.assertEqual(gh.trusted, frozenset({"renovate-master[bot]"}))
+        _, gh = self.handled_reader(configured(GITHUB_TRUSTED_ACTORS="renovate-master[bot], LKSHRK"))
+        self.assertEqual(gh.trusted, frozenset({"renovate-master[bot]", "lkshrk"}))
+
     def test_handler_needs_a_read_token(self):
         env = configured()
         del env["GITHUB_RO_TOKEN_FILE"]

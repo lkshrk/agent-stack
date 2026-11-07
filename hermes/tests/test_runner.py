@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import NULL_SHA, Activity, GitHubError, MergedPull, PullHead, TagObject
+from agent_stack_hermes.postrun import NULL_SHA, Activity, FileChange, GitHubError, MergedPull, PullHead, WorkflowRun
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -148,19 +148,24 @@ class FakeOmnigent:
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
                  agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
-                 compares=None, reachable=(), pushes=None):
+                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"})):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
         self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
-        self.compares, self.reachable_commits, self.pushes = dict(compares or {}), set(reachable), dict(pushes or {})
+        self.compares, self.runs, self.pushes = dict(compares or {}), dict(runs or {}), dict(pushes or {})
+        self.trusted = trusted
 
-    def tag(self, repo, sha):
-        self._call("tag", repo, sha)
+    def tag_commit(self, repo, sha):
+        self._call("tag_commit", repo, sha)
         return self.tags.get(sha)
 
-    def reachable(self, repo, commit, branch):
-        self._call("reachable", repo, commit, branch)
-        return commit in self.reachable_commits
+    def tag_runs(self, repo, commit):
+        self._call("tag_runs", repo, commit)
+        return list(self.runs.get(commit, ()))
+
+    def push_changes(self, repo, base, head):
+        self._call("push_changes", repo, base, head)
+        return [FileChange(path, "", "@@ -1 +1 @@\n+  tag: 2", 2) for path in self.compares[(base, head)]]
 
     def head_pushes(self, repo, head_ref, head_sha):
         self._call("head_pushes", repo, head_ref, head_sha)
@@ -190,7 +195,7 @@ class FakeGitHub:
 
     def changed_files(self, repo, base, head):
         self._call("changed_files", repo, base, head)
-        return list(self.compares.get((base, head), self.files))
+        return self.files
 
     def activity(self, repo, ref, since):
         self._call("activity", repo, ref, since)
@@ -632,11 +637,11 @@ class RunnerTest(RunnerCase):
 
     def test_polly_tag_without_release_stays_unattributed(self):
         moved = {**AFTER, "refs/tags/2026.11.0": "d" * 40}
-        gh = {"tags": {"d" * 40: TagObject("h-cloud-workflow[bot]", "e" * 40)}, "reachable": {"e" * 40}}
+        gh = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", T0)]}}
         out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assert_blocked(out, "needs_input",
                             "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
-        self.assertFalse(self.calls("tag") + self.calls("reachable"))
+        self.assertFalse(self.calls("tag_commit") + self.calls("tag_runs"))
 
     def test_multiple_sessions_for_card_blocks_environment(self):
         sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
@@ -888,7 +893,7 @@ class InfraRunnerTest(RunnerCase):
     def test_agent_push_on_protected_path_blocks(self):
         out = self.run_infra(gh_extra=self.agent_fix(["talos/talconfig.yaml"]))
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
-        self.assertIn(f"{RENOVATE_PR}: agent push {'r' * 40}..{'h' * 40} touches protected path talos/talconfig.yaml",
+        self.assertIn(f"{RENOVATE_PR}: agent push {'r' * 40}..{'h' * 40} changes talos/talconfig.yaml outside",
                       self.calls("block")[0][3])
 
     def test_result_mismatches_are_notes_not_violations(self):
@@ -918,10 +923,25 @@ class InfraRunnerTest(RunnerCase):
 
     def test_monthly_workflow_tag_completes(self):
         tag = {"refs/tags/2026.11.0": "d" * 40}
-        gh_extra = {"tags": {"d" * 40: TagObject("h-cloud-workflow[bot]", "e" * 40)}, "reachable": {"e" * 40}}
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", AT)]}}
         out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
         self.assertEqual(out["state"], "completed", out)
-        self.assertEqual(self.calls("reachable"), [("reachable", REPO, "e" * 40, "main")])
+        self.assertEqual(self.calls("tag_runs"), [("tag_runs", REPO, "e" * 40)])
+
+    def test_tag_run_finished_before_the_run_window_is_unattributed(self):
+        tag = {"refs/tags/2026.11.0": "d" * 40}
+        old = AT - runner.ACTIVITY_SLACK_SECONDS - 1
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", old)]}}
+        out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
+
+    def test_trusted_actors_reach_the_check(self):
+        pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), ("lkshrk", "r" * 40, "h" * 40, "push")]
+        gh_extra = {"pushes": {"renovate/chart-1.x": pushes}, "trusted": frozenset({"renovate-master[bot]", "lkshrk"})}
+        out = self.run_infra(gh_extra=gh_extra)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertFalse(self.calls("push_changes"))
 
     def test_blocked_infra_result_still_checks_main(self):
         result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}

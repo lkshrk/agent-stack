@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
-from agent_stack_hermes.postrun import PR_URL, GitHubReader, InfraReads, agent_actors, token_files, violations
+from agent_stack_hermes.postrun import DEFAULT_TRUSTED, PR_URL, GitHubReader, InfraReads, agent_actors, token_files, violations
 from agent_stack_hermes.retry import OutageClock, unreachable
 from agent_stack_hermes.runspec import (
     INVALID_RESULT,
@@ -272,13 +272,15 @@ def _on_repo(url: str, repo: str) -> bool:
     return bool(match) and f"{match.group(1)}/{match.group(2)}".lower() == repo.lower()
 
 
-def _infra_reads(gh, repo: str, default: str) -> InfraReads:
+def _infra_reads(gh, repo: str, since: float) -> InfraReads:
     return InfraReads(
         lambda sha: gh.merged_pulls(repo, sha),
         lambda head_ref, head_sha: gh.head_pushes(repo, head_ref, head_sha),
-        lambda base, head: gh.changed_files(repo, base, head),
-        lambda sha: gh.tag(repo, sha),
-        lambda commit: gh.reachable(repo, commit, default),
+        lambda base, head: gh.push_changes(repo, base, head),
+        lambda sha: gh.tag_commit(repo, sha),
+        lambda commit: gh.tag_runs(repo, commit),
+        gh.trusted,
+        since,
     )
 
 
@@ -315,7 +317,7 @@ def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str
     found = foreign + violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
                                  lambda ref: gh.activity(spec.repo, ref, since),
                                  lambda tag: gh.release_author(spec.repo, tag), gh.agents, branches,
-                                 infra=_infra_reads(gh, spec.repo, default) if infra and default else None,
+                                 infra=_infra_reads(gh, spec.repo, since) if infra and default else None,
                                  default=default, pulls=pulls, observed=landed)
     if found:
         return _blocked("permission", "post-run check: " + "; ".join(found))
@@ -484,7 +486,7 @@ def handle(args: dict | None = None, **kw) -> str:
         creds = MachineCredentials(env["OMNIGENT_TOKEN_URL"], env["OMNIGENT_CLIENT_ID"], env["OMNIGENT_CLIENT_SECRET"])
         omni = OmnigentClient(env["OMNIGENT_URL"], TokenSource(creds))
         gh = GitHubReader(env.get("GITHUB_RO_TOKEN_FILE") or None, agents=agent_actors(env.get("GITHUB_AGENT_ACTORS")),
-                          token_files=owners)
+                          token_files=owners, trusted=agent_actors(env.get("GITHUB_TRUSTED_ACTORS")) or DEFAULT_TRUSTED)
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
         return json.dumps(run_slice(env, kanban, omni, gh))
     except Exception as exc:
