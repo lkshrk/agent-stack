@@ -12,13 +12,14 @@ from agent_stack_hermes.postrun import (
     NULL_SHA,
     COMPARE_FILE_CAP,
     Activity,
+    Compare,
+    Content,
     FileChange,
     GitHubError,
     GitHubReader,
     MAX_AGENT_MERGES,
-    MAX_REPORTED_FILES,
     MAX_UNTRUSTED_PUSHES,
-    PRIVILEGED_KINDS,
+    MAX_PUSH_FILES,
     PROTECTED_PATHS,
     PULLS_RETRY_SECONDS,
     InfraReads,
@@ -138,20 +139,34 @@ def push(before, after, actor=AGENT, kind="push"):
     return Activity(HEAD_REF, 1000.0, actor, before, after, kind)
 
 
-def change(filename=APP, patch="@@ -1 +1 @@\n-  tag: 1.0\n+  tag: 1.1", previous="", changes=2):
-    return FileChange(filename, previous, patch, changes)
+def change(filename=APP, previous=""):
+    return FileChange(filename, previous)
 
 
-def tag_run(sha="c1", branch="main", status="completed", conclusion="success", updated=2000.0):
-    return WorkflowRun(sha, branch, status, conclusion, updated)
+def tag_run(sha="c1", branch="main", status="completed", conclusion="success", updated=2000.0, event="schedule",
+            repo=REPO):
+    return WorkflowRun(sha, branch, status, conclusion, updated, event, repo)
+
+
+RELEASE = """apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: litellm
+spec:
+  chartRef: {kind: OCIRepository, name: litellm}
+  values:
+    image: {tag: 1.0.0}
+"""
 
 
 RENOVATE_ONLY = [push(NULL_SHA, "h", RENOVATE, "branch_creation")]
 
 
 class FakeInfra:
-    def __init__(self, pulls=None, pushes=None, changes=None, tag_commits=None, runs=None, trusted=None, since=1000.0):
+    def __init__(self, pulls=None, pushes=None, changes=None, tag_commits=None, runs=None, trusted=None, since=1000.0,
+                 contents=None, statuses=None):
         self.pulls, self.changes = pulls or {}, changes or {}
+        self.contents, self.statuses = contents or {}, statuses or {}
         self.pushes = RENOVATE_ONLY if pushes is None else pushes
         self.tag_commits, self.runs = tag_commits or {}, runs or {}
         self.trusted = frozenset({RENOVATE}) if trusted is None else frozenset(trusted)
@@ -159,8 +174,8 @@ class FakeInfra:
         self.asked = []
 
     def reads(self):
-        return InfraReads(self.merged, self.head_pushes, self.push_changes, self.tag_commit, self.tag_runs,
-                          self.trusted, self.since)
+        return InfraReads(self.merged, self.head_pushes, self.push_changes, self.file_content, self.tag_commit,
+                          self.tag_runs, self.trusted, self.since)
 
     def merged(self, sha):
         self.asked.append(("merged", sha))
@@ -174,7 +189,14 @@ class FakeInfra:
         self.asked.append(("compare", base, head))
         if (base, head) not in self.changes:
             raise AssertionError(f"unexpected compare {base}...{head}")
-        return list(self.changes[(base, head)])
+        return Compare(self.statuses.get((base, head), "ahead"), list(self.changes[(base, head)]))
+
+    def file_content(self, path, ref):
+        self.asked.append(("content", path, ref))
+        found = self.contents.get((path, ref))
+        if isinstance(found, Content):
+            return found
+        return Content("absent") if found is None else Content("present", found.encode() if isinstance(found, str) else found)
 
     def tag_commit(self, sha):
         self.asked.append(("tag", sha))
@@ -415,10 +437,12 @@ class InfraViolationsTest(unittest.TestCase):
         self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
         self.assertIn(contains, out[0])
 
-    def agent_push(self, changes, actor=AGENT, kind="push", trusted=None):
+    def agent_push(self, changes, actor=AGENT, kind="push", trusted=None, contents=None, status="ahead"):
         pushes = [push(NULL_SHA, "r1", RENOVATE, "branch_creation"), push("r1", "h", actor, kind)]
         base = "b" if kind == "force_push" else "r1"
-        return FakeInfra(pulls={"m": [renovate_pull()]}, pushes=pushes, changes={(base, "h"): changes}, trusted=trusted)
+        return FakeInfra(pulls={"m": [renovate_pull()]}, pushes=pushes, changes={(base, "h"): changes}, trusted=trusted,
+                         contents={(path, base if ref == "base" else ref): text for (path, ref), text in (contents or {}).items()},
+                         statuses={(base, "h"): status})
 
     def landed(self, fake):
         return self.check({MAIN: "m"}, [merge("a", "m")], fake)
@@ -483,14 +507,9 @@ class InfraViolationsTest(unittest.TestCase):
     def test_agent_push_inside_an_app_passes_and_is_reported(self):
         fake = self.agent_push([change()])
         self.assertEqual(self.landed(fake), [])
-        self.assertEqual(fake.asked, [("merged", "m"), ("pushes", "renovate/x-1.x", "h"), ("compare", "r1", "h")])
+        self.assertEqual(fake.asked, [("merged", "m"), ("pushes", "renovate/x-1.x", "h"), ("compare", "r1", "h"),
+                                      ("content", APP, "r1"), ("content", APP, "h")])
         self.assertEqual(self.observed[0]["agent_pushes"], [{"before": "r1", "after": "h", "files": [APP]}])
-
-    def test_reported_files_are_capped(self):
-        many = [change(f"kubernetes/apps/ai/litellm/app/f{i}.yaml") for i in range(MAX_REPORTED_FILES + 3)]
-        self.assertEqual(self.landed(self.agent_push(many)), [])
-        [reported] = self.observed[0]["agent_pushes"]
-        self.assertEqual((len(reported["files"]), reported["files_omitted"]), (MAX_REPORTED_FILES, 3))
 
     def test_never_paths_are_violations(self):
         never = (
@@ -535,28 +554,40 @@ class InfraViolationsTest(unittest.TestCase):
             out = self.landed(self.agent_push([change(filename, previous=previous)]))
             self.assert_agent_violation(out, "outside the allowed app paths")
 
-    def test_privileged_kinds_and_target_namespace_are_violations(self):
-        for kind in PRIVILEGED_KINDS:
-            with self.subTest(kind):
-                patch = f"@@ -0,0 +1,3 @@\n+apiVersion: v1\n+kind: {kind}\n+metadata: {{}}"
-                out = self.landed(self.agent_push([change(patch=patch)]))
-                self.assert_agent_violation(out, f"adds kind {kind} in {APP}")
-        out = self.landed(self.agent_push([change(patch="@@ -1 +1,2 @@\n spec:\n+  targetNamespace: kube-system")]))
-        self.assert_agent_violation(out, f"sets targetNamespace in {APP}")
-        out = self.landed(self.agent_push([change(patch="@@ -1 +1,2 @@\n spec:\n+      serviceAccountName: flux")]))
-        self.assert_agent_violation(out, f"sets serviceAccountName in {APP}")
+    def test_content_is_checked_by_the_manifest_checker(self):
+        bumped = RELEASE.replace("tag: 1.0.0", "tag: 1.0.1")
+        fake = self.agent_push([change()], contents={(APP, "base"): RELEASE, (APP, "h"): bumped})
+        self.assertEqual(self.landed(fake), [])
+        role = "{apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRole, metadata: {name: x}, rules: []}"
+        fake = self.agent_push([change()], contents={(APP, "base"): RELEASE, (APP, "h"): RELEASE + "---\n" + role})
+        self.assert_agent_violation(self.landed(fake), "ClusterRole x: adds a rbac.authorization.k8s.io/v1 ClusterRole")
+        moved = RELEASE.replace("name: litellm}", "name: evil}")
+        fake = self.agent_push([change()], contents={(APP, "base"): RELEASE, (APP, "h"): moved})
+        self.assert_agent_violation(self.landed(fake), "changes spec.chartRef")
 
-    def test_unprivileged_or_removed_kinds_pass(self):
-        for patch in ("@@ -1 +1 @@\n+kind: HelmRelease", "@@ -1 +1 @@\n+kind: NetworkPolicy",
-                      "@@ -1 +1 @@\n-kind: ClusterRole", "@@ -1 +1 @@\n+  # kind: Role in a comment",
-                      "@@ -1 +1 @@\n-  targetNamespace: x", "@@ -1 +1 @@\n-  serviceAccountName: x"):
-            self.assertEqual(self.landed(self.agent_push([change(patch=patch)])), [], patch)
+    def test_renamed_file_is_compared_with_its_old_path(self):
+        old = "kubernetes/apps/ai/litellm/app/old.yaml"
+        fake = self.agent_push([change(previous=old)], contents={(old, "base"): RELEASE, (APP, "h"): RELEASE})
+        self.assertEqual(self.landed(fake), [])
+        self.assertIn(("content", old, "r1"), fake.asked)
 
-    def test_missing_patch_is_violation_unless_a_pure_rename(self):
-        out = self.landed(self.agent_push([change(patch=None)]))
-        self.assert_agent_violation(out, f"has no patch for {APP}")
-        rename = change(patch=None, previous="kubernetes/apps/ai/litellm/app/old.yaml", changes=0)
-        self.assertEqual(self.landed(self.agent_push([rename])), [])
+    def test_unreadable_content_is_violation(self):
+        for state in ("larger than 1 MB", "not a file"):
+            fake = self.agent_push([change()], contents={(APP, "h"): Content(state)})
+            self.assert_agent_violation(self.landed(fake), f"{APP} at h is {state}")
+
+    def test_too_many_files_in_a_push_is_violation(self):
+        many = [change(f"kubernetes/apps/ai/litellm/app/f{i}.yaml") for i in range(MAX_PUSH_FILES + 1)]
+        fake = self.agent_push(many)
+        self.assert_agent_violation(self.landed(fake), f"changes more than {MAX_PUSH_FILES} files")
+        self.assertNotIn("content", [a[0] for a in fake.asked])
+
+    def test_rewritten_push_must_be_ahead_of_the_pr_base(self):
+        for status in ("behind", "identical"):
+            fake = self.agent_push([change()], kind="force_push", status=status)
+            self.assert_agent_violation(self.landed(fake), f"is not ahead of the PR base ({status})")
+        self.assertEqual(self.landed(self.agent_push([change()], kind="force_push", status="diverged")), [])
+        self.assertEqual(self.landed(self.agent_push([change()], status="behind")), [])
 
     def test_null_actor_and_unlisted_actors_are_scanned(self):
         for actor in ("", "github-actions[bot]", "lkshrk"):
@@ -677,8 +708,8 @@ class InfraTagTest(unittest.TestCase):
         return FakeInfra(tag_commits={"t2": "c1"}, runs={"c1": [tag_run(**run)]})
 
     def test_monthly_tag_from_a_tag_workflow_run_passes(self):
-        for name in ("2026.11.0", "2026.1.0", "2027.12.14"):
-            fake = self.workflow()
+        for name, event in (("2026.11.0", "schedule"), ("2026.1.0", "workflow_dispatch"), ("2027.12.14", "schedule")):
+            fake = self.workflow(event=event)
             self.assertEqual(self.check(name, fake=fake), [], name)
             self.assertEqual(fake.asked, [("tag", "t2"), ("runs", "c1")])
 
@@ -703,7 +734,8 @@ class InfraTagTest(unittest.TestCase):
 
     def test_runs_that_do_not_prove_the_tag_are_unattributed(self):
         for run in ({"sha": "other"}, {"branch": "renovate/x"}, {"status": "in_progress"}, {"conclusion": "failure"},
-                    {"conclusion": ""}, {"updated": 999.0}):
+                    {"conclusion": ""}, {"updated": 999.0}, {"event": "push"}, {"event": "pull_request"},
+                    {"repo": "evil/app"}):
             with self.subTest(run):
                 self.assertEqual(self.check(fake=self.workflow(**run)), [f"ref moved (unattributed): {self.TAG}"])
         self.assertEqual(self.check(fake=FakeInfra(tag_commits={"t2": "c1"})), [f"ref moved (unattributed): {self.TAG}"])
@@ -713,7 +745,8 @@ class InfraTagTest(unittest.TestCase):
         self.assertEqual(self.check(fake=fake), [f"ref moved (unattributed): {self.TAG}"])
 
     def test_other_tag_names_are_unattributed(self):
-        for name in ("v1.2.3", "2026.11", "2026.111.0", "26.11.0", "2026.11.0-rc1", "２０２６.11.0", "2026.1١.0"):
+        for name in ("v1.2.3", "2026.11", "2026.111.0", "26.11.0", "2026.11.0-rc1", "２０２６.11.0", "2026.1١.0",
+                     "2026.0.0", "2026.13.0", "2026.00.1", "2026.01.0"):
             fake = self.workflow()
             self.assertEqual(self.check(name, fake=fake), [f"ref moved (unattributed): refs/tags/{name}"], name)
             self.assertEqual(fake.asked, [])
@@ -1173,26 +1206,54 @@ class HeadPushesTest(ReaderCase):
 
 
 class PushChangesTest(ReaderCase):
-    def test_recorded_compare_with_patches(self):
+    def test_recorded_compare(self):
         r = self.reader([jr(recorded("compare_h-cloud_1519.json"))])
-        [got] = r.push_changes("lkshrk/h-cloud", "999bff9", "c901885")
-        self.assertEqual((got.filename, got.previous, got.changes),
-                         ("kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml", "", 2))
-        self.assertIn("+          image: ghcr.io/lkshrk/agent-stack/omnigent-host:1.27.3", got.patch)
+        got = r.push_changes("lkshrk/h-cloud", "999bff9", "c901885")
+        self.assertEqual(got, Compare("ahead", [FileChange("kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml")]))
         self.assertIn("/repos/lkshrk/h-cloud/compare/999bff9...c901885", self.opener.requests[0].full_url)
 
-    def test_rename_and_missing_patch(self):
-        body = {"files": [{"filename": "b.yaml", "previous_filename": "a.yaml", "changes": 0},
-                          {"filename": "big.bin", "changes": 9}]}
-        got = self.reader([jr(body)]).push_changes(REPO, "x", "y")
-        self.assertEqual(got, [FileChange("b.yaml", "a.yaml", None, 0), FileChange("big.bin", "", None, 9)])
+    def test_rename(self):
+        body = {"status": "diverged", "files": [{"filename": "b.yaml", "previous_filename": "a.yaml"}]}
+        self.assertEqual(self.reader([jr(body)]).push_changes(REPO, "x", "y"),
+                         Compare("diverged", [FileChange("b.yaml", "a.yaml")]))
 
     def test_wrong_shape_or_truncated_raises(self):
-        for body in ([], {}, {"files": ["x"]}, {"files": [{"filename": ""}]}, {"files": [{"filename": "a", "patch": 3}]},
-                     {"files": [{"filename": "a", "changes": "1"}]},
-                     {"files": [{"filename": f"f{i}", "changes": 1} for i in range(COMPARE_FILE_CAP)]}):
+        for body in ([], {}, {"status": "ahead", "files": ["x"]}, {"status": "ahead", "files": [{"filename": ""}]},
+                     {"files": []}, {"status": "ahead", "files": [{"filename": f"f{i}"} for i in range(COMPARE_FILE_CAP)]}):
             with self.subTest(body=str(body)[:60]), self.assertRaises(GitHubError):
                 self.reader([jr(body)]).push_changes(REPO, "x", "y")
+
+
+class FileContentTest(ReaderCase):
+    PATH = "kubernetes/apps/ai/litellm-proxy/app/servicemonitor.yaml"
+
+    def test_recorded_file(self):
+        r = self.reader([jr(recorded("contents_h-cloud_servicemonitor.json"))])
+        got = r.file_content("lkshrk/h-cloud", self.PATH, "c9018854")
+        self.assertEqual(got.state, "present")
+        self.assertIn(b"kind: ServiceMonitor", got.data)
+        url = self.opener.requests[0].full_url
+        self.assertIn(f"/repos/lkshrk/h-cloud/contents/{self.PATH}?ref=c9018854", url)
+
+    def test_absent_large_and_non_files(self):
+        err = urllib.error.HTTPError(API, 404, "Not Found", {}, io.BytesIO(b"{}"))
+        self.assertEqual(self.reader([err]).file_content(REPO, "a.yaml", "x"), Content("absent"))
+        body = recorded("contents_h-cloud_servicemonitor.json")
+        cases = (
+            ({**body, "size": 2_000_000, "encoding": "none", "content": ""}, "larger than 1 MB"),
+            ({**body, "encoding": "none"}, "larger than 1 MB"),
+            ({**body, "type": "symlink"}, "not a file"),
+            ([{"type": "file", "name": "a"}], "not a file"),
+        )
+        for payload, state in cases:
+            self.assertEqual(self.reader([jr(payload)]).file_content(REPO, "a.yaml", "x").state, state)
+
+    def test_size_mismatch_or_error_raises(self):
+        body = recorded("contents_h-cloud_servicemonitor.json")
+        err = urllib.error.HTTPError(API, 403, "no", {}, io.BytesIO(b"x"))
+        for item in (jr({**body, "size": 1}), err, OSError("reset")):
+            with self.subTest(item=item), self.assertRaises(GitHubError):
+                self.reader([item]).file_content(REPO, "a.yaml", "x")
 
 
 class TagCommitTest(ReaderCase):
@@ -1227,7 +1288,8 @@ class TagRunsTest(ReaderCase):
     def test_recorded_runs(self):
         r = self.reader([jr(recorded("tag_runs_h-cloud_2026.11.0.json"))])
         [run] = r.tag_runs("lkshrk/h-cloud", self.COMMIT)
-        self.assertEqual(run, WorkflowRun(self.COMMIT, "main", "completed", "success", 1_793_505_544.0))
+        self.assertEqual(run, WorkflowRun(self.COMMIT, "main", "completed", "success", 1_793_505_544.0, "schedule",
+                                          "lkshrk/h-cloud"))
         url = self.opener.requests[0].full_url
         self.assertIn("/repos/lkshrk/h-cloud/actions/workflows/tag.yaml/runs?", url)
         self.assertIn(f"head_sha={self.COMMIT}", url)

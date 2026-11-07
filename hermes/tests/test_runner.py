@@ -7,7 +7,17 @@ from pathlib import Path
 from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import NULL_SHA, Activity, FileChange, GitHubError, MergedPull, PullHead, WorkflowRun
+from agent_stack_hermes.postrun import (
+    NULL_SHA,
+    Activity,
+    Compare,
+    Content,
+    FileChange,
+    GitHubError,
+    MergedPull,
+    PullHead,
+    WorkflowRun,
+)
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -148,12 +158,12 @@ class FakeOmnigent:
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
                  agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
-                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"})):
+                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"}), contents=None):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
         self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
         self.compares, self.runs, self.pushes = dict(compares or {}), dict(runs or {}), dict(pushes or {})
-        self.trusted = trusted
+        self.trusted, self.contents = trusted, dict(contents or {})
 
     def tag_commit(self, repo, sha):
         self._call("tag_commit", repo, sha)
@@ -165,7 +175,12 @@ class FakeGitHub:
 
     def push_changes(self, repo, base, head):
         self._call("push_changes", repo, base, head)
-        return [FileChange(path, "", "@@ -1 +1 @@\n+  tag: 2", 2) for path in self.compares[(base, head)]]
+        return Compare("ahead", [FileChange(path) for path in self.compares[(base, head)]])
+
+    def file_content(self, repo, path, ref):
+        self._call("file_content", repo, path, ref)
+        found = self.contents.get((path, ref))
+        return Content("absent") if found is None else Content("present", found.encode())
 
     def head_pushes(self, repo, head_ref, head_sha):
         self._call("head_pushes", repo, head_ref, head_sha)
@@ -637,7 +652,7 @@ class RunnerTest(RunnerCase):
 
     def test_polly_tag_without_release_stays_unattributed(self):
         moved = {**AFTER, "refs/tags/2026.11.0": "d" * 40}
-        gh = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", T0)]}}
+        gh = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", T0, "schedule", REPO)]}}
         out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
         self.assert_blocked(out, "needs_input",
                             "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
@@ -890,6 +905,17 @@ class InfraRunnerTest(RunnerCase):
         pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), (AGENT, "r" * 40, "h" * 40, "push")]
         return {"pushes": {"renovate/chart-1.x": pushes}, "compares": {("r" * 40, "h" * 40): files}}
 
+    def test_agent_push_adding_a_cluster_role_blocks(self):
+        path = "kubernetes/apps/ai/litellm/app/extra.yaml"
+        gh_extra = self.agent_fix([path])
+        gh_extra["contents"] = {(path, "h" * 40): '{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole",'
+                                                   '"metadata":{"name":"x"},"rules":[]}'}
+        out = self.run_infra(gh_extra=gh_extra)
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertIn("ClusterRole x: adds a rbac.authorization.k8s.io/v1 ClusterRole", self.calls("block")[0][3])
+        self.assertEqual(self.calls("file_content"), [("file_content", REPO, path, "r" * 40),
+                                                      ("file_content", REPO, path, "h" * 40)])
+
     def test_agent_push_on_protected_path_blocks(self):
         out = self.run_infra(gh_extra=self.agent_fix(["talos/talconfig.yaml"]))
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
@@ -923,7 +949,7 @@ class InfraRunnerTest(RunnerCase):
 
     def test_monthly_workflow_tag_completes(self):
         tag = {"refs/tags/2026.11.0": "d" * 40}
-        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", AT)]}}
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", AT, "schedule", REPO)]}}
         out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
         self.assertEqual(out["state"], "completed", out)
         self.assertEqual(self.calls("tag_runs"), [("tag_runs", REPO, "e" * 40)])
@@ -931,7 +957,7 @@ class InfraRunnerTest(RunnerCase):
     def test_tag_run_finished_before_the_run_window_is_unattributed(self):
         tag = {"refs/tags/2026.11.0": "d" * 40}
         old = AT - runner.ACTIVITY_SLACK_SECONDS - 1
-        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", old)]}}
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", old, "schedule", REPO)]}}
         out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
         self.assert_blocked(out, "needs_input",
                             "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")

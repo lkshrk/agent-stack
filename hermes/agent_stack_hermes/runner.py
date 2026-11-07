@@ -277,6 +277,7 @@ def _infra_reads(gh, repo: str, since: float) -> InfraReads:
         lambda sha: gh.merged_pulls(repo, sha),
         lambda head_ref, head_sha: gh.head_pushes(repo, head_ref, head_sha),
         lambda base, head: gh.push_changes(repo, base, head),
+        lambda path, ref: gh.file_content(repo, path, ref),
         lambda sha: gh.tag_commit(repo, sha),
         lambda commit: gh.tag_runs(repo, commit),
         gh.trusted,

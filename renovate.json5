@@ -88,6 +88,13 @@
     },
     {
       customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG PYYAML_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'pypi',
+      depNameTemplate: 'PyYAML',
+    },
+    {
+      customType: 'regex',
       description: 'Runner image referenced by the sandbox config',
       managerFilePatterns: ['/(^|/)config/omnigent/config\\.yaml$/'],
       matchStrings: ['image: (?<depName>ghcr\\.io/[^:\\s]+):(?<currentValue>[^@\\s]+)(?:@(?<currentDigest>sha256:[0-9a-f]{64}))?'],
