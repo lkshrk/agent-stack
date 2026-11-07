@@ -566,5 +566,57 @@ class ReviewSevenTest(unittest.TestCase):
         self.assertEqual(KUSTOMIZATION_FILES, ("kustomization.yaml", "kustomization.yml"))
 
 
+class ReviewEightTest(unittest.TestCase):
+    def values_cm(self, values):
+        body = "\n".join("    " + line for line in values.splitlines())
+        return f"apiVersion: v1\nkind: ConfigMap\nmetadata: {{name: v}}\ndata:\n  values.yaml: |\n{body}\n"
+
+    def test_mixed_key_types_do_not_crash(self):
+        for payload in ("{1: a, b: c}", "{null: x, a: y}", "{true: 1, x: 2}"):
+            with self.subTest(payload):
+                doc = f"apiVersion: v1\nkind: ConfigMap\nmetadata: {{name: m}}\nextra: {payload}\n"
+                self.assertIsInstance(added(doc), list)
+                self.assertEqual(check_change(APP + "cm.yaml", doc, doc), [])
+                self.assertIsInstance(check_change(APP + "cm.yaml", CONFIGMAP, doc), list)
+                values = self.values_cm(f"a: {payload}")
+                self.assertIsInstance(check_change(APP + "configmap.yaml", self.values_cm("a: 1"), values), list)
+        unknown = f"apiVersion: v1\nkind: {{1: a, b: c}}\nmetadata: {{name: m}}\n"
+        self.assertTrue(added(unknown))
+
+    def test_unexpected_errors_fail_closed(self):
+        from unittest import mock
+
+        import agent_stack_policies.manifests as manifests
+
+        with mock.patch.object(manifests, "_field_rules", side_effect=KeyError("boom")):
+            errors = check_change(APP + "service.yaml", None, SERVICE)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("cannot be checked", errors[0])
+
+    def test_new_duplicate_identities_are_violations(self):
+        before = self.values_cm("items:\n  - name: a\n    rbac: {create: true}")
+        after = self.values_cm("items:\n  - name: a\n    rbac: {create: true}\n  - name: a\n    rbac: {create: true}")
+        errors = check_change(APP + "configmap.yaml", before, after)
+        self.assertTrue(any("duplicate" in e for e in errors), errors)
+        two = POD.replace("        - name: b\n", "        - name: a\n")
+        self.assertTrue(any("duplicate" in e for e in changed(POD, two)))
+
+    def test_existing_untouched_duplicates_pass_but_changed_ones_do_not(self):
+        dup = POD.replace("        - name: b\n", "        - name: a\n")
+        self.assertEqual(changed(dup, dup.replace("runAsUser: 1000", "runAsUser: 1001")), [])
+        errors = changed(dup, dup.replace("b:1.0.0", "b:1.0.1"))
+        self.assertTrue(any("duplicate" in e for e in errors), errors)
+
+    def test_only_string_identities_count(self):
+        ports = ("apiVersion: v1\nkind: Service\nmetadata: {name: s}\nspec:\n  ports:\n"
+                 "    - {name: 1, port: 80}\n    - {name: 1, port: 81}\n")
+        self.assertEqual(check_change(APP + "svc.yaml", ports, ports.replace("port: 81", "port: 82")), [])
+        before = POD.replace("        - name: a\n", "        - name: 7\n")
+        moved = before.replace("          envFrom:\n            - secretRef:\n                name: a-secret\n", "")
+        moved = moved.replace("          image: ghcr.io/acme/b:1.0.0\n", "          image: ghcr.io/acme/b:1.0.0\n"
+                              "          envFrom:\n            - secretRef:\n                name: a-secret\n")
+        self.assertTrue(changed(before, moved))
+
+
 if __name__ == "__main__":
     unittest.main()

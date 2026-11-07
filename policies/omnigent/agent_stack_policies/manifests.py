@@ -211,7 +211,7 @@ def _index(path: str, docs: list) -> tuple[dict, list, list[str]]:
 def _element_id(value, index: int):
     if isinstance(value, dict):
         for key in IDENTITY_KEYS:
-            if isinstance(value.get(key), (str, int)) and not isinstance(value.get(key), bool):
+            if isinstance(value.get(key), str):
                 return f"[{key}={value[key]}]"
     return index
 
@@ -226,8 +226,41 @@ def _walk(node, trail=()):
             yield from _walk(value, trail + (_element_id(value, i),))
 
 
+def _plain(value):
+    if isinstance(value, dict):
+        return {(k if isinstance(k, str) else f"<{type(k).__name__}>{k!r}"): _plain(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_plain(v) for v in value]
+    return value
+
+
 def _canon(value) -> str:
-    return json.dumps(value, sort_keys=True, default=str)
+    return json.dumps(_plain(value), sort_keys=True, default=str)
+
+
+def _location(trail: tuple) -> str:
+    return ".".join(map(str, trail)) or "(top)"
+
+
+def _duplicates(node) -> dict[tuple, str]:
+    out: dict[tuple, str] = {}
+    stack: list[tuple[object, tuple]] = [(node, ())]
+    while stack:
+        item, trail = stack.pop()
+        if isinstance(item, dict):
+            stack.extend((v, trail + (k,)) for k, v in item.items())
+        elif isinstance(item, list):
+            ids = [_element_id(v, i) for i, v in enumerate(item)]
+            for ident in {i for i in ids if isinstance(i, str) and ids.count(i) > 1}:
+                out[(trail, ident)] = _canon([v for v, i in zip(item, ids) if i == ident])
+            stack.extend((v, trail + (i,)) for v, i in zip(item, ids))
+    return out
+
+
+def _duplicate_rules(where: str, old, new) -> list[str]:
+    before, after = _duplicates(old), _duplicates(new)
+    return [f"{where}: duplicate list entries {ident} at {_location(trail)}"
+            for (trail, ident), value in sorted(after.items(), key=str) if before.get((trail, ident)) != value]
 
 
 def _secret_key(key) -> bool:
@@ -241,7 +274,7 @@ def _plain_id(value) -> bool:
 def _sensitive(doc) -> Counter:
     found: Counter = Counter()
     for trail, key, value in _walk(doc):
-        at = ".".join(map(str, trail[:-1]))
+        at = trail[:-1]
         if key in POD_FIELDS or _secret_key(key):
             found[(at, key, _canon(value))] += 1
         elif key == "capabilities" and isinstance(value, dict):
@@ -254,6 +287,7 @@ def _sensitive(doc) -> Counter:
 
 
 def _embedded(text: str):
+    """Text PyYAML can't scan or parse counts as plain text, though Helm or the app might still read it."""
     if any(char in text for char in FORBIDDEN_CHARACTERS):
         return None, "contains odd line breaks"
     try:
@@ -297,8 +331,9 @@ def _values_rules(where: str, label: str, old, new) -> list[str]:
     for trail in sorted(set(before) | set(after), key=str):
         if before.get(trail) != after.get(trail):
             errors.append(f"{where}: changes {label}.{'.'.join(map(str, trail))}")
-    for at, field, value in sorted(_sensitive(new or {}) - _sensitive(old or {})):
-        errors.append(f"{where}: adds or changes {field} in {label} at {at or '(top)'} ({value[:60]})")
+    for at, field, value in sorted(_sensitive(new or {}) - _sensitive(old or {}), key=str):
+        errors.append(f"{where}: adds or changes {field} in {label} at {_location(at)} ({value[:60]})")
+    errors.extend(_duplicate_rules(f"{where}: {label}", old or {}, new))
     return errors
 
 
@@ -332,8 +367,9 @@ def _field_rules(where: str, key: tuple, old: dict | None, new: dict) -> list[st
     if old is None and isinstance(new.get("metadata"), dict) and "namespace" in new["metadata"]:
         errors.append(f"{where}: a new document may not set metadata.namespace")
     gained = _sensitive(new) - _sensitive(old or {})
-    for at, field, value in sorted(gained):
-        errors.append(f"{where}: adds or changes {field} at {at or '(top)'} ({value[:60]})")
+    for at, field, value in sorted(gained, key=str):
+        errors.append(f"{where}: adds or changes {field} at {_location(at)} ({value[:60]})")
+    errors.extend(_duplicate_rules(where, old or {}, new))
     if key[:2] == HELMRELEASE:
         old_spec, new_spec = _mapping((old or {}).get("spec")), _mapping(new.get("spec"))
         for field in HELMRELEASE_FIXED_FIELDS:
@@ -400,7 +436,7 @@ def check_change(
         before = None
     try:
         return _check(path, before, after)
-    except (RecursionError, ValueError) as exc:
+    except Exception as exc:
         return [f"{path}: cannot be checked: {type(exc).__name__}"]
 
 
