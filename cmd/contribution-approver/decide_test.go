@@ -449,9 +449,12 @@ func TestASupersededRecordIsPurgedWithTheOtherCodeMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.issue(k, shaB); err != nil {
+	s.markAnnounced(k, shaA, old)
+	fresh, err := s.issue(k, shaB)
+	if err != nil {
 		t.Fatal(err)
 	}
+	s.markAnnounced(k, shaB, fresh)
 	if n := s.live(); n != 1 {
 		t.Fatalf("live codes = %d, want 1", n)
 	}
@@ -464,6 +467,78 @@ func TestASupersededRecordIsPurgedWithTheOtherCodeMemory(t *testing.T) {
 	s.mu.Unlock()
 	if kept {
 		t.Fatal("the superseded record outlived the code memory")
+	}
+}
+
+func TestAFailedRetryAnnouncementLeavesTheOlderCodeValid(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	if rec := approveWith(h, old); rec.Code != http.StatusOK {
+		t.Fatalf("the older code answered %d %q", rec.Code, lastMessage(h))
+	}
+	if r := h.gh.reviewCalls(); len(r) != 1 || r[0].body["commit_id"] != shaA {
+		t.Fatalf("reviews = %v, want one on %s", r, shaA)
+	}
+}
+
+func TestARetryAnnouncementReplacesTheCode(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.poller.poll(context.Background())
+	fresh := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, old); rec.Code != http.StatusGone || lastMessage(h) != outdatedText {
+		t.Fatalf("older code: reply = %d %q", rec.Code, lastMessage(h))
+	}
+	if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+		t.Fatalf("the newer code answered %d", rec.Code)
+	}
+}
+
+func TestAnExpiredCodeDoesNotReplaceANewerLiveCode(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.clock.advance(codeTTL + time.Second)
+	h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+	h.poller.poll(context.Background())
+	fresh := codeIn(t, lastMessage(h))
+	before := announcements(h)
+
+	rec := approveWith(h, old)
+	h.poller.poll(context.Background())
+
+	if rec.Code != http.StatusGone || lastMessage(h) != outdatedText || announcements(h) != before {
+		t.Fatalf("reply = %d %q, announcements %d -> %d", rec.Code, lastMessage(h), before, announcements(h))
+	}
+	if rec := approveWith(h, fresh); rec.Code != http.StatusOK {
+		t.Fatalf("the live code answered %d", rec.Code)
+	}
+}
+
+func TestASupersededCodeSubmitsNothingAfterTheStoreForgetsThePullRequest(t *testing.T) {
+	for name, drop := range map[string]func(s *codeStore, k prKey){
+		"reviewed":  func(s *codeStore, k prKey) { s.markReviewed(k, shaB) },
+		"forgotten": func(s *codeStore, k prKey) { s.forget(k) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			old := announce(t, h, 7, shaA)
+			announceNewHead(t, h)
+			drop(h.codes, prKey{testFork, 7})
+
+			if rec := approveWith(h, old); rec.Code != http.StatusGone || lastMessage(h) != outdatedText {
+				t.Fatalf("reply = %d %q", rec.Code, lastMessage(h))
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+		})
 	}
 }
 

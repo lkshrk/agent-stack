@@ -149,12 +149,6 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	for code, p := range s.byCode {
-		if p.pr == k && !p.superseded && now.Before(p.expires) {
-			p.superseded = true
-			s.byCode[code] = p
-		}
-	}
 	// Expired and superseded codes stay as tombstones so a late reply maps back to its pull request.
 	for code, p := range s.byCode {
 		if !now.Before(p.expires.Add(tombstoneTTL)) {
@@ -171,10 +165,39 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 			continue
 		}
 		s.byCode[code] = pending{pr: k, sha: sha, expires: now.Add(s.ttl)}
-		s.announced[k] = headState{sha: sha}
 		return code, nil
 	}
 	return "", fmt.Errorf("no free approval code")
+}
+
+// markAnnounced makes code the pull request's current one once its announcement went out.
+func (s *codeStore) markAnnounced(k prKey, sha, code string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	for c, p := range s.byCode {
+		if c != code && p.pr == k && !p.superseded && now.Before(p.expires) {
+			p.superseded = true
+			s.byCode[c] = p
+		}
+	}
+	s.announced[k] = headState{sha: sha}
+}
+
+func (s *codeStore) withdraw(code string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.byCode, code)
+}
+
+func (s *codeStore) hasLiveLocked(k prKey) bool {
+	now := s.now()
+	for _, p := range s.byCode {
+		if p.pr == k && !p.superseded && now.Before(p.expires) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *codeStore) take(code string) (pending, codeStatus) {
@@ -197,6 +220,9 @@ func (s *codeStore) take(code string) (pending, codeStatus) {
 	if !now.Before(p.expires) {
 		if !current || a.consumed {
 			return p, codeExpiredStale
+		}
+		if s.hasLiveLocked(p.pr) {
+			return p, codeSuperseded
 		}
 		a.expired = true
 		s.announced[p.pr] = a

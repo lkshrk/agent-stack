@@ -198,9 +198,10 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		return err
 	}
 	if err := p.notify.Notify(ctx, announcement(cfg, pr, sha, runs, code)); err != nil {
-		p.codes.forget(k)
+		p.codes.withdraw(code)
 		return err
 	}
+	p.codes.markAnnounced(k, sha, code)
 	last, err := p.gh.lastReviewID(ctx, cfg.Fork, k.number)
 	if err != nil {
 		p.codes.bindFailed(k, sha)
