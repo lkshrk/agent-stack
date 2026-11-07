@@ -407,12 +407,15 @@ class ForkSetupTest(unittest.TestCase):
     def test_a_failed_workflow_disable_stops_before_actions_are_enabled(self):
         self.fork.fail = ("PUT", API + r"/actions/workflows/(\d+)/(enable|disable)")
         self.fork.ci_state = "active"
+        permissions = dict(self.fork.workflow_permissions)
 
         code, out, err = self.run_setup()
 
         self.assertEqual(code, 1)
         self.assertIn("disable", err)
         self.assertIs(self.fork.actions["enabled"], False)
+        self.assertEqual(self.fork.workflow_permissions, permissions)
+        self.assertNotIn(f"/repos/{FORK}/actions/permissions/workflow", [p for _, p, _ in self.gh.writes()])
         self.assertNotIn(("PUT", f"/repos/{FORK}/actions/permissions"), [(m, p) for m, p, _ in self.gh.writes()])
 
     def test_a_run_that_failed_to_enable_actions_finishes_on_the_next_run(self):
@@ -527,6 +530,7 @@ class ForkSetupTest(unittest.TestCase):
         code, out, err = self.run_setup()
 
         self.assertEqual(code, 1)
+        self.assertIn("issues", err)
         self.assertEqual(self.steps(), ["issues", "labels", "rulesets"])
         self.assertNotIn(CI_PATH, self.fork.files)
 
