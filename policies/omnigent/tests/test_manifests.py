@@ -396,7 +396,7 @@ class ReviewSixTest(unittest.TestCase):
     def test_copying_an_existing_secret_ref_to_another_container_is_caught(self):
         after = POD + "          envFrom:\n            - secretRef:\n                name: a-secret\n"
         self.rejected(POD, after, contains="secretRef")
-        reordered = POD.replace("        - name: a\n", "        - name: z\n          image: z:1\n        - name: a\n")
+        reordered = POD.replace("        - name: a\n", "        - name: z\n          args: [run]\n        - name: a\n")
         self.assertEqual(changed(POD, reordered), [])
 
     def test_configmap_values_follow_the_values_rules(self):
@@ -616,6 +616,55 @@ class ReviewEightTest(unittest.TestCase):
         moved = moved.replace("          image: ghcr.io/acme/b:1.0.0\n", "          image: ghcr.io/acme/b:1.0.0\n"
                               "          envFrom:\n            - secretRef:\n                name: a-secret\n")
         self.assertTrue(changed(before, moved))
+
+
+IMAGE_VALUES = HELMRELEASE.replace("  values:\n", """  values:
+    image:
+      registry: ghcr.io
+      repository: acme/web
+      tag: 1.0.0
+    sidecar:
+      image: ghcr.io/acme/sidecar:2.0.0
+""")
+
+
+class ImageRepositoryTest(unittest.TestCase):
+    def release(self, after):
+        return check_change(APP + "helmrelease.yaml", IMAGE_VALUES, after)
+
+    def kustomization(self, before, after):
+        return check_change(APP + "kustomization.yaml", KUSTOMIZATION + before, KUSTOMIZATION + after)
+
+    def test_tag_and_digest_changes_pass(self):
+        self.assertEqual(changed(DEPLOYMENT, DEPLOYMENT.replace("web:1.0.0", "web:1.0.1")), [])
+        self.assertEqual(changed(DEPLOYMENT, DEPLOYMENT.replace("web:1.0.0", "web:1.0.1@sha256:" + "a" * 64)), [])
+        self.assertEqual(self.release(IMAGE_VALUES.replace("tag: 1.0.0", "tag: 1.0.1")), [])
+        self.assertEqual(self.release(IMAGE_VALUES.replace("sidecar:2.0.0", "sidecar:2.1.0@sha256:" + "b" * 64)), [])
+        images = "images:\n  - name: web\n    newName: ghcr.io/acme/web\n    newTag: 1.0.0\n"
+        self.assertEqual(self.kustomization(images, images.replace("newTag: 1.0.0", "newTag: 1.0.1")), [])
+        self.assertEqual(self.kustomization(images, images + "    digest: sha256:" + "c" * 64 + "\n"), [])
+
+    def test_pod_spec_repository_change_refused(self):
+        for image in ("ghcr.io/evil/web:1.0.0", "docker.io/acme/web:1.0.0", "ghcr.io/acme/web-x:1.0.0",
+                      "ghcr.io/acme/web/x:1.0.0", "evil.example:5000/acme/web:1.0.0"):
+            with self.subTest(image):
+                self.assertTrue(changed(DEPLOYMENT, DEPLOYMENT.replace("ghcr.io/acme/web:1.0.0", image)))
+        added = DEPLOYMENT.replace("      containers:\n", "      containers:\n        - name: extra\n          image: ghcr.io/evil/x:1\n")
+        self.assertTrue(changed(DEPLOYMENT, added))
+
+    def test_helm_values_repository_and_registry_change_refused(self):
+        for old, new in (("repository: acme/web", "repository: evil/web"), ("registry: ghcr.io", "registry: evil.example"),
+                         ("ghcr.io/acme/sidecar:2.0.0", "ghcr.io/evil/sidecar:2.0.0")):
+            with self.subTest(new):
+                self.assertTrue(self.release(IMAGE_VALUES.replace(old, new)))
+        upper = IMAGE_VALUES.replace("registry: ghcr.io", "Registry: ghcr.io")
+        self.assertTrue(check_change(APP + "helmrelease.yaml", upper, upper.replace("Registry: ghcr.io", "Registry: x.io")))
+
+    def test_kustomize_image_name_and_new_name_fixed(self):
+        images = "images:\n  - name: web\n    newName: ghcr.io/acme/web\n    newTag: 1.0.0\n"
+        self.assertTrue(self.kustomization(images, images.replace("newName: ghcr.io/acme/web", "newName: ghcr.io/evil/web")))
+        self.assertTrue(self.kustomization(images, images.replace("name: web", "name: other")))
+        self.assertTrue(self.kustomization("", "images:\n  - name: web\n    newName: ghcr.io/evil/web\n"))
 
 
 if __name__ == "__main__":

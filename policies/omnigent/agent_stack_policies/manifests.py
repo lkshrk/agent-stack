@@ -90,6 +90,7 @@ SENSITIVE_VALUES = re.compile(
 KUSTOMIZATION_MUTABLE = ("images", "resources")
 MAX_NESTING = 64
 MAX_EXPANDED_NODES = 100_000
+IMAGE_SOURCE_KEYS = frozenset({"repository", "registry"})
 IDENTITY_KEYS = ("name", "mountPath", "containerPort", "key")
 _OPENERS = (yaml.BlockSequenceStartToken, yaml.BlockMappingStartToken, yaml.FlowSequenceStartToken,
             yaml.FlowMappingStartToken)
@@ -286,6 +287,52 @@ def _sensitive(doc) -> Counter:
     return found
 
 
+def image_repository(image: str) -> str:
+    name = image.split("@", 1)[0]
+    head, _, last = name.rpartition("/")
+    return f"{head}/{last.split(':', 1)[0]}" if head else last.split(":", 1)[0]
+
+
+def _images(doc) -> Counter:
+    found: Counter = Counter()
+    for trail, key, value in _walk(doc):
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        if key.lower() == "image":
+            found[(trail, image_repository(value))] += 1
+        elif key.lower() in IMAGE_SOURCE_KEYS:
+            found[(trail, value)] += 1
+    return found
+
+
+def _image_rules(where: str, label: str, old, new) -> list[str]:
+    gained = _images(new) - _images(old or {})
+    return [f"{where}: changes the image repository at {label}{_location(trail)} ({repo[:80]})"
+            for trail, repo in sorted(gained, key=str)]
+
+
+def _kustomize_images(doc: dict) -> dict:
+    listed = doc.get("images")
+    out: dict = {}
+    for entry in listed if isinstance(listed, list) else []:
+        if isinstance(entry, dict):
+            out[_canon(entry.get("name"))] = _canon(entry.get("newName"))
+    return out
+
+
+def _kustomize_image_rules(where: str, old: dict, new: dict) -> list[str]:
+    before, after = _kustomize_images(old), _kustomize_images(new)
+    errors = []
+    for name, new_name in sorted(after.items()):
+        if name in before:
+            if before[name] != new_name:
+                errors.append(f"{where}: changes images[{name}].newName")
+        elif new_name != _canon(None):
+            errors.append(f"{where}: adds images[{name}] with a newName")
+    errors.extend(f"{where}: removes images[{name}]" for name in sorted(set(before) - set(after)))
+    return errors
+
+
 def _embedded(text: str):
     """Text PyYAML can't scan or parse counts as plain text, though Helm or the app might still read it."""
     if any(char in text for char in FORBIDDEN_CHARACTERS):
@@ -334,6 +381,7 @@ def _values_rules(where: str, label: str, old, new) -> list[str]:
     for at, field, value in sorted(_sensitive(new or {}) - _sensitive(old or {}), key=str):
         errors.append(f"{where}: adds or changes {field} in {label} at {_location(at)} ({value[:60]})")
     errors.extend(_duplicate_rules(f"{where}: {label}", old or {}, new))
+    errors.extend(_image_rules(where, f"{label}.", old, new))
     return errors
 
 
@@ -370,6 +418,7 @@ def _field_rules(where: str, key: tuple, old: dict | None, new: dict) -> list[st
     for at, field, value in sorted(gained, key=str):
         errors.append(f"{where}: adds or changes {field} at {_location(at)} ({value[:60]})")
     errors.extend(_duplicate_rules(where, old or {}, new))
+    errors.extend(_image_rules(where, "", old, new))
     if key[:2] == HELMRELEASE:
         old_spec, new_spec = _mapping((old or {}).get("spec")), _mapping(new.get("spec"))
         for field in HELMRELEASE_FIXED_FIELDS:
@@ -388,6 +437,7 @@ def _field_rules(where: str, key: tuple, old: dict | None, new: dict) -> list[st
                 errors.append(f"{where}: changes spec.{field}")
     if key[:2] == KUSTOMIZE:
         errors.extend(_kustomization_rules(where, old or {}, new))
+        errors.extend(_kustomize_image_rules(where, old or {}, new))
     return errors
 
 
