@@ -22,7 +22,8 @@ MANAGED_BEFORE = Path(__file__).resolve().parent / "testdata" / "hermes" / "mana
 STOCK_TEMPLATE = Path(__file__).resolve().parent / "testdata" / "hermes" / "stock-cli-config-v0.22.5.yaml"
 INSTALLED = Path("/opt/agent-stack")
 SECONDARY = ("delivery", "omnigent-runner")
-PA_INTENDED_CHANGES = {"cron": {"wrap_response": False}}
+DEFAULT_SKILLS = INSTALLED / "hermes-profiles" / "default" / "skills"
+PA_INTENDED_CHANGES = {"cron": {"wrap_response": False}, "skills": {"external_dirs": [str(DEFAULT_SKILLS)]}}
 
 H16_PER_PROFILE = {
     "model": None,
@@ -215,6 +216,12 @@ class ProfilesTest(unittest.TestCase):
     def test_pa_cron_messages_are_unwrapped(self):
         self.assertIs(effective("default")["cron"]["wrap_response"], False)
 
+    def test_pa_reads_shipped_skills(self):
+        self.assertEqual(profile("default")["skills"]["external_dirs"], [str(DEFAULT_SKILLS)])
+        for name in ("upgrade-h-cloud",):
+            text = (PROFILES / "default" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertTrue(text.startswith(f"---\nname: {name}\n"), name)
+
     def test_pa_multiplexes(self):
         self.assertIs(profile("default")["gateway"]["multiplex_profiles"], True)
 
@@ -261,6 +268,10 @@ class ProfilesInImageTest(unittest.TestCase):
             for asset in ("config.yaml", "SOUL.md"):
                 self.assertEqual((root / name / asset).read_bytes(), (PROFILES / name / asset).read_bytes())
             self.assertTrue((root / name / "skills").is_dir(), name)
+        shipped = PROFILES / "default" / "skills"
+        for skill in shipped.rglob("*"):
+            if skill.is_file():
+                self.assertEqual((root / "default" / "skills" / skill.relative_to(shipped)).read_bytes(), skill.read_bytes())
         plugin = root / "omnigent-runner" / "plugins" / "omnigent_runner"
         for asset in ("plugin.yaml", "__init__.py"):
             self.assertEqual((plugin / asset).read_bytes(),
@@ -281,6 +292,36 @@ class ProfilesInImageTest(unittest.TestCase):
 
         for name in ("default", *SECONDARY):
             self.assertEqual(_deep_merge(copy.deepcopy(profile(name)), managed()), effective(name), name)
+
+    def test_shipped_skill_resolves_and_local_copy_wins(self):
+        import json
+        import tempfile
+
+        from agent import skill_utils
+        from tools.skills_tool import skill_view
+
+        saved = os.environ.get("HERMES_HOME")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "config.yaml").write_text(yaml.safe_dump({"skills": profile("default")["skills"]}))
+            os.environ["HERMES_HOME"] = tmp
+            try:
+                skill_utils._external_dirs_cache_clear()
+                shipped = json.loads(skill_view("upgrade-h-cloud"))
+                self.assertTrue(shipped.get("success"), shipped)
+                self.assertIn("runner-start infra", shipped["content"])
+                local = home / "skills" / "devops" / "upgrade-h-cloud"
+                local.mkdir(parents=True)
+                (local / "SKILL.md").write_text("---\nname: upgrade-h-cloud\ndescription: old\n---\n\nold skill body\n")
+                skill_utils._external_dirs_cache_clear()
+                old = json.loads(skill_view("upgrade-h-cloud"))
+                self.assertIn("old skill body", old["content"])
+            finally:
+                skill_utils._external_dirs_cache_clear()
+                if saved is None:
+                    os.environ.pop("HERMES_HOME", None)
+                else:
+                    os.environ["HERMES_HOME"] = saved
 
     def test_profile_names_valid(self):
         from hermes_cli.profiles import normalize_profile_name

@@ -37,6 +37,9 @@ memory:
 skills:
   write_approval: false
   creation_nudge_interval: 15
+  # A same-named skill in /opt/data/skills shadows these.
+  external_dirs:
+    - /opt/agent-stack/hermes-profiles/default/skills
 
 # The gateway's dispatcher reads these from this profile for every assignee's cards.
 kanban:
