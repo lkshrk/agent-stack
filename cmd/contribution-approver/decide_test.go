@@ -542,6 +542,101 @@ func TestASupersededCodeSubmitsNothingAfterTheStoreForgetsThePullRequest(t *test
 	}
 }
 
+func TestAForgetWhileTheAnnouncementIsSentAnnouncesAgain(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	h.signal.whenSent(func(string) { h.codes.forget(prKey{testFork, 7}) })
+	h.poller.poll(context.Background())
+	lost := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, lost); rec.Code != http.StatusNotFound {
+		t.Fatalf("the forgotten code answered %d", rec.Code)
+	}
+	h.poller.poll(context.Background())
+	if announcements(h) != 2 {
+		t.Fatalf("announcements = %d, want 2: %q", announcements(h), h.signal.messages())
+	}
+	if rec := approveWith(h, codeIn(t, lastMessage(h))); rec.Code != http.StatusOK {
+		t.Fatalf("the new code answered %d", rec.Code)
+	}
+}
+
+func TestACodeRepliedBeforeItsAnnouncementIsDeliveredDecidesNothing(t *testing.T) {
+	for name, setup := range map[string]func(h *harness){
+		"first announcement": func(h *harness) { h.gh.readyPR(7, shaA) },
+		"same head again": func(h *harness) {
+			announce(t, h, 7, shaA)
+			h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			setup(h)
+			var early *httptest.ResponseRecorder
+			h.signal.whenSent(func(msg string) { early = approveWith(h, codeIn(t, msg)) })
+			h.poller.poll(context.Background())
+
+			if early == nil || early.Code != http.StatusNotFound {
+				t.Fatalf("early reply = %v, want 404", early)
+			}
+			if r := h.gh.reviewCalls(); len(r) != 0 {
+				t.Fatalf("reviews = %v, want none", r)
+			}
+		})
+	}
+}
+
+func TestAFailedAnnouncementOfANewHeadLeavesTheOlderCodeRefused(t *testing.T) {
+	h := newHarness(t)
+	old := announce(t, h, 7, shaA)
+	h.gh.update(func() { h.gh.prs[7].sha = shaB; h.gh.runs[shaB] = h.gh.runs[shaA] })
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	if rec := approveWith(h, old); rec.Code != http.StatusConflict {
+		t.Fatalf("the older code answered %d, want 409", rec.Code)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	h.poller.poll(context.Background())
+	if !strings.Contains(lastMessage(h), shaB) || announcements(h) != 2 {
+		t.Fatalf("messages = %q, want the new head announced", h.signal.messages())
+	}
+}
+
+func TestAFailedAnnouncementWithdrawsItsCode(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	h.signal.fail = true
+	h.poller.poll(context.Background())
+	h.signal.fail = false
+
+	h.codes.mu.Lock()
+	n := len(h.codes.byCode)
+	h.codes.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("codes kept after a failed announcement = %d, want 0", n)
+	}
+}
+
+func TestTakingACodePurgesOldRecords(t *testing.T) {
+	h := newHarness(t)
+	announce(t, h, 7, shaA)
+	announceNewHead(t, h)
+	h.clock.advance(codeTTL + tombstoneTTL)
+
+	approveWith(h, "00000000")
+
+	h.codes.mu.Lock()
+	n := len(h.codes.byCode)
+	h.codes.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("records kept past the day = %d, want 0", n)
+	}
+}
+
 func TestUsedAndUnknownCodesKeepTheirText(t *testing.T) {
 	h := newHarness(t)
 	code := announce(t, h, 7, shaA)

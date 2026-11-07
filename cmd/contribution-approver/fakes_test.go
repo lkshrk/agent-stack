@@ -29,29 +29,44 @@ type fakeSignal struct {
 	mu   sync.Mutex
 	sent []map[string]any
 	fail bool
-	srv  *httptest.Server
+	// onSend runs once, outside the lock, after the next accepted message is recorded.
+	onSend func(message string)
+	srv    *httptest.Server
 }
 
 func newFakeSignal(t *testing.T) *fakeSignal {
 	s := &fakeSignal{}
 	s.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if r.Method != http.MethodPost || r.URL.Path != "/v2/send" {
 			t.Errorf("unexpected Signal call %s %s", r.Method, r.URL.Path)
 		}
 		if s.fail {
+			s.mu.Unlock()
 			http.Error(w, "down", http.StatusServiceUnavailable)
 			return
 		}
 		s.sent = append(s.sent, body)
+		hook := s.onSend
+		s.onSend = nil
+		s.mu.Unlock()
+		if hook != nil {
+			msg, _ := body["message"].(string)
+			hook(msg)
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `[{"timestamp":"1"}]`)
 	}))
 	t.Cleanup(s.srv.Close)
 	return s
+}
+
+func (s *fakeSignal) whenSent(hook func(message string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onSend = hook
 }
 
 func (s *fakeSignal) messages() []string {
