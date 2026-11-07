@@ -83,6 +83,9 @@ class InfraVcsTest(unittest.TestCase):
             "git log --grep push",
             "git remote -v",
             "git remote get-url origin",
+            "git remote show origin",
+            "git remote --verbose",
+            "git remote -v show origin",
         ):
             self.assertVerdict(command, "ALLOW")
 
@@ -92,6 +95,10 @@ class InfraVcsTest(unittest.TestCase):
             "git remote add x https://github.com/lkshrk/other.git",
             "git remote rename origin x",
             "git remote remove origin",
+            "git remote -v set-url origin https://github.com/lkshrk/other.git",
+            "git remote -v add x https://github.com/lkshrk/other.git",
+            "git remote --verbose rename origin x",
+            "git remote --foo show origin",
         ):
             self.assertVerdict(command, "DENY")
 
@@ -126,6 +133,8 @@ class InfraVcsTest(unittest.TestCase):
             "gh pr reopen 7",
             "gh pr close 7 --delete-branch",
             "gh pr close 7 -d",
+            "gh pr close 7 -dc x",
+            "gh pr close 7 -cd x",
             "gh api -X PATCH repos/lkshrk/h-cloud/git/refs/heads/main -f sha=abc",
             "gh api -X DELETE repos/lkshrk/h-cloud/git/refs/tags/v1",
             "gh api graphql -f query='mutation { x }'",

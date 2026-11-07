@@ -11,7 +11,8 @@ from .tools import gh_api_mutates
 _GIT_GLOBAL_VALUES = frozenset(
     {"-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace", "--attr-source", "--shallow-file"}
 )
-_REMOTE_READS = frozenset({"-v", "--verbose", "show", "get-url"})
+_REMOTE_OPTIONS = frozenset({"-v", "--verbose"})
+_REMOTE_READS = frozenset({"show", "get-url"})
 _BRANCH_PART = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 _GROUPING = frozenset({"(", ")", "{", "}", "$"})
 _GH_READS = {
@@ -23,7 +24,6 @@ _GH_READS = {
     "auth": frozenset({"status"}),
 }
 _GH_ANY = frozenset({"search", "status"})
-_DELETE_BRANCH = frozenset({"-d", "--delete-branch"})
 _SHOW_TOKEN = frozenset({"-t", "--show-token"})
 
 PUSH_FORM = "only `git push origin HEAD:{prefix}<branch>` is allowed: no options, tags, deletes or other branches"
@@ -60,9 +60,25 @@ def _check_git(rest: list[str], assignments: list[str], wrappers: list[str], bra
         if not branch.fullmatch(args[1].removeprefix("HEAD:")) or ".." in args[1] or args[1].endswith(".lock"):
             return form
         return None
-    if sub == "remote" and args and not set(args[:1]) <= _REMOTE_READS:
-        return REMOTE_FORM
+    if sub == "remote":
+        return _check_remote(args)
     return None
+
+
+def _check_remote(args: list[str]) -> str | None:
+    for arg in args:
+        if not arg.startswith("-"):
+            return None if arg in _REMOTE_READS else REMOTE_FORM
+        if arg not in _REMOTE_OPTIONS:
+            return REMOTE_FORM
+    return None
+
+
+def _deletes_branch(args: list[str]) -> bool:
+    return any(
+        a == "--delete-branch" or a.startswith("--delete-branch=") or (a.startswith("-") and not a.startswith("--") and "d" in a)
+        for a in args
+    )
 
 
 def _check_gh(rest: list[str]) -> str | None:
@@ -76,7 +92,7 @@ def _check_gh(rest: list[str]) -> str | None:
     allowed = _GH_READS.get(group)
     if not allowed or len(rest) < 2 or rest[1] not in allowed:
         return GH_FORM
-    if group == "pr" and rest[1] == "close" and any(a in _DELETE_BRANCH or a.startswith("--delete-branch=") for a in rest[2:]):
+    if group == "pr" and rest[1] == "close" and _deletes_branch(rest[2:]):
         return GH_FORM
     if group == "auth" and any(a in _SHOW_TOKEN or a.startswith("--show-token=") for a in rest[2:]):
         return GH_FORM
