@@ -6,13 +6,5 @@
     "default_branch": "main",
     "title_format": "conventional-scoped",
     "ci_workflow": "contribution-ci.yml"
-  },
-  {
-    "upstream": "webdev-harke/contribution-standin",
-    "fork": "lkshrk/contribution-standin",
-    "owner": "lkshrk",
-    "default_branch": "main",
-    "title_format": "conventional-scoped",
-    "ci_workflow": "contribution-ci.yml"
   }
 ]
