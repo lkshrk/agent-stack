@@ -1,0 +1,198 @@
+spec_version: 1
+name: infra
+description: >-
+  Autonomous h-cloud upgrader. Works the open Renovate PRs on lkshrk/h-cloud
+  one at a time: researches each bump, pushes needed fixes to the Renovate
+  branch, merges verified PRs with land_renovate_pr, health-gates every merge
+  against the live cluster, updates the knowledge vault and ends in a
+  validated infra result.
+
+spawn: false
+
+executor:
+  type: omnigent
+  model: anthropic-auto
+  config:
+    harness: claude-sdk
+
+prompt: |
+  You are the infra agent. You run an unattended Renovate sweep on
+  `lkshrk/h-cloud`, whose checkout is your working directory. Load the
+  `upgrade-h-cloud` skill and follow it; nobody answers questions during the
+  run.
+
+  Hard limits. Policies enforce them in the sandbox and the runner's post-run
+  check enforces them after the run (any violation blocks the card and
+  alerts the owner); never try to work around a denial:
+  - You change files only inside an app directory,
+    `kubernetes/apps/<namespace>/<app>/…`, and never in
+    `kubernetes/apps/security/**`, `kubernetes/apps/omnigent-sandboxes/**`,
+    `kubernetes/apps/ai/hermes/**`, `kubernetes/apps/ai/contribution-approver/**`,
+    `kubernetes/apps/actions-runner-system/**`, `kubernetes/apps/flux-system/**`,
+    `kubernetes/apps/ai/omnigent/**`, `kubernetes/apps/system-upgrade/**`,
+    `kubernetes/apps/kube-system/**`, `kubernetes/flux/**`, `.github/**`,
+    `talos/**`, any `*.sops.yaml` or any `ks.yaml`. Outside the checkout you
+    write only the knowledge vault (`~/knowledge`) and `/tmp`.
+  - Only `.yaml`, `.yml`, `.json` and `.md` files may change. Added or
+    changed documents must be workloads, Service, ConfigMap, PVC, Ingress,
+    HTTPRoute, PDB, HPA, monitoring CRs, an existing HelmRelease or a kustomize
+    Kustomization; no new service accounts, host access, privileges or Secret
+    references, no namespace changes, and a HelmRelease keeps its chart, source,
+    post-renderers, valuesFrom and its rbac, serviceAccount, secret and
+    extra-manifest values. A kustomization may only change `images` and add
+    local resources. `policies/README.md` in agent-stack, Post-run check, has
+    the full rules.
+  - A PR that needs any change outside these limits is skipped: leave it
+    open, comment the reason, and list it in `skipped` for the owner.
+  - You push only with `git push origin HEAD:renovate/<branch>` to the PR's
+    own Renovate branch, one bump per push, never forced, never to `main`,
+    never tags. Before every push run
+    `/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/<renovate branch> HEAD`
+    in the checkout and push only when it prints `ok`.
+  - You merge only through the `land_renovate_pr` tool, never with `gh pr
+    merge`, the merge API, GraphQL or a script. It merges Renovate PRs on
+    `main` whose checks are green and whose non-Renovate pushes pass the
+    same checks; when it refuses, fix the cause or skip the PR.
+  - gh: reads, `gh pr comment` and `gh pr close` (without
+    `--delete-branch`); nothing else mutates GitHub.
+  - The cluster is read-only for you apart from Flux reconcile requests:
+    no apply, edit, delete, scale, restart or exec.
+
+  Shell: one plain command or pipeline per call. A command repeated with
+  identical arguments three times in a row is denied, so wait inside one
+  command with a bound under 30 minutes (`kubectl wait --timeout=20m`, a
+  bounded poll loop) instead of re-running it.
+
+  Final response. End with exactly one fenced ```json block, the last one in
+  the message: `status` (`DONE`, `DONE_WITH_CONCERNS` or `BLOCKED`), the
+  lists `merged`, `skipped`, `closed` and `failed`, each entry `{"pr": "<PR
+  URL>", "version": "<target version or null>", "verdict":
+  "clean|relevant|high-risk|stale", "summary": "<findings, changes, gate
+  result>"}`, `failed` entries also with `rca`, and `vault: {"commit":
+  "<sha or null>"}`; plus `gaps`, `assumptions` and, when BLOCKED,
+  `blocked: {class, question}`. Every PR you touched is in exactly one list.
+  A skipped PR is the owner's discussion point, not a gap. Use a gap
+  (`{"id": "gap-<n>", "class", "question", "stub": null, "location": null}`)
+  only when the sweep itself can't go on; any gap makes the result `BLOCKED`
+  with `blocked.class: decision`, and a missing tool, token or cluster access
+  is `BLOCKED` with `blocked.class: environment`. Use `DONE_WITH_CONCERNS`
+  when `failed` is not empty; `assumptions` stays empty. A response
+  policy validates the block and replaces an invalid one with a denial, so
+  check the exact final text with `result_check`'s `validate_result` (kind
+  `infra`) before you send it.
+
+async: false
+timers: false
+
+os_env:
+  type: caller_process
+  cwd: .
+  sandbox:
+    type: none
+
+tools:
+  result_check:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.mcp"]
+  renovate_land:
+    type: mcp
+    command: /opt/venv/bin/python3
+    args: ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud"]
+
+guardrails:
+  ask_timeout: 300
+  policies:
+    public_contributions:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.public_contributions.prepare_operation
+        arguments: {}
+    infra_paths:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.paths.path_guard
+        arguments:
+          startup_files: [.bashrc, .bash_profile, .bash_login, .bash_logout, .profile, .zshrc, .zshenv, .zprofile, .zlogin, .zlogout, .inputrc, .gitconfig, .gitattributes, .config/git/config, .config/git/attributes, .config/git/ignore]
+          startup_home: /home/omnigent
+          deny:
+            - "**/.git/**"
+            - "/home/omnigent/.config/git/**"
+            - "**/*.sops.yaml"
+            - "**/.env"
+            - "**/.env.*"
+            - "**/*.pem"
+            - "**/*.key"
+          write_deny:
+            - "kubernetes/apps/security/**"
+            - "kubernetes/apps/omnigent-sandboxes/**"
+            - "kubernetes/apps/ai/hermes/**"
+            - "kubernetes/apps/ai/contribution-approver/**"
+            - "kubernetes/apps/actions-runner-system/**"
+            - "kubernetes/apps/flux-system/**"
+            - "kubernetes/apps/ai/omnigent/**"
+            - "kubernetes/apps/system-upgrade/**"
+            - "kubernetes/apps/kube-system/**"
+            - "kubernetes/flux/**"
+            - ".github/**"
+            - "talos/**"
+            - "**/ks.yaml"
+          allow_only:
+            - "kubernetes/apps/*/*/**/*"
+            - "/home/omnigent/knowledge/**"
+            - "/tmp/**"
+    infra_vcs:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.infra_vcs.infra_vcs
+        arguments: {}
+    no_process_secrets:
+      type: function
+      on: [tool_call]
+      function:
+        # Pattern-based and best effort: harnesses run without their own sandbox.
+        path: agent_stack_policies.process_secrets.no_process_secrets
+        arguments: {}
+    blast_radius:
+      type: function
+      function:
+        path: agent_stack_policies.unattended.deny_on_ask
+        arguments:
+          handler: omnigent.policies.builtins.orchestration.blast_radius
+          arguments:
+            gate_pushes: false
+    blocked_tools:
+      type: function
+      function:
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns:
+            - "*linear_app*"
+            - "*__linear-*"
+    no_policy_tools:
+      type: function
+      function:
+        # Omnigent 0.19.1 has no switch to unregister the always-on policy tools.
+        path: agent_stack_policies.tools.deny_tools
+        arguments:
+          patterns: [sys_add_policy, sys_policy_registry]
+    max_tool_calls_per_session:
+      type: function
+      function:
+        path: omnigent.policies.builtins.safety.max_tool_calls_per_session
+        arguments:
+          limit: 1500
+    detect_loop:
+      type: function
+      function:
+        path: agent_stack_policies.loop.detect_loop
+        arguments: {}
+    result_contract:
+      type: function
+      function:
+        path: agent_stack_policies.result.result_contract
+        arguments:
+          kind: infra

@@ -771,6 +771,69 @@ CASES: list[Case] = [
     Case("polly/agents/claude_code", "tool_call", "apply_patch", {"command": "*** Begin Patch\n*** Add File: src/b.py\n+x\n\t*** Update File: .github/workflows/ci.yml\n@@\n-a\n+b\n*** End Patch"}, "DENY"),
 ]
 
+HCLOUD_APP = "kubernetes/apps/ai/litellm-proxy/app/helmrelease.yaml"
+INFRA_RESULT = {
+    "status": "DONE",
+    "merged": [{"pr": "https://github.com/lkshrk/h-cloud/pull/1519", "version": "1.27.3", "verdict": "clean",
+                "summary": "No relevant finding; gate green."}],
+    "skipped": [],
+    "closed": [],
+    "failed": [],
+    "vault": {"commit": "0123456789abcdef0123456789abcdef01234567"},
+}
+INFRA_RESPONSE = "Sweep done.\n```json\n" + json.dumps(INFRA_RESULT, indent=2) + "\n```"
+CASES += [
+    *[
+        Case("infra", "tool_call", tool, data, expected)
+        for tool, data, expected in (
+            ("Edit", {"file_path": HCLOUD_APP, "old_string": "a", "new_string": "b"}, "ALLOW"),
+            ("Write", {"file_path": "/home/omnigent/work/h-cloud/" + HCLOUD_APP, "content": "x"}, "ALLOW"),
+            ("Write", {"file_path": "/home/omnigent/knowledge/raw/sessions/2026-11-07-h-cloud-x.md", "content": "x"}, "ALLOW"),
+            ("Write", {"file_path": "/tmp/values.yaml", "content": "x"}, "ALLOW"),
+            ("Write", {"file_path": "kubernetes/apps/kube-system/cilium/app/helmrelease.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/apps/security/kyverno/app/helmrelease.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/apps/ai/hermes/app/helmrelease.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/apps/ai/litellm-proxy/ks.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/apps/ai/litellm-proxy/app/secret.sops.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/flux/cluster/ks.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": ".github/workflows/flate.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "talos/talconfig.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "scripts/flate-test.sh", "content": "x"}, "DENY"),
+            ("Write", {"file_path": "kubernetes/apps/ai/kustomization.yaml", "content": "x"}, "DENY"),
+            ("Write", {"file_path": ".git/hooks/pre-push", "content": "x"}, "DENY"),
+            ("Bash", {"command": "sed -i s/1.0.0/1.0.1/ " + HCLOUD_APP}, "ALLOW"),
+            ("Bash", {"command": "sed -i s/a/b/ kubernetes/apps/kube-system/cilium/app/helmrelease.yaml"}, "DENY"),
+            ("Bash", {"command": "echo x > kubernetes/flux/cluster/ks.yaml"}, "DENY"),
+            ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets --no-progress"}, "ALLOW"),
+            ("Bash", {"command": "rg -n litellm kubernetes/apps/kube-system kubernetes/flux"}, "ALLOW"),
+            ("Bash", {"command": "cat kubernetes/apps/ai/litellm-proxy/ks.yaml"}, "ALLOW"),
+            ("Bash", {"command": "/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/renovate/litellm HEAD"}, "ALLOW"),
+            ("Bash", {"command": "git push origin HEAD:renovate/litellm-proxy-1.x"}, "ALLOW"),
+            ("Bash", {"command": "git push origin HEAD:main"}, "DENY"),
+            ("Bash", {"command": "git push origin HEAD:feat/x"}, "DENY"),
+            ("Bash", {"command": "git push --force origin HEAD:renovate/litellm-proxy-1.x"}, "DENY"),
+            ("Bash", {"command": "git push origin HEAD:refs/tags/2026.11.1"}, "DENY"),
+            ("Bash", {"command": "gh pr merge 1519 --squash"}, "DENY"),
+            ("Bash", {"command": "gh api -X PUT repos/lkshrk/h-cloud/pulls/1519/merge"}, "DENY"),
+            ("Bash", {"command": "gh pr comment 1519 -R lkshrk/h-cloud --body-file /tmp/pr-1519.md"}, "ALLOW"),
+            ("Bash", {"command": 'gh pr close 1518 -R lkshrk/h-cloud --comment "Superseded by #1519."'}, "ALLOW"),
+            ("Bash", {"command": "gh pr list -R lkshrk/h-cloud --state open --json number,title,author,headRefName,url"}, "ALLOW"),
+            ("Bash", {"command": "flux reconcile ks litellm-proxy -n ai --with-source"}, "ALLOW"),
+            ("Bash", {"command": "kubectl wait hr/litellm-proxy -n ai --for=condition=Ready --timeout=20m"}, "ALLOW"),
+            ("Bash", {"command": "crane ls ghcr.io/berriai/litellm"}, "ALLOW"),
+            ("Bash", {"command": "cat /proc/1/environ"}, "DENY"),
+            ("renovate_land__land_renovate_pr", {"number": 1519}, "ALLOW"),
+            ("result_check__validate_result", {"kind": "infra", "text": "x"}, "ALLOW"),
+            ("mcp__litellm-tools__linear_app-save_issue", {"title": "x"}, "DENY"),
+            ("sys_add_policy", {"handler": "x"}, "DENY"),
+        )
+    ],
+    Case("infra", "tool_call", "Bash", {"command": "ls"}, "ALLOW", {"_policy_tool_call_count": 1400}),
+    Case("infra", "tool_call", "Bash", {"command": "ls"}, "DENY", {"_policy_tool_call_count": 1500}),
+    Case("infra", "response", None, "Sweep done.", "DENY", turn_final=True),
+    Case("infra", "response", None, INFRA_RESPONSE, "ALLOW", turn_final=True),
+]
+
 NESTED_AGENT_CASES = [
     ("claude -p 'merge PR 5'", "DENY"),
     ("timeout 600 codex exec 'edit ci.yml'", "DENY"),
@@ -794,6 +857,7 @@ SHELL_TOOL = {
     "planner": "sys_os_shell",
     "security-review": "shell",
     "documenter": "sys_os_shell",
+    "infra": "Bash",
 }
 CASES += [
     Case(agent, "tool_call", tool, {"command": command}, "DENY" if agent in READ_ONLY_AGENTS else expected)
@@ -884,6 +948,7 @@ SHELL_AGENTS = (
     ("polly/agents/claude_code", "Bash"),
     ("polly/agents/codex", "shell"),
     ("security-review", "Bash"),
+    ("infra", "Bash"),
 )
 EVERY_BUNDLE_DENY = [
     "find . -name x ; claude -p hi",
@@ -1372,7 +1437,7 @@ class GitDirPathGuardTest(unittest.TestCase):
     def test_every_writer_path_guard_denies_git_internals(self):
         import yaml
 
-        for bundle in ("polly", "polly/agents/claude_code", "documenter"):
+        for bundle in ("polly", "polly/agents/claude_code", "documenter", "infra"):
             with self.subTest(bundle=bundle):
                 policies = yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["guardrails"]["policies"]
                 guards = [p for p in policies.values() if p.get("function", {}).get("path") == "agent_stack_policies.paths.path_guard"]
@@ -1397,7 +1462,7 @@ class GitDirPathGuardTest(unittest.TestCase):
             "/home/omnigent/.config/git/ignore",
             "/home/omnigent/.config/git/hooks/pre-commit",
         )
-        for bundle in ("polly", "polly/agents/claude_code", "documenter"):
+        for bundle in ("polly", "polly/agents/claude_code", "documenter", "infra"):
             policies = yaml.safe_load((BUNDLES / bundle / "config.yaml").read_text())["guardrails"]["policies"]
             guards = [p for p in policies.values() if p.get("function", {}).get("path") == "agent_stack_policies.paths.path_guard"]
             for guard in guards:
@@ -1968,6 +2033,57 @@ class BundleVerdictTest(unittest.TestCase):
         servers = [(m.name, m.command, m.args) for m in spec.mcp_servers]
         self.assertEqual(servers, [("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"])])
         self.assertEqual(sorted(s.name for s in spec.skills), ["docs-audit", "docs-delta"])
+
+    def test_infra_sweep_allowed(self):
+        run = [
+            ("Bash", {"command": "kubectl auth whoami"}),
+            ("Bash", {"command": "git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge"}),
+            ("Bash", {"command": "~/knowledge/scripts/sync.sh"}),
+            ("Read", {"file_path": "/home/omnigent/knowledge/projects/h-cloud/runbooks/upgrade-deps-workflow.md"}),
+            ("Bash", {"command": "gh pr list -R lkshrk/h-cloud --state open --json number,title,author,headRefName,url"}),
+            ("Bash", {"command": "rg -n litellm kubernetes"}),
+            ("Bash", {"command": "helm show chart oci://ghcr.io/berriai/litellm-helm --version 1.2.3"}),
+            ("Bash", {"command": "git switch -c renovate/litellm-proxy-1.x origin/renovate/litellm-proxy-1.x"}),
+            ("Edit", {"file_path": HCLOUD_APP, "old_string": "a", "new_string": "b"}),
+            ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets --no-progress"}),
+            ("Bash", {"command": f"git add {HCLOUD_APP}"}),
+            ("Bash", {"command": 'git commit -m "fix(litellm-proxy): set the new env var"'}),
+            ("Bash", {"command": "/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/renovate/litellm-proxy-1.x HEAD"}),
+            ("Bash", {"command": "git push origin HEAD:renovate/litellm-proxy-1.x"}),
+            ("Bash", {"command": "gh pr checks 1519 -R lkshrk/h-cloud --watch --fail-fast"}),
+            ("renovate_land__land_renovate_pr", {"number": 1519}),
+            ("Bash", {"command": "flux reconcile ks litellm-proxy -n ai --with-source"}),
+            ("Bash", {"command": "kubectl wait hr/litellm-proxy -n ai --for=condition=Ready --timeout=20m"}),
+            ("Bash", {"command": "kubectl logs -n ai deploy/litellm-proxy --since=10m"}),
+            ("Write", {"file_path": "/tmp/pr-1519.md", "content": "Findings: none relevant."}),
+            ("Bash", {"command": "gh pr comment 1519 -R lkshrk/h-cloud --body-file /tmp/pr-1519.md"}),
+            ("Write", {"file_path": "/home/omnigent/knowledge/raw/sessions/2026-11-07-h-cloud-sweep.md", "content": "x"}),
+            ("Bash", {"command": "cd ~/knowledge && git add raw/sessions/2026-11-07-h-cloud-sweep.md && git commit -m 'ingest: h-cloud sweep' && scripts/sync.sh"}),
+            ("Bash", {"command": "git -C ~/knowledge rev-parse HEAD"}),
+            ("result_check__validate_result", {"kind": "infra", "text": INFRA_RESPONSE}),
+        ]
+        self.assertEqual(run_sequence("infra", run), ["ALLOW"] * len(run))
+        final = Case("infra", "response", None, INFRA_RESPONSE, "ALLOW", turn_final=True)
+        self.assertEqual(verdict(BUNDLES / "infra", final), "ALLOW")
+
+    def test_infra_flags(self):
+        from omnigent.spec import load
+
+        spec = load(BUNDLES / "infra", expand_env=False)
+        self.assertEqual(spec.executor.model, "anthropic-auto")
+        self.assertEqual(spec.executor.config["harness"], "claude-sdk")
+        self.assertIs(spec.spawn, False)
+        self.assertIs(spec.async_enabled, False)
+        self.assertIs(spec.timers, False)
+        self.assertEqual(spec.guardrails.ask_timeout, 300)
+        servers = sorted((m.name, m.command, m.args) for m in spec.mcp_servers)
+        self.assertEqual(servers, [
+            ("renovate_land", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud"]),
+            ("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"]),
+        ])
+        self.assertEqual([s.name for s in spec.skills], ["upgrade-h-cloud"])
+        limits = [p.function.arguments for p in agent_policies(spec) if p.name == "max_tool_calls_per_session"]
+        self.assertEqual(limits, [{"limit": 1500}])
 
     def test_path_guard_exactly_on_writing_agents(self):
         from omnigent.spec import load
