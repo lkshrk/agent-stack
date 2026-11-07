@@ -3,16 +3,23 @@ import json
 import re
 from dataclasses import asdict, dataclass
 
-BUNDLES = ("planner", "security-review", "documenter", "polly")
-RESULT_KIND = {"planner": "planner", "security-review": "security", "documenter": "documenter", "polly": "polly"}
+BUNDLES = ("planner", "security-review", "documenter", "polly", "infra")
+RESULT_KIND = {
+    "planner": "planner",
+    "security-review": "security",
+    "documenter": "documenter",
+    "polly": "polly",
+    "infra": "infra",
+}
 MODELS = {
     "planner": "anthropic/claude-fable",
     "security-review": "openai/gpt-astra",
     "documenter": "anthropic-auto",
     "polly": "anthropic-auto",
+    "infra": "anthropic-auto",
 }
 LAUNCH_ARGS = {"security-review": ["--profile", "security-review"]}
-MAX_RUNTIME = {"planner": 7200, "security-review": 3600, "documenter": 7200, "polly": 21600}
+MAX_RUNTIME = {"planner": 7200, "security-review": 3600, "documenter": 7200, "polly": 21600, "infra": 21600}
 LINK_PREFIX = "agent-stack-link: "
 RUN_PREFIX = "agent-stack-run: "
 MAX_ERRORS_SHOWN = 5

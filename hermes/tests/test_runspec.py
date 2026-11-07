@@ -94,6 +94,22 @@ class RunSpecTest(unittest.TestCase):
         self.assertEqual(req["model_override"], "anthropic-auto")
         self.assertNotIn("terminal_launch_args", req)
 
+    def test_infra_request_and_limits(self):
+        from agent_stack_hermes import runspec
+
+        req = session_request(RunSpec("infra", "lkshrk/h-cloud", "main", "upgrade h-cloud"), "card-1", None)
+        self.assertEqual(req["model_override"], "anthropic-auto")
+        self.assertEqual(req["agent_id"], builtin_agent_id("infra"))
+        self.assertNotIn("terminal_launch_args", req)
+        self.assertEqual((runspec.RESULT_KIND["infra"], runspec.MAX_RUNTIME["infra"]), ("infra", 21600))
+
+    def test_infra_result_evaluated(self):
+        block = {"status": "DONE", "merged": [], "skipped": [], "closed": [], "failed": [], "vault": {"commit": None}}
+        snap = {"status": "idle", "items": [assistant("```json\n" + json.dumps(block) + "\n```")]}
+        self.assertTrue(evaluate("infra", snap).done)
+        bad = {"status": "idle", "items": [assistant('```json\n{"status": "DONE"}\n```')]}
+        self.assertIn("merged must be a list", evaluate("infra", bad).reason)
+
     def test_planner_first_valid_block_wins(self):
         snap = snapshot("planner")
         out = evaluate("planner", snap)
