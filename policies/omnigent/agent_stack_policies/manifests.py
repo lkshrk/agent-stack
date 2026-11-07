@@ -6,12 +6,14 @@ import re
 from collections import Counter
 
 import yaml
+from yaml.parser import ParserError
+from yaml.scanner import ScannerError
 
 ALLOWED_EXTENSIONS = (".yaml", ".yml", ".json", ".md")
 UNPARSED_EXTENSIONS = (".md",)
 FORBIDDEN_CHARACTERS = {"\r": "CR", "\x85": "NEL", "\u2028": "LS", "\u2029": "PS"}
 KUSTOMIZE = ("kustomize.config.k8s.io/v1beta1", "Kustomization")
-KUSTOMIZATION_FILES = ("kustomization.yaml", "kustomization.yml", "Kustomization")
+KUSTOMIZATION_FILES = ("kustomization.yaml", "kustomization.yml")
 HELMRELEASE = ("helm.toolkit.fluxcd.io/v2", "HelmRelease")
 CONFIGMAP = ("v1", "ConfigMap")
 PVC = ("v1", "PersistentVolumeClaim")
@@ -88,6 +90,7 @@ SENSITIVE_VALUES = re.compile(
 KUSTOMIZATION_MUTABLE = ("images", "resources")
 MAX_NESTING = 64
 MAX_EXPANDED_NODES = 100_000
+IDENTITY_KEYS = ("name", "mountPath", "containerPort", "key")
 _OPENERS = (yaml.BlockSequenceStartToken, yaml.BlockMappingStartToken, yaml.FlowSequenceStartToken,
             yaml.FlowMappingStartToken)
 _CLOSERS = (yaml.BlockEndToken, yaml.FlowSequenceEndToken, yaml.FlowMappingEndToken)
@@ -95,7 +98,10 @@ _LOCAL_RESOURCE = re.compile(r"(\./)?[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml", re.ASCI
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
-    pass
+    yaml_implicit_resolvers = {
+        first: [(tag, pattern) for tag, pattern in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+        for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
 
 
 def _unique_mapping(loader, node, deep=False):
@@ -140,19 +146,20 @@ def _token_problem(text: str) -> str | None:
     return None
 
 
-def _expands(docs: list) -> bool:
-    stack, seen = list(docs), 0
+def _shape_problem(docs: list) -> str | None:
+    stack, seen = [(doc, 0) for doc in docs], 0
     while stack:
-        node = stack.pop()
+        node, depth = stack.pop()
         seen += 1
         if seen > MAX_EXPANDED_NODES:
-            return True
+            return f"expands to more than {MAX_EXPANDED_NODES} nodes through aliases"
+        if depth > MAX_NESTING:
+            return f"nests deeper than {MAX_NESTING} levels through aliases"
         if isinstance(node, dict):
-            stack.extend(node.keys())
-            stack.extend(node.values())
+            stack.extend((child, depth + 1) for child in (*node.keys(), *node.values()))
         elif isinstance(node, list):
-            stack.extend(node)
-    return False
+            stack.extend((child, depth + 1) for child in node)
+    return None
 
 
 def _documents(path: str, text: str) -> tuple[list | None, list[str]]:
@@ -161,8 +168,9 @@ def _documents(path: str, text: str) -> tuple[list | None, list[str]]:
         if problem:
             return None, [f"{path}: {problem}"]
         docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
-        if _expands(docs):
-            return None, [f"{path}: expands to more than {MAX_EXPANDED_NODES} nodes through aliases"]
+        problem = _shape_problem(docs)
+        if problem:
+            return None, [f"{path}: {problem}"]
         return docs, []
     except (yaml.YAMLError, RecursionError, ValueError) as exc:
         detail = getattr(exc, "problem", None) if isinstance(exc, yaml.constructor.ConstructorError) else None
@@ -200,6 +208,14 @@ def _index(path: str, docs: list) -> tuple[dict, list, list[str]]:
     return keyed, other, errors
 
 
+def _element_id(value, index: int):
+    if isinstance(value, dict):
+        for key in IDENTITY_KEYS:
+            if isinstance(value.get(key), (str, int)) and not isinstance(value.get(key), bool):
+                return f"[{key}={value[key]}]"
+    return index
+
+
 def _walk(node, trail=()):
     if isinstance(node, dict):
         for key, value in node.items():
@@ -207,7 +223,7 @@ def _walk(node, trail=()):
             yield from _walk(value, trail + (key,))
     elif isinstance(node, list):
         for i, value in enumerate(node):
-            yield from _walk(value, trail + (i,))
+            yield from _walk(value, trail + (_element_id(value, i),))
 
 
 def _canon(value) -> str:
@@ -224,15 +240,16 @@ def _plain_id(value) -> bool:
 
 def _sensitive(doc) -> Counter:
     found: Counter = Counter()
-    for _, key, value in _walk(doc):
+    for trail, key, value in _walk(doc):
+        at = ".".join(map(str, trail[:-1]))
         if key in POD_FIELDS or _secret_key(key):
-            found[(key, _canon(value))] += 1
+            found[(at, key, _canon(value))] += 1
         elif key == "capabilities" and isinstance(value, dict):
             added = value.get("add")
             for cap in added if isinstance(added, list) else [added]:
-                found[("capabilities.add", _canon(cap))] += 1
+                found[(at, "capabilities.add", _canon(cap))] += 1
         elif key in ID_FIELDS and not _plain_id(value):
-            found[(key, _canon(value))] += 1
+            found[(at, key, _canon(value))] += 1
     return found
 
 
@@ -241,24 +258,23 @@ def _embedded(text: str):
         return None, "contains odd line breaks"
     try:
         problem = _token_problem(text)
-    except (yaml.YAMLError, RecursionError, ValueError):
+        if problem:
+            return None, problem
+        docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
+    except (ScannerError, ParserError):
         return None, None
+    except (yaml.YAMLError, RecursionError, ValueError) as exc:
+        detail = getattr(exc, "problem", None) or type(exc).__name__
+        return None, f"is YAML the checker cannot read ({detail})"
+    problem = _shape_problem(docs)
     if problem:
         return None, problem
-    try:
-        docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
-    except yaml.constructor.ConstructorError:
-        return None, "has duplicate or merge keys"
-    except (yaml.YAMLError, RecursionError, ValueError):
-        return None, None
-    if _expands(docs):
-        return None, f"expands to more than {MAX_EXPANDED_NODES} nodes through aliases"
-    mappings = [doc for doc in docs if isinstance(doc, dict)]
-    if not mappings:
+    structured = [doc for doc in docs if isinstance(doc, (dict, list))]
+    if not structured:
         return None, None
     if len(docs) != 1:
         return None, "holds several YAML documents"
-    return mappings[0], None
+    return structured[0], None
 
 
 def _configmap_entries(doc: dict) -> dict[str, str]:
@@ -281,8 +297,8 @@ def _values_rules(where: str, label: str, old, new) -> list[str]:
     for trail in sorted(set(before) | set(after), key=str):
         if before.get(trail) != after.get(trail):
             errors.append(f"{where}: changes {label}.{'.'.join(map(str, trail))}")
-    for field, value in sorted(_sensitive(new or {}) - _sensitive(old or {})):
-        errors.append(f"{where}: adds or changes {field} in {label} ({value[:60]})")
+    for at, field, value in sorted(_sensitive(new or {}) - _sensitive(old or {})):
+        errors.append(f"{where}: adds or changes {field} in {label} at {at or '(top)'} ({value[:60]})")
     return errors
 
 
@@ -316,8 +332,8 @@ def _field_rules(where: str, key: tuple, old: dict | None, new: dict) -> list[st
     if old is None and isinstance(new.get("metadata"), dict) and "namespace" in new["metadata"]:
         errors.append(f"{where}: a new document may not set metadata.namespace")
     gained = _sensitive(new) - _sensitive(old or {})
-    for field, value in sorted(gained):
-        errors.append(f"{where}: adds or changes {field} ({value[:60]})")
+    for at, field, value in sorted(gained):
+        errors.append(f"{where}: adds or changes {field} at {at or '(top)'} ({value[:60]})")
     if key[:2] == HELMRELEASE:
         old_spec, new_spec = _mapping((old or {}).get("spec")), _mapping(new.get("spec"))
         for field in HELMRELEASE_FIXED_FIELDS:
@@ -359,7 +375,7 @@ def _kustomization_rules(where: str, old: dict, new: dict) -> list[str]:
     for entry in after:
         if entry in before:
             continue
-        if not isinstance(entry, str) or not _LOCAL_RESOURCE.fullmatch(entry) or ".." in entry:
+        if not isinstance(entry, str) or not _LOCAL_RESOURCE.fullmatch(entry):
             errors.append(f"{where}: resource {entry!r} is not a local file in this directory")
     return errors
 

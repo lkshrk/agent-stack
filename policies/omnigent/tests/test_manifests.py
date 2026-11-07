@@ -149,7 +149,7 @@ class BypassTest(unittest.TestCase):
             f"{chr(98 + i)}: &{chr(98 + i)} [{', '.join([f'*{chr(97 + i)}'] * 10)}]\n" for i in range(6))
         self.assert_rejected(added("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: l}\ndata:\n  " +
                                    laughs.replace("\n", "\n  ")), "expands")
-        self.assert_rejected(added("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: r}\nloop: &l [*l]\n"), "expands")
+        self.assert_rejected(added("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: r}\nloop: &l [*l]\n"), "through aliases")
         self.assert_rejected(added(SERVICE + "---\n" + SERVICE), "twice")
 
     def test_flux_kinds_in_an_app_file(self):
@@ -452,6 +452,118 @@ class ReviewSixTest(unittest.TestCase):
         source = Path(manifests.__file__).read_text(encoding="utf-8")
         for char in (" ", " ", "\x85"):
             self.assertNotIn(char, source)
+
+
+TWO = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: two
+spec:
+  template:
+    spec:
+      containers:
+        - name: a
+          image: ghcr.io/acme/a:1.0.0
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          env:
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef: {name: s, key: k}
+        - name: b
+          image: ghcr.io/acme/b:1.0.0
+      volumes:
+        - name: host
+          hostPath: {path: /var/lib/a}
+        - name: scratch
+          emptyDir: {}
+"""
+
+
+def swap(text, old_block, new_block):
+    assert text.count(old_block) == 1, old_block
+    return text.replace(old_block, new_block)
+
+
+class ReviewSevenTest(unittest.TestCase):
+    def rejected(self, before, after, name="deployment.yaml", contains=""):
+        errors = check_change(APP + name, before, after)
+        self.assertTrue(errors, "expected a violation")
+        self.assertTrue(any(contains in e for e in errors), errors)
+
+    def cm(self, value):
+        body = "\n".join("    " + line for line in value.splitlines())
+        return f"apiVersion: v1\nkind: ConfigMap\nmetadata: {{name: v}}\ndata:\n  values.yaml: |\n{body}\n"
+
+    def test_timestamp_next_to_rbac_is_not_hidden(self):
+        before = self.cm("d: 2001-01-01\nrbac: {create: false}")
+        self.rejected(before, self.cm("d: 2001-99-99\nrbac: {create: true}"), "configmap.yaml", "rbac")
+        self.rejected(self.cm("a: 1"), self.cm("d: 2001-99-99\nrbac: {create: true}"), "configmap.yaml", "rbac")
+        main = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: t}\ndata:\n  when: 2001-99-99\n"
+        self.assertEqual(added(main), [])
+
+    def test_errors_other_than_not_yaml_are_violations(self):
+        chain = "a0: &a0 x\n" + "".join(f"a{i}: &a{i} [*a{i - 1}]\n" for i in range(1, 300))
+        self.rejected(self.cm("a: 1"), self.cm(chain), "configmap.yaml", "data.values.yaml")
+        self.rejected(self.cm("a: 1"), self.cm("loop: &l [*l]"), "configmap.yaml", "data.values.yaml")
+        laughs = "a: &a [x, x, x, x, x, x, x, x, x, x]\n" + "".join(
+            f"{chr(98 + i)}: &{chr(98 + i)} [{', '.join([f'*{chr(97 + i)}'] * 10)}]\n" for i in range(6))
+        self.rejected(self.cm("a: 1"), self.cm(laughs), "configmap.yaml", "expands")
+        self.rejected(self.cm("a: 1"), self.cm("a: *undefined"), "configmap.yaml", "data.values.yaml")
+        self.assertEqual(check_change(APP + "configmap.yaml", self.cm("a: 1"), self.cm("a: [unclosed")), [])
+        self.assertEqual(check_change(APP + "configmap.yaml", self.cm("a: 1"), self.cm("just: some: text")), [])
+
+    def test_top_level_list_in_data_follows_the_rules(self):
+        self.rejected(self.cm("a: 1"), self.cm("- securityContext: {privileged: true}"), "configmap.yaml", "privileged")
+        self.assertEqual(check_change(APP + "configmap.yaml", self.cm("- a: 1"), self.cm("- a: 2\n- b: 3")), [])
+
+    def test_moving_sensitive_fields_between_containers_is_caught(self):
+        moves = {
+            "privileged": ("            privileged: true\n", "", "          image: ghcr.io/acme/b:1.0.0\n",
+                           "          image: ghcr.io/acme/b:1.0.0\n          securityContext: {privileged: true}\n"),
+            "runAsUser": ("            runAsUser: 0\n", "", "          image: ghcr.io/acme/b:1.0.0\n",
+                          "          image: ghcr.io/acme/b:1.0.0\n          securityContext: {runAsUser: 0}\n"),
+            "secretKeyRef": ("          env:\n            - name: TOKEN\n              valueFrom:\n"
+                             "                secretKeyRef: {name: s, key: k}\n", "",
+                             "          image: ghcr.io/acme/b:1.0.0\n",
+                             "          image: ghcr.io/acme/b:1.0.0\n          env:\n            - name: TOKEN\n"
+                             "              valueFrom:\n                secretKeyRef: {name: s, key: k}\n"),
+            "hostPath": ("          hostPath: {path: /var/lib/a}\n", "          emptyDir: {}\n",
+                         "        - name: scratch\n          emptyDir: {}\n",
+                         "        - name: scratch\n          hostPath: {path: /var/lib/a}\n"),
+        }
+        for field, (old1, new1, old2, new2) in moves.items():
+            with self.subTest(field):
+                self.rejected(TWO, swap(swap(TWO, old1, new1), old2, new2), contains=field)
+
+    def test_reordering_and_inserting_named_entries_passes(self):
+        a = TWO[TWO.index("        - name: a\n"):TWO.index("        - name: b\n")]
+        b = TWO[TWO.index("        - name: b\n"):TWO.index("      volumes:\n")]
+        self.assertEqual(changed(TWO, swap(TWO, a + b, b + a)), [])
+        inserted = swap(TWO, "          env:\n", "          env:\n            - name: NEW\n              value: x\n")
+        self.assertEqual(changed(TWO, inserted), [])
+        volume = swap(TWO, "      volumes:\n", "      volumes:\n        - name: cache\n          emptyDir: {}\n")
+        self.assertEqual(changed(TWO, volume), [])
+
+    def test_alias_tricks(self):
+        scalar = POD.replace("runAsUser: 1000", "runAsUser: *uid").replace("metadata:\n", "uid: &uid 0\nmetadata:\n", 1)
+        self.rejected(POD, scalar, contains="runAsUser")
+        key = POD.replace("  name: pod\n", "  name: pod\n  label: &k privileged\n").replace(
+            "        runAsUser: 1000\n", "        runAsUser: 1000\n      podSecurity: {*k : true}\n")
+        self.rejected(POD, key, contains="privileged")
+        shared = POD.replace("        - name: b\n          image: ghcr.io/acme/b:1.0.0\n",
+                             "        - name: b\n          image: ghcr.io/acme/b:1.0.0\n"
+                             "          securityContext: &sc {readOnlyRootFilesystem: true}\n"
+                             "        - name: c\n          image: ghcr.io/acme/c:1.0.0\n          securityContext: *sc\n")
+        self.rejected(shared, shared.replace("{readOnlyRootFilesystem: true}", "{privileged: true}"), contains="privileged")
+        self.assertEqual(changed(shared, shared.replace("c:1.0.0", "c:1.0.1")), [])
+
+    def test_kustomization_constants(self):
+        from agent_stack_policies.manifests import KUSTOMIZATION_FILES
+
+        self.assertEqual(KUSTOMIZATION_FILES, ("kustomization.yaml", "kustomization.yml"))
 
 
 if __name__ == "__main__":
