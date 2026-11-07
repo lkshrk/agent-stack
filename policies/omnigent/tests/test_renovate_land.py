@@ -1,4 +1,5 @@
 import base64
+import http.client
 import http.server
 import io
 import json
@@ -97,11 +98,11 @@ class Fake:
         body = json.loads(request.data) if request.data else None
         self.calls.append((key, body, request.get_header("Authorization")))
         if key not in self.routes:
-            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, io.BytesIO(b'{"message":"Not Found"}'))
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", http.client.HTTPMessage(), io.BytesIO(b'{"message":"Not Found"}'))
         value = self.routes[key]
         if isinstance(value, tuple):
             status, value = value
-            raise urllib.error.HTTPError(request.full_url, status, "error", {}, io.BytesIO(json.dumps(value).encode()))
+            raise urllib.error.HTTPError(request.full_url, status, "error", http.client.HTTPMessage(), io.BytesIO(json.dumps(value).encode()))
         if isinstance(value, list) and value and callable(value[0]):
             value = value.pop(0)()
         return Response(value)
@@ -136,7 +137,7 @@ class LandTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def land(self, fake, number=7):
+    def land(self, fake, number: object = 7):
         github = GitHub(str(self.token_file), opener=fake, sleep=lambda _: None)
         return land(github, REPO, number)
 
@@ -295,7 +296,7 @@ class FakeServer(http.server.BaseHTTPRequestHandler):
 
     do_GET = do_PUT = _serve
 
-    def log_message(self, *args):
+    def log_message(self, format, *args):
         pass
 
 

@@ -139,15 +139,16 @@ def _repo_name(side: dict) -> str:
 
 
 def _pull(github: GitHub, repo: str, number: int) -> dict:
-    for attempt in range(MERGEABLE_TRIES):
+    attempt = 1
+    while True:
         body = github.get(f"/repos/{repo}/pulls/{number}")
         if not isinstance(body, dict) or not isinstance(body.get("head"), dict) or not isinstance(body.get("base"), dict):
             raise Refused("pull request response has the wrong shape")
-        if body.get("mergeable") is not None or attempt == MERGEABLE_TRIES - 1:
+        if body.get("mergeable") is not None or attempt >= MERGEABLE_TRIES:
             return body
         # GitHub computes mergeability in the background after a push.
         github.sleep(MERGEABLE_WAIT_SECONDS)
-    return body
+        attempt += 1
 
 
 def _verify_pull(body: dict, repo: str, base: str) -> str:
@@ -175,10 +176,11 @@ def _verify_pull(body: dict, repo: str, base: str) -> str:
 def _verify_checks(github: GitHub, repo: str, sha: str) -> None:
     runs, total = [], 0
     for page, body in github.pages(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100", key="check_runs"):
-        if not isinstance(page, list) or not isinstance(body.get("total_count"), int):
+        count = body.get("total_count") if isinstance(body, dict) else None
+        if not isinstance(page, list) or not isinstance(count, int):
             raise Refused("check runs response has the wrong shape")
         runs.extend(page)
-        total = body["total_count"]
+        total = count
     if len(runs) < total:
         raise Refused(f"check runs list is truncated ({len(runs)} of {total})")
     status = github.get(f"/repos/{repo}/commits/{sha}/status?per_page=100")
@@ -296,7 +298,7 @@ def _verify_untrusted(github: GitHub, repo: str, pushes: list[dict], base_sha: s
                 raise Refused(f"{where}: " + "; ".join(found[:3]))
 
 
-def land(github: GitHub, repo: str, number, base: str = DEFAULT_BASE) -> dict:
+def land(github: GitHub, repo: str, number: object, base: str = DEFAULT_BASE) -> dict:
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         raise Refused("number must be a positive integer")
     body = _pull(github, repo, number)
@@ -340,7 +342,8 @@ def respond(line: str, github: GitHub, repo: str) -> dict | None:
     if not isinstance(message, dict) or "method" not in message or "id" not in message:
         return None
     method = message["method"]
-    params = message.get("params") if isinstance(message.get("params"), dict) else {}
+    raw_params = message.get("params")
+    params = raw_params if isinstance(raw_params, dict) else {}
     try:
         if method == "initialize":
             version = params.get("protocolVersion")
