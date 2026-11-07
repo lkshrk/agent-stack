@@ -276,6 +276,8 @@ def path_guard(
             return _deny(f"startup file {path} is not writable")
         if escapes(path) and not relative_startup_template(path):
             return _deny(f"path {path} tries to escape with '..'")
+        if "." in _normalise(path).split("/"):
+            return _deny(f"path {path} has a '.' segment; write it without one")
         if forbidden(path):
             return _deny(f"forbidden path {path}")
         if write_forbidden(path):

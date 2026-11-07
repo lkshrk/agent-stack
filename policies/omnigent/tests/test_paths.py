@@ -809,6 +809,18 @@ class WriteDenyTest(unittest.TestCase):
         self.assertEqual(self.verdict("Write", {"file_path": "/tmp/chart/values.yaml", "content": "x"}), "ALLOW")
         self.assertEqual(self.verdict("Write", {"file_path": "kubernetes/apps/ai/ns.yaml", "content": "x"}), "DENY")
 
+    def test_dot_segments_do_not_dodge_write_deny(self):
+        for path in ("kubernetes/apps/./kube-system/cilium/app/values.yaml",
+                     "/home/omnigent/work/h-cloud/kubernetes/apps/./kube-system/cilium/app/values.yaml",
+                     "kubernetes/apps/ai/litellm/app/./ks.yaml",
+                     "kubernetes/apps/ai/litellm/app/.",
+                     "kubernetes/./flux/cluster/x.yaml"):
+            with self.subTest(path):
+                self.assertEqual(self.verdict("Write", {"file_path": path, "content": "x"}), "DENY")
+                if not path.startswith("/") and not path.endswith("/."):
+                    self.assertEqual(self.verdict("Bash", {"command": f"sed -i s/a/b/ {path}"}), "DENY")
+        self.assertEqual(self.verdict("Write", {"file_path": "./kubernetes/apps/ai/litellm/app/a.yaml", "content": "x"}), "ALLOW")
+
     def test_write_deny_alone_scopes_shell_writes(self):
         guard = path_guard(write_deny=["talos/**"])
         self.assertEqual(guard(tool_call_event("Bash", {"command": "echo x > talos/a.yaml"}))["result"], "DENY")
