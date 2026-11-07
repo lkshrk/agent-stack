@@ -201,8 +201,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		p.codes.withdraw(code)
 		return err
 	}
-	digest := contentDigest(pr.Title, pr.Body)
-	if !p.codes.markAnnounced(k, sha, code, digest) {
+	if !p.codes.markAnnounced(k, sha, code) {
 		log.Printf("contribution-approver: %s#%d at %s: the code was dropped while announcing; the next poll announces again if still ready", cfg.Fork, k.number, sha)
 		return nil
 	}
@@ -211,7 +210,7 @@ func (p *poller) announce(ctx context.Context, cfg forkConfig, k prKey, sha stri
 		p.codes.bindFailed(k, sha)
 		return fmt.Errorf("announced, but listing reviews to bind it failed: %w", err)
 	}
-	p.codes.recordAnnouncement(k, sha, digest, last)
+	p.codes.recordAnnouncement(k, sha, contentDigest(pr.Title, pr.Body), last)
 	log.Printf("contribution-approver: announced %s#%d at %s", cfg.Fork, k.number, sha)
 	return nil
 }

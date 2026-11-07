@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/rand"
 	"fmt"
-	"math"
 	"math/big"
 	"sync"
 	"time"
@@ -36,12 +35,6 @@ type sentAnnouncement struct {
 	lastReview int64
 }
 
-type provisionalSent struct {
-	sha  string
-	prev sentAnnouncement
-	had  bool
-}
-
 type headState struct {
 	sha      string
 	consumed bool
@@ -71,8 +64,6 @@ type codeStore struct {
 	unbound   map[prKey]int
 	holdUntil map[prKey]time.Time
 	heldSHA   map[prKey]string
-	// provisional keeps the record an unbound announcement replaced, so a failed bind can restore it.
-	provisional map[prKey]provisionalSent
 }
 
 func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
@@ -80,7 +71,6 @@ func newCodeStore(ttl time.Duration, now func() time.Time) *codeStore {
 		ttl: ttl, now: now, byCode: map[string]pending{}, announced: map[prKey]headState{},
 		sent: map[prKey]map[string]sentAnnouncement{}, resend: map[prKey]int64{},
 		unbound: map[prKey]int{}, holdUntil: map[prKey]time.Time{}, heldSHA: map[prKey]string{},
-		provisional: map[prKey]provisionalSent{},
 	}
 }
 
@@ -91,7 +81,6 @@ func (s *codeStore) recordAnnouncement(k prKey, sha, digest string, lastReview i
 		s.sent[k] = map[string]sentAnnouncement{}
 	}
 	s.sent[k][sha] = sentAnnouncement{digest: digest, lastReview: max(lastReview, s.resend[k])}
-	delete(s.provisional, k)
 	delete(s.resend, k)
 	delete(s.unbound, k)
 	delete(s.holdUntil, k)
@@ -139,14 +128,6 @@ func (s *codeStore) reannouncing(k prKey) bool {
 func (s *codeStore) bindFailed(k prKey, sha string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if p, ok := s.provisional[k]; ok && p.sha == sha {
-		if p.had {
-			s.sent[k][sha] = p.prev
-		} else {
-			delete(s.sent[k], sha)
-		}
-	}
-	delete(s.provisional, k)
 	s.resend[k] = max(s.resend[k], 0)
 	s.unbound[k]++
 	if n := s.unbound[k]; n > 1 {
@@ -195,20 +176,13 @@ func (s *codeStore) purgeLocked(now time.Time) {
 }
 
 // markAnnounced reports false if code was dropped while its announcement was sent.
-func (s *codeStore) markAnnounced(k prKey, sha, code, digest string) bool {
+func (s *codeStore) markAnnounced(k prKey, sha, code string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.byCode[code]
 	if !ok {
 		return false
 	}
-	if s.sent[k] == nil {
-		s.sent[k] = map[string]sentAnnouncement{}
-	}
-	prev, had := s.sent[k][sha]
-	s.provisional[k] = provisionalSent{sha: sha, prev: prev, had: had}
-	// No review binds until recordAnnouncement stores the real listing.
-	s.sent[k][sha] = sentAnnouncement{digest: digest, lastReview: math.MaxInt64}
 	p.delivered = true
 	s.byCode[code] = p
 	now := s.now()
@@ -299,7 +273,6 @@ func (s *codeStore) keepOnly(fork string, ready map[prKey]bool) {
 	for k := range s.sent {
 		if k.fork == fork && !ready[k] {
 			delete(s.sent, k)
-			delete(s.provisional, k)
 		}
 	}
 	for k := range s.resend {

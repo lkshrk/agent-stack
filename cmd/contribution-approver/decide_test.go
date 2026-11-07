@@ -449,12 +449,12 @@ func TestASupersededRecordIsPurgedWithTheOtherCodeMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.markAnnounced(k, shaA, old, "")
+	s.markAnnounced(k, shaA, old)
 	fresh, err := s.issue(k, shaB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.markAnnounced(k, shaB, fresh, "")
+	s.markAnnounced(k, shaB, fresh)
 	if n := s.live(); n != 1 {
 		t.Fatalf("live codes = %d, want 1", n)
 	}
@@ -596,30 +596,32 @@ func replyFromHook(t *testing.T, h *harness, msg string) *httptest.ResponseRecor
 	return approveWith(h, m[1])
 }
 
-func TestACodeRepliedWhileTheReviewsAreListedApproves(t *testing.T) {
-	for name, setup := range map[string]func(h *harness){
-		"first announcement": func(h *harness) { h.gh.readyPR(7, shaA) },
-		"same head again": func(h *harness) {
-			announce(t, h, 7, shaA)
-			h.codes.requestReannouncement(prKey{testFork, 7}, 0)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			h := newHarness(t)
-			setup(h)
-			var reply *httptest.ResponseRecorder
-			h.signal.whenSent(func(msg string) {
-				h.gh.beforeNext(http.MethodGet, "/repos/"+testFork+"/pulls/7/reviews", func() { reply = replyFromHook(t, h, msg) })
-			})
-			h.poller.poll(context.Background())
+func TestACodeRepliedWhileTheReviewsAreListedIsRefusedThenANewCodePublishes(t *testing.T) {
+	h := publishable(t, shaA, nil)
+	var reply *httptest.ResponseRecorder
+	h.signal.whenSent(func(msg string) {
+		h.gh.beforeNext(http.MethodGet, "/repos/"+testFork+"/pulls/7/reviews", func() { reply = replyFromHook(t, h, msg) })
+	})
+	pollTimes(h, 1)
 
-			if reply == nil || reply.Code != http.StatusOK {
-				t.Fatalf("reply = %v, want 200", reply)
-			}
-			if r := h.gh.reviewCalls(); len(r) != 1 || r[0].body["commit_id"] != shaA {
-				t.Fatalf("reviews = %v, want one on %s", r, shaA)
-			}
-		})
+	if reply == nil || reply.Code != http.StatusConflict {
+		t.Fatalf("reply = %v, want 409", reply)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	pollTimes(h, 1)
+	if readyMessages(h) != 2 {
+		t.Fatalf("messages = %q, want a second announcement", h.signal.messages())
+	}
+	if rec := approveWith(h, codeIn(t, lastMessage(h))); rec.Code != http.StatusOK {
+		t.Fatalf("the new code answered %d", rec.Code)
+	}
+	pollTimes(h, 1)
+
+	onlyUpstream(t, h)
+	if n := countContaining(h.signal.messages(), "Published "+testFork+"#7 at "+shaA); n != 1 {
+		t.Fatalf("messages = %q, want one publish notice", h.signal.messages())
 	}
 }
 
