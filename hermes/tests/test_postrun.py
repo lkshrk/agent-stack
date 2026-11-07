@@ -5,11 +5,29 @@ import tempfile
 import unittest
 import urllib.error
 
-from agent_stack_hermes.postrun import MAX_PAGES, NULL_SHA, Activity, GitHubError, GitHubReader, PullHead, agent_actors, violations
+from pathlib import Path
+
+from agent_stack_hermes.postrun import (
+    MAX_PAGES,
+    NULL_SHA,
+    Activity,
+    GitHubError,
+    GitHubReader,
+    MergedPull,
+    PullHead,
+    agent_actors,
+    token_files,
+    violations,
+)
 
 API = "https://api.github.com"
 REPO = "acme/app"
 HEAD = PullHead("feat/x", "acme/app", "main", "acme/app", "main")
+RECORDED = Path(__file__).parent / "testdata" / "github"
+
+
+def recorded(name):
+    return json.loads((RECORDED / name).read_text())
 
 
 class FakeResponse(io.BytesIO):
@@ -77,6 +95,26 @@ class Lookup:
         return [e for e in self.entries if e.ref == ref]
 
 
+class Merges:
+    def __init__(self, **pulls):
+        self.pulls = pulls
+        self.asked = []
+
+    def __call__(self, sha):
+        self.asked.append(sha)
+        return list(self.pulls.get(sha, ()))
+
+
+def renovate_pull(sha="m", **over):
+    fields = {"merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO, "head_ref": "renovate/x-1.x",
+              "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT}
+    return MergedPull(**{**fields, **over})
+
+
+def merge(before, after, actor=AGENT, kind="pr_merge"):
+    return Activity(MAIN, 1000.0, actor, before, after, kind)
+
+
 class Releases:
     def __init__(self, **authors):
         self.authors = authors
@@ -87,15 +125,21 @@ class Releases:
         return self.authors.get(tag)
 
 
+class Taggers(Releases):
+    pass
+
+
 class ViolationsTest(unittest.TestCase):
     base = {"refs/heads/main": "a", "refs/heads/feat/x": "b", "refs/tags/v1": "t"}
 
     def check(self, after, before=None, pull=HEAD, files=(), bundle="coder", lookup=None, agents=AGENTS, branches=(),
-              releases=None):
+              releases=None, taggers=None):
         self.lookup = lookup or Lookup()
         self.releases = releases or Releases()
+        self.taggers = taggers or Taggers()
         before = self.base if before is None else before
-        return violations(bundle, REPO, before, after, pull, list(files), self.lookup, self.releases, agents, branches)
+        return violations(bundle, REPO, before, after, pull, list(files), self.lookup, self.releases, agents, branches,
+                          tagger=self.taggers)
 
     def test_head_branch_move_allowed(self):
         self.assertEqual(self.check({**self.base, "refs/heads/feat/x": "c"}), [])
@@ -186,15 +230,47 @@ class ViolationsTest(unittest.TestCase):
                 self.assertEqual(out, ["tag moved: refs/tags/v1"])
         self.assertEqual(releases.asked, [])
 
-    def test_tag_without_release_is_unattributed(self):
-        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]", NULL_SHA, "t2"))
-        out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup)
+    def test_tag_without_release_or_tagger_is_unattributed(self):
+        out = self.check({**self.base, "refs/tags/v2": "t2"})
         self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
-        self.assertEqual((self.releases.asked, lookup.asked), (["v2"], [MAIN]))
+        asked = (self.releases.asked, self.lookup.asked, self.taggers.asked)
+        self.assertEqual(asked, (["v2"], [MAIN, "refs/tags/v2"], ["t2"]))
+
+    def test_tag_without_release_attributed_by_activity(self):
+        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]", NULL_SHA, "t2"))
+        self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup), [])
+        self.assertEqual(self.taggers.asked, [])
+
+    def test_tag_created_by_agent_per_activity_is_violation(self):
+        lookup = Lookup(entry("refs/tags/v2", AGENT, NULL_SHA, "t2"))
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup, taggers=Taggers(t2="lkshrk"))
+        self.assertEqual(out, ["ref moved by agent: refs/tags/v2"])
+
+    def test_tag_activity_not_reaching_the_tag_is_unattributed(self):
+        for actor in ("github-actions[bot]", ""):
+            lookup = Lookup(entry("refs/tags/v2", actor, NULL_SHA, "t9"))
+            out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup, taggers=Taggers(t2="lkshrk"))
+            self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"], actor)
+
+    def test_tag_without_release_attributed_by_tagger(self):
+        taggers = Taggers(t2="h-cloud-workflow[bot]")
+        self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, taggers=taggers), [])
+        self.assertEqual(taggers.asked, ["t2"])
+
+    def test_tag_tagged_by_agent_is_violation(self):
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, taggers=Taggers(t2="H-Cloud-NPA[bot]"))
+        self.assertEqual(out, ["ref moved by agent: refs/tags/v2"])
+
+    def test_moved_tag_is_violation_despite_tagger(self):
+        out = self.check({**self.base, "refs/tags/v1": "t2"}, taggers=Taggers(t2="h-cloud-workflow[bot]"))
+        self.assertEqual(out, ["tag moved: refs/tags/v1"])
+        self.assertEqual(self.taggers.asked, [])
 
     def test_release_without_author_is_unattributed(self):
         out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""))
         self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
+        out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""), taggers=Taggers(t2="x[bot]"))
+        self.assertEqual(out, [])
 
     def test_deleted_tag_is_unattributed(self):
         releases = Releases(v1="github-actions[bot]")
@@ -287,6 +363,169 @@ class ViolationsTest(unittest.TestCase):
 
     def test_non_documenter_ignores_files(self):
         self.assertEqual(self.check(self.base, files=["src/app.py"]), [])
+
+
+class InfraViolationsTest(unittest.TestCase):
+    base = {MAIN: "a", "refs/heads/renovate/x-1.x": "r"}
+
+    def check(self, after, entries, merges=None, bundle="infra", agents=AGENTS, pulls=None, default="main"):
+        self.merges = merges or Merges()
+        lookup = Lookup(*entries)
+        return violations(bundle, REPO, self.base, after, None, [], lookup, Releases(), agents, ("main",),
+                          tagger=Taggers(), merged=self.merges, default=default, pulls=pulls or {})
+
+    def test_agent_landed_renovate_pr_allowed(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]))
+        self.assertEqual(out, [])
+        self.assertEqual(self.merges.asked, ["m"])
+
+    def test_chain_of_agent_merges_and_owner_push_allowed(self):
+        entries = [merge("a", "m1"), entry(MAIN, "lkshrk", "m1", "o"), merge("o", "m2")]
+        merges = Merges(m1=[renovate_pull("m1")], m2=[renovate_pull("m2", merged_by="H-Cloud-NPA[bot]")])
+        self.assertEqual(self.check({MAIN: "m2"}, entries, merges), [])
+        self.assertEqual(self.merges.asked, ["m1", "m2"])
+
+    def test_agent_push_is_violation(self):
+        for kind in ("push", "force_push", "merge_queue_merge", ""):
+            out = self.check({MAIN: "m"}, [merge("a", "m", kind=kind)], Merges(m=[renovate_pull()]))
+            self.assertEqual(len(out), 1, kind)
+            self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+            self.assertEqual(self.merges.asked, [])
+
+    def test_merge_not_matching_rules_is_violation(self):
+        bad = {
+            "unmerged": renovate_pull(merged=False),
+            "other merge commit": renovate_pull(merge_commit_sha="x"),
+            "other base": renovate_pull(base_ref="release"),
+            "fork head": renovate_pull(head_repo="evil/app"),
+            "deleted fork": renovate_pull(head_repo=""),
+            "other base repo": renovate_pull(base_repo="other/app"),
+            "non-renovate head": renovate_pull(head_ref="feat/renovate/x"),
+            "human author": renovate_pull(author="lkshrk"),
+            "other renovate": renovate_pull(author="renovate[bot]"),
+            "merged by owner": renovate_pull(merged_by="lkshrk"),
+            "merged by nobody": renovate_pull(merged_by=""),
+        }
+        for name, pull in bad.items():
+            with self.subTest(name):
+                out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[pull]))
+                self.assertEqual(len(out), 1, out)
+                self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+
+    def test_not_exactly_one_pr_is_violation(self):
+        for pulls in ([], [renovate_pull(), renovate_pull()]):
+            out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=pulls))
+            self.assertEqual(len(out), 1, pulls)
+            self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+
+    def test_broken_chain_after_landed_merge_is_unattributed(self):
+        out = self.check({MAIN: "z"}, [merge("a", "m")], Merges(m=[renovate_pull()]))
+        self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
+
+    def test_case_insensitive_repo_and_logins(self):
+        pull = renovate_pull(base_repo="ACME/app", head_repo="Acme/App", author="Renovate-Master[bot]")
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[pull])), [])
+
+    def test_other_protected_branch_still_violation(self):
+        base = {**self.base, "refs/heads/release": "q"}
+        lookup = Lookup(Activity("refs/heads/release", 1000.0, AGENT, "q", "m", "pr_merge"))
+        merges = Merges(m=[renovate_pull(base_ref="release")])
+        out = violations("infra", REPO, base, {**base, "refs/heads/release": "m"}, None, [], lookup, Releases(), AGENTS,
+                         ("main", "release"), tagger=Taggers(), merged=merges, default="main", pulls={})
+        self.assertEqual(out, ["ref moved by agent: refs/heads/release"])
+        self.assertEqual(merges.asked, [])
+
+    def test_other_bundles_keep_the_plain_rule(self):
+        for bundle in ("polly", "documenter"):
+            out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]), bundle=bundle)
+            self.assertEqual(out, ["ref moved by agent: refs/heads/main"], bundle)
+            self.assertEqual(self.merges.asked, [])
+
+    def test_no_agent_actors_is_violation(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]), agents=frozenset())
+        self.assertEqual(out, ["ref moved: refs/heads/main"])
+
+    def test_every_result_pr_is_checked(self):
+        pulls = {
+            "https://github.com/acme/app/pull/1": PullHead("renovate/a", REPO, "main", REPO, "main"),
+            "https://github.com/acme/app/pull/2": PullHead("renovate/b", "evil/app", "main", REPO, "main"),
+            "https://github.com/acme/app/pull/3": PullHead("main", REPO, "main", REPO, "main"),
+            "https://github.com/other/app/pull/4": PullHead("renovate/c", "other/app", "main", "other/app", "main"),
+        }
+        out = self.check(dict(self.base), [], pulls=pulls)
+        self.assertEqual(out, [
+            f"https://github.com/acme/app/pull/2: PR head is not in {REPO}",
+            "https://github.com/acme/app/pull/3: PR head is a protected branch: main",
+            f"https://github.com/other/app/pull/4: PR head is not in {REPO}",
+            f"https://github.com/other/app/pull/4: PR is not in {REPO}",
+        ])
+
+
+class TokenFilesTest(unittest.TestCase):
+    def test_parsed(self):
+        value = " routivo=/var/run/agent/github/review, LKSHRK=/var/run/agent/github/hcloud-ro ,"
+        expected = {"routivo": "/var/run/agent/github/review", "lkshrk": "/var/run/agent/github/hcloud-ro"}
+        self.assertEqual(token_files(value), expected)
+        for value in (None, "", " , "):
+            self.assertEqual(token_files(value), {}, value)
+
+    def test_malformed_raises(self):
+        for value in ("routivo", "=/x", "routivo=", "a=/x,A=/y", "a b=/x"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                token_files(value)
+
+
+class MultiOwnerTokenTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.files = {}
+        for name in ("fallback", "review", "hcloud"):
+            path = os.path.join(tmp.name, name)
+            with open(path, "w") as fh:
+                fh.write(f"tok-{name}\n")
+            self.files[name] = path
+
+    def reader(self, responses, fallback=True):
+        self.opener = FakeOpener(responses)
+        owners = {"routivo": self.files["review"], "lkshrk": self.files["hcloud"]}
+        return GitHubReader(self.files["fallback"] if fallback else None, opener=self.opener, token_files=owners)
+
+    def auth(self, i=0):
+        return self.opener.requests[i].get_header("Authorization")
+
+    def test_token_chosen_by_owner(self):
+        r = self.reader([jr({"default_branch": "main"}) for _ in range(3)])
+        for repo, token in (("lkshrk/h-cloud", "tok-hcloud"), ("Routivo/app", "tok-review"), ("acme/app", "tok-fallback")):
+            r.default_branch(repo)
+            self.assertEqual(self.auth(-1), f"Bearer {token}", repo)
+
+    def test_pull_and_pages_use_the_owner_token(self):
+        nxt = f'<{API}/repositories/1/git/matching-refs/heads?page=2>; rel="next"'
+        body = {"head": {"ref": "renovate/x", "repo": {"full_name": "lkshrk/h-cloud"}},
+                "base": {"ref": "main", "repo": {"full_name": "lkshrk/h-cloud", "default_branch": "main"}}}
+        r = self.reader([jr([], {"Link": nxt}), jr([]), jr([]), jr(body)])
+        r.refs("lkshrk/h-cloud")
+        r.pull("https://github.com/lkshrk/h-cloud/pull/3")
+        self.assertEqual({q.get_header("Authorization") for q in self.opener.requests}, {"Bearer tok-hcloud"})
+
+    def test_unlisted_owner_without_fallback_raises_without_retry(self):
+        r = self.reader([jr({"default_branch": "main"})], fallback=False)
+        with self.assertRaises(GitHubError) as cm:
+            r.default_branch("acme/app")
+        self.assertNotIn(cm.exception.status, (0, 429))
+        self.assertLess(cm.exception.status, 500)
+        self.assertFalse(cm.exception.malformed)
+        self.assertIn("acme", str(cm.exception))
+        self.assertEqual(self.opener.requests, [])
+        r.default_branch("lkshrk/h-cloud")
+        self.assertEqual(self.auth(), "Bearer tok-hcloud")
+
+    def test_errors_never_carry_the_token(self):
+        err = urllib.error.HTTPError(API, 401, "bad", {}, io.BytesIO(b"Bad credentials"))
+        with self.assertRaises(GitHubError) as cm:
+            self.reader([err]).default_branch("lkshrk/h-cloud")
+        self.assertNotIn("tok-", str(cm.exception))
 
 
 class AgentActorsTest(unittest.TestCase):
@@ -400,8 +639,8 @@ class ActivityTest(ReaderCase):
         got = r.activity(REPO, "refs/heads/main", self.SINCE)
         self.assertEqual(
             got,
-            [Activity("refs/heads/main", 1_700_000_001.0, "lkshrk", "a", "b"),
-             Activity("refs/heads/main", 1_700_000_400.0, "h-cloud-npa[bot]", "b", "c")],
+            [Activity("refs/heads/main", 1_700_000_001.0, "lkshrk", "a", "b", "push"),
+             Activity("refs/heads/main", 1_700_000_400.0, "h-cloud-npa[bot]", "b", "c", "push")],
         )
         first = self.opener.requests[0].full_url
         self.assertIn("/repos/acme/app/activity?", first)
@@ -418,7 +657,19 @@ class ActivityTest(ReaderCase):
 
     def test_null_actor_and_offset_timestamp(self):
         r = self.reader([jr([self.item("2023-11-15T00:13:21+02:00", None)])])
-        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [Activity("refs/heads/main", 1_700_000_001.0, "", "a", "b")])
+        self.assertEqual(r.activity(REPO, "refs/heads/main", self.SINCE), [Activity("refs/heads/main", 1_700_000_001.0, "", "a", "b", "push")])
+
+    def test_recorded_pr_merge_keeps_activity_type(self):
+        r = self.reader([jr(recorded("activity_h-cloud_pr_merge.json"))])
+        [got] = r.activity("lkshrk/h-cloud", "refs/heads/main", self.SINCE)
+        self.assertEqual((got.actor, got.activity_type, got.before[:7], got.after[:7]),
+                         ("renovate-master[bot]", "pr_merge", "999bff9", "05394a4"))
+
+    def test_missing_activity_type_is_empty(self):
+        item = self.item("2023-11-14T22:20:00Z")
+        del item["activity_type"]
+        got = self.reader([jr([item])]).activity(REPO, "refs/heads/main", self.SINCE)
+        self.assertEqual(got[0].activity_type, "")
 
     def test_other_refs_dropped(self):
         r = self.reader([jr([self.item("2023-11-14T22:20:00Z", ref="refs/heads/main-x")])])
@@ -442,6 +693,7 @@ class ActivityTest(ReaderCase):
             [{**self.item("2023-11-14T22:20:00Z"), "ref": None}],
             [{**self.item("2023-11-14T22:20:00Z"), "before": None}],
             [{**self.item("2023-11-14T22:20:00Z"), "after": ""}],
+            [{**self.item("2023-11-14T22:20:00Z"), "activity_type": 3}],
         )
         for body in bad:
             with self.subTest(body=body), self.assertRaises(GitHubError):
@@ -521,6 +773,73 @@ class PullTest(ReaderCase):
     def test_wrong_shape_raises(self):
         with self.assertRaises(GitHubError):
             self.reader([jr({"head": {"ref": "x"}})]).pull("https://github.com/acme/app/pull/7")
+
+
+class MergedPullsTest(ReaderCase):
+    SHA = "05394a48b339dffd02103e1f2aa0113aa095c0be"
+
+    def test_recorded_renovate_merge(self):
+        r = self.reader([jr(recorded("commit_pulls_h-cloud_1519.json")), jr(recorded("pull_h-cloud_1519.json"))])
+        got = r.merged_pulls("lkshrk/h-cloud", self.SHA)
+        self.assertEqual(got, [MergedPull(True, self.SHA, "main", "lkshrk/h-cloud",
+                                          "renovate/ghcr.io-lkshrk-agent-stack-omnigent-host-1.x", "lkshrk/h-cloud",
+                                          "renovate-master[bot]", "renovate-master[bot]")])
+        urls = [q.full_url for q in self.opener.requests]
+        self.assertIn(f"/repos/lkshrk/h-cloud/commits/{self.SHA}/pulls", urls[0])
+        self.assertTrue(urls[1].endswith("/repos/lkshrk/h-cloud/pulls/1519"))
+
+    def test_several_or_no_pulls_skip_the_detail(self):
+        listed = recorded("commit_pulls_h-cloud_1519.json")
+        r = self.reader([jr(listed + listed), jr([])])
+        self.assertEqual([p.merged_by for p in r.merged_pulls("lkshrk/h-cloud", self.SHA)], ["", ""])
+        self.assertEqual(r.merged_pulls("lkshrk/h-cloud", self.SHA), [])
+        self.assertEqual(len(self.opener.requests), 2)
+
+    def test_unmerged_and_deleted_fork(self):
+        listed = recorded("commit_pulls_h-cloud_1519.json")
+        detail = {**recorded("pull_h-cloud_1519.json"), "merged_at": None, "merge_commit_sha": None, "merged_by": None}
+        detail["head"] = {**detail["head"], "repo": None}
+        [got] = self.reader([jr(listed), jr(detail)]).merged_pulls("lkshrk/h-cloud", self.SHA)
+        self.assertEqual((got.merged, got.merge_commit_sha, got.merged_by, got.head_repo), (False, "", "", ""))
+
+    def test_wrong_shape_raises(self):
+        listed = recorded("commit_pulls_h-cloud_1519.json")
+        detail = recorded("pull_h-cloud_1519.json")
+        bad = ({**detail, "base": None}, {**detail, "user": None}, {**detail, "merged_by": "x"}, [], {**detail, "merged_at": 5})
+        for body in bad:
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(listed), jr(body)]).merged_pulls("lkshrk/h-cloud", self.SHA)
+        for body in ({}, ["x"], [{"number": "1"}]):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).merged_pulls("lkshrk/h-cloud", self.SHA)
+
+    def test_error_raises(self):
+        err = urllib.error.HTTPError(API, 422, "No commit found", {}, io.BytesIO(b"{}"))
+        with self.assertRaises(GitHubError):
+            self.reader([err]).merged_pulls("lkshrk/h-cloud", self.SHA)
+
+
+class TaggerTest(ReaderCase):
+    SHA = "14300c762a6295307e64914059a0809e1d2c584d"
+
+    def test_recorded_annotated_tag(self):
+        r = self.reader([jr(recorded("tag_h-cloud_2026.11.0.json"))])
+        self.assertEqual(r.tagger("lkshrk/h-cloud", self.SHA), "h-cloud-workflow[bot]")
+        self.assertTrue(self.opener.requests[0].full_url.endswith(f"/repos/lkshrk/h-cloud/git/tags/{self.SHA}"))
+
+    def test_lightweight_tag_is_none(self):
+        err = urllib.error.HTTPError(API, 404, "Not Found", {}, io.BytesIO(b"{}"))
+        self.assertIsNone(self.reader([err]).tagger("lkshrk/h-cloud", "5a5ee096a0fa04ac3dd7934177b8b80719737dfc"))
+
+    def test_missing_tagger_is_empty(self):
+        body = {k: v for k, v in recorded("tag_h-cloud_2026.11.0.json").items() if k != "tagger"}
+        self.assertEqual(self.reader([jr(body)]).tagger("lkshrk/h-cloud", self.SHA), "")
+
+    def test_error_and_wrong_shape_raise(self):
+        err = urllib.error.HTTPError(API, 403, "no", {}, io.BytesIO(b"x"))
+        for item in (err, OSError("reset"), jr([]), jr({"tagger": "x"}), jr({"tagger": {"name": 5}})):
+            with self.subTest(item=item), self.assertRaises(GitHubError):
+                self.reader([item]).tagger("lkshrk/h-cloud", self.SHA)
 
 
 class CompareTest(ReaderCase):

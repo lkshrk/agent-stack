@@ -17,6 +17,10 @@ def load_plugin():
     return module
 
 
+def configured(**over):
+    return {**{name: "x" for name in runner.REQUIRED_ENV}, "GITHUB_RO_TOKEN_FILE": "x", **over}
+
+
 class FakeContext:
     def __init__(self):
         self.tools, self.hooks = [], []
@@ -76,7 +80,7 @@ class PluginTest(unittest.TestCase):
         self.assertIn("not configured", out["reason"])
 
     def test_handler_error_reports_running_without_retry(self):
-        env = {name: "x" for name in runner.REQUIRED_ENV}
+        env = configured()
         boom = mock.Mock(side_effect=OSError("database is locked"))
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
                 mock.patch.object(runner, "run_slice", boom):
@@ -85,16 +89,49 @@ class PluginTest(unittest.TestCase):
         self.assertIn("database is locked", out["reason"])
 
     def test_handler_reads_agent_actors(self):
-        env = {**{name: "x" for name in runner.REQUIRED_ENV}, "GITHUB_AGENT_ACTORS": "app-a[bot],app-b[bot]"}
+        env = {**configured(), "GITHUB_AGENT_ACTORS": "app-a[bot],app-b[bot]"}
         seen = mock.Mock(return_value={})
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
                 mock.patch.object(runner, "run_slice", seen):
             runner.handle({})
         self.assertEqual(seen.call_args.args[3].agents, frozenset({"app-a[bot]", "app-b[bot]"}))
-        with mock.patch.dict(os.environ, {name: "x" for name in runner.REQUIRED_ENV}, clear=True), \
+        with mock.patch.dict(os.environ, configured(), clear=True), \
                 mock.patch.object(runner, "HermesKanban"), mock.patch.object(runner, "run_slice", seen):
             runner.handle({})
         self.assertEqual(seen.call_args.args[3].agents, frozenset())
+
+    def handled_reader(self, env):
+        seen = mock.Mock(return_value={})
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
+                mock.patch.object(runner, "run_slice", seen):
+            out = json.loads(runner.handle({}))
+        return out, (seen.call_args.args[3] if seen.called else None)
+
+    def test_handler_reads_token_files_by_owner(self):
+        files = "routivo=/var/run/agent/github/review,lkshrk=/var/run/agent/github/hcloud-ro"
+        _, gh = self.handled_reader(configured(GITHUB_RO_TOKEN_FILES=files))
+        self.assertEqual(gh._token_files, {"routivo": "/var/run/agent/github/review", "lkshrk": "/var/run/agent/github/hcloud-ro"})
+        self.assertEqual(gh._token_file, "x")
+        env = configured(GITHUB_RO_TOKEN_FILES=files)
+        del env["GITHUB_RO_TOKEN_FILE"]
+        _, gh = self.handled_reader(env)
+        self.assertIsNone(gh._token_file)
+        _, gh = self.handled_reader(configured())
+        self.assertEqual((gh._token_file, gh._token_files), ("x", {}))
+
+    def test_handler_needs_a_read_token(self):
+        env = configured()
+        del env["GITHUB_RO_TOKEN_FILE"]
+        out, gh = self.handled_reader(env)
+        self.assertIsNone(gh)
+        self.assertEqual((out["state"], out["call_again"]), ("blocked", False))
+        self.assertIn("GITHUB_RO_TOKEN_FILE or GITHUB_RO_TOKEN_FILES", out["reason"])
+
+    def test_handler_rejects_malformed_token_files(self):
+        out, gh = self.handled_reader(configured(GITHUB_RO_TOKEN_FILES="routivo"))
+        self.assertIsNone(gh)
+        self.assertEqual((out["state"], out["call_again"]), ("blocked", False))
+        self.assertIn("GITHUB_RO_TOKEN_FILES", out["reason"])
 
     def test_handler_without_config_blocks_the_card(self):
         RecordingKanban.blocks = []

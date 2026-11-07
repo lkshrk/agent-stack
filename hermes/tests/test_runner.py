@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import Activity, GitHubError, PullHead
+from agent_stack_hermes.postrun import Activity, GitHubError, MergedPull, PullHead
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -147,9 +147,18 @@ class FakeOmnigent:
 
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
-                 agents=frozenset({AGENT})):
+                 agents=frozenset({AGENT}), taggers=None, merges=None, pulls=None, default="trunk"):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
+        self.taggers, self.merges, self.pulls, self.default = dict(taggers or {}), dict(merges or {}), dict(pulls or {}), default
+
+    def tagger(self, repo, sha):
+        self._call("tagger", repo, sha)
+        return self.taggers.get(sha)
+
+    def merged_pulls(self, repo, sha):
+        self._call("merged_pulls", repo, sha)
+        return list(self.merges.get(sha, ()))
 
     def release_author(self, repo, tag):
         self._call("release_author", repo, tag)
@@ -166,7 +175,7 @@ class FakeGitHub:
 
     def pull(self, pr_url):
         self._call("pull", pr_url)
-        return PullHead(BRANCH, REPO, "main", REPO, "main")
+        return self.pulls.get(pr_url, PullHead(BRANCH, REPO, "main", REPO, "main"))
 
     def changed_files(self, repo, base, head):
         self._call("changed_files", repo, base, head)
@@ -178,10 +187,10 @@ class FakeGitHub:
 
     def default_branch(self, repo):
         self._call("default_branch", repo)
-        return "trunk"
+        return self.default
 
 
-class RunnerTest(unittest.TestCase):
+class RunnerCase(unittest.TestCase):
     def setUp(self):
         self.log = []
         self.clock = Clock()
@@ -215,6 +224,8 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(block[3].startswith(reason_prefix), block[3])
         self.assertFalse(self.calls("complete"))
 
+
+class RunnerTest(RunnerCase):
     def test_first_slice_records_refs_then_session(self):
         out = self.run_slice(running(), comments=())
         names = [c[0] if c[0] != "note" else c[1].split(":")[0] for c in self.log]
@@ -608,6 +619,13 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(snapshot(), refs=(moved,), gh_fail={"release_author": GitHubError("HTTP 403", 403)})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
+    def test_workflow_tag_without_release_completes_by_tagger(self):
+        moved = {**AFTER, "refs/tags/2026.11.0": "d" * 40}
+        out = self.run_slice(snapshot(), refs=(moved,), gh={"taggers": {"d" * 40: "h-cloud-workflow[bot]"}})
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(self.calls("tagger"), [("tagger", REPO, "d" * 40)])
+        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main", "refs/tags/2026.11.0"])
+
     def test_multiple_sessions_for_card_blocks_environment(self):
         sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
         out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
@@ -767,6 +785,85 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(running(), env={})
         self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("blocked", False, None))
         self.assertFalse(self.log)
+
+
+
+RENOVATE_PR = "https://github.com/example-org/example-repo/pull/7"
+OTHER_PRS = ("https://github.com/example-org/example-repo/pull/8", "https://github.com/example-org/example-repo/pull/9",
+             "https://github.com/example-org/example-repo/pull/10")
+MERGED = "c" * 40
+
+
+def infra_result(**over):
+    entry = {"verdict": "clean", "summary": "Bumped the chart."}
+    return {
+        "status": "DONE",
+        "merged": [{"pr": RENOVATE_PR, "version": "1.2.3", **entry}],
+        "skipped": [{"pr": OTHER_PRS[0], **entry, "verdict": "high-risk"}],
+        "closed": [{"pr": OTHER_PRS[1], **entry, "verdict": "stale"}],
+        "failed": [{"pr": OTHER_PRS[2], **entry, "verdict": "relevant", "rca": "The chart dropped a value."}],
+        "vault": {"commit": None},
+        **over,
+    }
+
+
+def landed(sha=MERGED, **over):
+    fields = {"merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
+              "head_ref": "renovate/chart-1.x", "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT}
+    return MergedPull(**{**fields, **over})
+
+
+class InfraRunnerTest(RunnerCase):
+    def run_infra(self, result=None, merges=None, entries=None, pulls=None, moved=MERGED, **kw):
+        gh = {"default": "main", "merges": {MERGED: [landed()]} if merges is None else merges,
+              "activity": {"refs/heads/main": [(AGENT, "a" * 40, MERGED, "pr_merge")] if entries is None else entries},
+              "pulls": pulls or {}}
+        refs = ({**AFTER, "refs/heads/main": moved},)
+        return self.run_slice(snapshot(infra_result() if result is None else result), bundle="infra", refs=refs, gh=gh,
+                              **kw)
+
+    def test_agent_landed_renovate_pr_completes(self):
+        out = self.run_infra()
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("merged_pulls"), [("merged_pulls", REPO, MERGED)])
+        self.assertEqual([c[1] for c in self.calls("pull")], [RENOVATE_PR, *OTHER_PRS])
+        self.assertEqual(self.calls("default_branch"), [("default_branch", REPO)])
+        self.assertFalse(self.calls("pull_requests") + self.calls("changed_files"))
+        [complete] = self.calls("complete")
+        self.assertEqual((complete[3]["bundle"], complete[3]["pr_url"]), ("infra", None))
+
+    def test_agent_push_to_main_blocks(self):
+        out = self.run_infra(entries=[(AGENT, "a" * 40, MERGED, "push")])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertFalse(self.calls("merged_pulls"))
+
+    def test_agent_merge_of_non_renovate_pr_blocks(self):
+        out = self.run_infra(merges={MERGED: [landed(author="lkshrk")]})
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+
+    def test_any_result_pr_outside_the_repo_blocks(self):
+        pulls = {OTHER_PRS[1]: PullHead("renovate/x", "evil/fork", "main", REPO, "main")}
+        out = self.run_infra(pulls=pulls)
+        self.assert_blocked(out, "needs_input",
+                            f"BLOCKED{{permission}}: post-run check: {OTHER_PRS[1]}: PR head is not in {REPO}")
+
+    def test_result_pr_on_another_repo_blocks_without_fetching(self):
+        foreign = "https://github.com/evil-org/example-repo/pull/3"
+        result = infra_result(closed=[{"pr": foreign, "verdict": "stale", "summary": "Gone."}])
+        out = self.run_infra(result=result)
+        self.assert_blocked(out, "needs_input", f"BLOCKED{{permission}}: post-run check: {foreign}: PR is not in {REPO}")
+        self.assertNotIn(foreign, [c[1] for c in self.calls("pull")])
+
+    def test_blocked_infra_result_still_checks_main(self):
+        result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}
+        out = self.run_infra(result=result, entries=[(AGENT, "a" * 40, MERGED, "force_push")])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertFalse(self.calls("pull") + self.calls("pull_requests"))
+
+    def test_blocked_infra_result_passes_class_when_clean(self):
+        result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}
+        out = self.run_infra(result=result, entries=[], moved="a" * 40)
+        self.assert_blocked(out, "needs_input", "BLOCKED{decision}: Upgrade Talos?")
 
 
 if __name__ == "__main__":
