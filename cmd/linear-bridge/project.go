@@ -224,6 +224,10 @@ func (p *projector) tick(ctx context.Context) error {
 		p.resetStall()
 		return nil
 	}
+	finished := map[string]bool{}
+	for _, ev := range events {
+		finished[ev.CardID] = finished[ev.CardID] || reportKinds[ev.Kind]
+	}
 	seen := map[string]bool{}
 	errs := map[string]error{}
 	var order []string
@@ -233,7 +237,7 @@ func (p *projector) tick(ctx context.Context) error {
 			continue
 		}
 		seen[ev.CardID] = true
-		if err := p.project(ctx, ev.CardID); err != nil {
+		if err := p.project(ctx, ev.CardID, finished[ev.CardID]); err != nil {
 			errs[ev.CardID] = err
 			order = append(order, ev.CardID)
 			continue
@@ -318,7 +322,7 @@ func callWith(ctx context.Context, fn func(context.Context) error) error {
 	return fn(cctx)
 }
 
-func (p *projector) project(ctx context.Context, cardID string) error {
+func (p *projector) project(ctx context.Context, cardID string, finished bool) error {
 	var card Card
 	err := callWith(ctx, func(c context.Context) (err error) {
 		card, err = p.kanban.Card(c, cardID)
@@ -328,7 +332,7 @@ func (p *projector) project(ctx context.Context, cardID string) error {
 		return err
 	}
 	if card.Link == nil {
-		return nil
+		return p.report(ctx, card, finished)
 	}
 	p.identifiers[cardID] = card.Link.Identifier
 	key := strings.Join([]string{cardID, card.Status, strconv.FormatInt(card.RunID, 10), card.Outcome, card.BlockReason}, "|")
@@ -412,6 +416,22 @@ func (p *projector) setState(ctx context.Context, card Card, issue IssueInfo) er
 		return fmt.Errorf("set state: %w", err)
 	}
 	return nil
+}
+
+func (p *projector) report(ctx context.Context, card Card, finished bool) error {
+	if !finished {
+		return nil
+	}
+	msg, ok := runnerReport(card)
+	if !ok {
+		return nil
+	}
+	key := strings.Join([]string{card.ID, card.Status, strconv.FormatInt(card.RunID, 10), card.Outcome, card.BlockReason}, "|")
+	return p.step(key, "report", func() error {
+		cctx, cancel := context.WithTimeout(ctx, notifyTimeout)
+		defer cancel()
+		return p.notify.Notify(cctx, msg)
+	})
 }
 
 func (p *projector) alert(msg string) {

@@ -95,6 +95,21 @@ class GateInImageTest(unittest.TestCase):
         self.assertEqual(card["metadata"], {"bundle": "polly"})
         self.assertEqual(card["summary"], "done it")
         self.assertIsNone(card["link"])
+        self.assertIsNone(card["run"])
+
+    def test_runner_card_json_carries_run(self):
+        from hermes_cli import kanban_db as kb
+        from hermes_cli.kanban_db_connect import connect_closing
+
+        from agent_stack_hermes.gate import HermesKanbanAdmin
+        from agent_stack_hermes.start import card_body
+
+        with connect_closing(self.db) as conn:
+            task_id = kb.create_task(conn, title="x", body=card_body("infra", ""), assignee="omnigent-runner")
+        card = HermesKanbanAdmin(self.db).get(task_id)
+        self.assertIsNone(card["link"])
+        self.assertEqual(card["run"], {"bundle": "infra", "repo": "lkshrk/h-cloud", "ref": "main"})
+        self.assertEqual(card["assignee"], "omnigent-runner")
 
     def test_reblocked_card_in_triage_keeps_block_info(self):
         from hermes_cli import kanban_db as kb

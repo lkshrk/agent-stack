@@ -40,7 +40,11 @@ func (s *signalNotifier) Notify(ctx context.Context, text string) error {
 	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxRespBytes))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("signal send returned %d", resp.StatusCode)
+		err := fmt.Errorf("signal send returned %d", resp.StatusCode)
+		if permanentStatus(resp.StatusCode) {
+			return permanent(err)
+		}
+		return err
 	}
 	return nil
 }
