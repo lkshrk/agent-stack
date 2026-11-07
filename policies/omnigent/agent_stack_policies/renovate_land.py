@@ -11,7 +11,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from .infra_paths import MAX_PUSH_FILES, MAX_UNTRUSTED_PUSHES, RENOVATE, RENOVATE_PREFIX, agent_path_allowed
+from .infra_paths import (
+    COMPARE_FILE_CAP,
+    MAX_AGENT_MERGES,
+    MAX_CONTENT_BYTES,
+    MAX_PUSH_FILES,
+    MAX_UNTRUSTED_PUSHES,
+    RENOVATE,
+    RENOVATE_PREFIX,
+    REWRITE_BASE_STATUSES,
+    agent_path_allowed,
+)
 
 PROTOCOL_VERSION = "2025-06-18"
 TOKEN_ENV = "HCLOUD_TOKEN_FILE"
@@ -23,10 +33,7 @@ TIMEOUT_SECONDS = 30
 MAX_PAGES = 20
 MERGEABLE_TRIES = 4
 MERGEABLE_WAIT_SECONDS = 3
-COMPARE_FILE_CAP = 300
-MAX_CONTENT_BYTES = 1_000_000
 GREEN_CONCLUSIONS = frozenset({"success", "neutral", "skipped"})
-REWRITE_BASE_STATUSES = ("ahead", "diverged")
 NULL_SHA = "0" * 40
 NEXT_LINK = re.compile(r'<([^>]*)>\s*;\s*rel="next"')
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -325,13 +332,18 @@ def land(github: GitHub, repo: str, number: object, base: str = DEFAULT_BASE, re
     return {"merged": True, "pr": f"https://github.com/{repo}/pull/{number}", "head_sha": head_sha, "sha": merged["sha"]}
 
 
+class Session:
+    def __init__(self):
+        self.merges = 0
+
+
 class RpcError(Exception):
     def __init__(self, code: int, message: str):
         super().__init__(message)
         self.code = code
 
 
-def _call(params: dict, github: GitHub, repo: str, required: tuple[str, ...]) -> dict:
+def _call(params: dict, github: GitHub, repo: str, required: tuple[str, ...], session: Session) -> dict:
     if params.get("name") != TOOL["name"]:
         raise RpcError(-32602, f"unknown tool {params.get('name')!r}")
     args = params.get("arguments")
@@ -339,14 +351,20 @@ def _call(params: dict, github: GitHub, repo: str, required: tuple[str, ...]) ->
     try:
         if set(args) != {"number"}:
             raise Refused("pass only number; the repository is fixed by the bundle")
+        if session.merges >= MAX_AGENT_MERGES:
+            raise Refused(f"this session already merged {MAX_AGENT_MERGES} PRs, the most one run may merge")
         out = land(github, repo, args["number"], required=required)
+        session.merges += 1
     except Refused as exc:
         return {"content": [{"type": "text", "text": f"not merged: {exc}"}], "isError": True}
     text = f"merged {out['pr']} at head {out['head_sha']} as {out['sha']}"
     return {"content": [{"type": "text", "text": text}], "structuredContent": out, "isError": False}
 
 
-def respond(line: str, github: GitHub, repo: str, required: tuple[str, ...] = ()) -> dict | None:
+def respond(
+    line: str, github: GitHub, repo: str, required: tuple[str, ...] = (), session: Session | None = None
+) -> dict | None:
+    session = session if session is not None else Session()
     try:
         message = json.loads(line)
     except (ValueError, RecursionError):
@@ -369,7 +387,7 @@ def respond(line: str, github: GitHub, repo: str, required: tuple[str, ...] = ()
         elif method == "tools/list":
             result = {"tools": [TOOL]}
         elif method == "tools/call":
-            result = _call(params, github, repo, required)
+            result = _call(params, github, repo, required, session)
         else:
             raise RpcError(-32601, f"method {method!r} not found")
     except RpcError as exc:
@@ -387,10 +405,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     github = GitHub(os.environ.get(TOKEN_ENV) or DEFAULT_TOKEN_FILE, api=args.api)
     required = tuple(args.require_check)
+    session = Session()
     for line in sys.stdin:
         if not line.strip():
             continue
-        reply = respond(line, github, args.repo, required)
+        reply = respond(line, github, args.repo, required, session)
         if reply is not None:
             sys.stdout.write(json.dumps(reply) + "\n")
             sys.stdout.flush()

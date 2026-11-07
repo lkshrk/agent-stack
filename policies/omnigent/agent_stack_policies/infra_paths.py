@@ -22,6 +22,10 @@ AGENT_ALLOWED_ROOT = ("kubernetes", "apps")
 AGENT_ALLOWED_MIN_SEGMENTS = 5
 MAX_UNTRUSTED_PUSHES = 20
 MAX_PUSH_FILES = 50
+MAX_AGENT_MERGES = 50
+COMPARE_FILE_CAP = 300
+MAX_CONTENT_BYTES = 1_000_000
+REWRITE_BASE_STATUSES = ("ahead", "diverged")
 
 
 def protected_path(path: str) -> bool:

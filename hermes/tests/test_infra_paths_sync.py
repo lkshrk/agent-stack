@@ -14,3 +14,7 @@ class InfraPathsSyncTest(unittest.TestCase):
         self.assertEqual(infra_paths.RENOVATE_PREFIX, postrun.RENOVATE_PREFIX)
         self.assertEqual(infra_paths.MAX_UNTRUSTED_PUSHES, postrun.MAX_UNTRUSTED_PUSHES)
         self.assertEqual(infra_paths.MAX_PUSH_FILES, postrun.MAX_PUSH_FILES)
+        self.assertEqual(infra_paths.MAX_AGENT_MERGES, postrun.MAX_AGENT_MERGES)
+        self.assertEqual(infra_paths.COMPARE_FILE_CAP, postrun.COMPARE_FILE_CAP)
+        self.assertEqual(infra_paths.MAX_CONTENT_BYTES, postrun.MAX_CONTENT_BYTES)
+        self.assertEqual(infra_paths.REWRITE_BASE_STATUSES, postrun.REWRITE_BASE_STATUSES)

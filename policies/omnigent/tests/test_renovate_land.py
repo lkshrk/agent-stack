@@ -352,6 +352,24 @@ class LandTest(unittest.TestCase):
                 with self.assertRaises(Refused):
                     self.land(Fake(), number=bad)
 
+    def test_merges_per_process_are_capped(self):
+        from agent_stack_policies.infra_paths import MAX_AGENT_MERGES
+
+        github = GitHub(str(self.token_file), opener=Fake(), sleep=lambda _: None)
+        state = renovate_land.Session()
+        line = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                           "params": {"name": "land_renovate_pr", "arguments": {"number": 7}}})
+        reply = renovate_land.respond(line, github, REPO, (), state)
+        self.assertFalse(reply["result"]["isError"])
+        self.assertEqual(state.merges, 1)
+        state.merges = MAX_AGENT_MERGES
+        fake = Fake()
+        github = GitHub(str(self.token_file), opener=fake, sleep=lambda _: None)
+        reply = renovate_land.respond(line, github, REPO, (), state)
+        self.assertTrue(reply["result"]["isError"])
+        self.assertIn(str(MAX_AGENT_MERGES), reply["result"]["content"][0]["text"])
+        self.assertEqual(fake.calls, [])
+
     def test_tool_name_is_not_a_merge_tool_name(self):
         self.assertEqual(renovate_land.TOOL["name"], "land_renovate_pr")
         self.assertFalse(renovate_land.TOOL["name"].endswith("merge_pull_request"))
