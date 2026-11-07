@@ -83,7 +83,7 @@ A second run changes nothing. The disable-before-Actions order only protects a f
 3. Open the link and read the whole body: the announcement shows only an excerpt, but the whole body is published.
 4. After the announcement, the owner approves in one of two ways:
    - submit an approving review on the fork PR in GitHub, or
-   - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead.
+   - reply `approve <code>` in Signal. The approver then submits the owner's approving review on the announced commit. `reject <code>` requests changes instead. A quote reply to the announcement with just `approve` or `reject` works too.
 5. The approver publishes on its next poll, within about a minute.
 
 The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. An approving review in GitHub doesn't need the code.
@@ -181,6 +181,7 @@ Prove each of these before the first real contribution, and approve nothing real
 - [ ] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected.
 - [ ] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
 - [ ] A fork PR approved in GitHub and one approved over Signal each publish once.
+- [ ] A quote reply of just `approve` to a real announcement with a long body reaches the approver (Signal clients may truncate quoted text or name the author by UUID only).
 - [ ] A non-owner review publishes nothing, and a stale code publishes nothing.
 - [ ] A commit pushed after the review isn't published.
 - [ ] A body edit after the review is refused, and the approval is dismissed.
