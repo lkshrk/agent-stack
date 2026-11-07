@@ -13,6 +13,14 @@ Research decides — never the size of the version jump.
 Ported from the owner's Hermes skill `upgrade-h-cloud` 0.1.0; the procedure and
 rules are the owner's, only the environment differs.
 
+## When to Use
+
+- The run spec asks for an h-cloud upgrade sweep: process the open Renovate PRs
+  on `lkshrk/h-cloud`.
+- Don't use for: dependency work in other repositories; bumps Renovate has not
+  proposed (no self-discovery — central Renovate in `lkshrk/gh-ops` runs daily
+  and is the only bump source); Talos node operations beyond what a bump needs.
+
 ## Environment
 
 - **Checkout:** your working directory is a fresh h-cloud checkout of the run
@@ -82,8 +90,9 @@ rules are the owner's, only the environment differs.
      Renovate branch so bump and fix land atomically (`git switch -c <branch>
      origin/<branch>`, edit, commit), then merge. Prefer fixing runtime config
      over deferring (e.g. an image that newly requires env vars gets the env
-     vars, not a deferral). A fix that needs a change outside the agent's
-     limits (the bundle instructions list them) turns the PR into a skip.
+     vars, not a deferral). A fix that needs you to author a change in a
+     protected path or outside `kubernetes/apps/<ns>/<app>/` (the bundle
+     instructions list the limits) turns the PR into a skip.
    - `high-risk` (datapath flips, irreversible migrations, anything on the
      Do-Not-Repeat list) → do not merge and **do not close**: skipped PRs are
      never closed. Comment the skip reason, list them in `skipped`; an open
@@ -92,18 +101,26 @@ rules are the owner's, only the environment differs.
      flux-operator tag + flux-instance tag + `distribution.artifact` version
      + `bootstrap/helmfile.d/01-apps.yaml`; Cilium OCIRepository + bootstrap
      helmfile; rook-ceph operator + cluster tags; OpenHands chart PR first
-     (wait for the migrate Job to succeed), then the image PR. A coupled set
-     that touches a protected path (flux-system, kube-system, bootstrap) is
-     skipped as a whole.
-5. **Validate and merge.** `./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets --no-progress`
-   (offline flate validation) must pass. Strictly one bump per push — a failing
-   bump must revert cleanly. Before each push run
-   `/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/<branch> HEAD`;
+     (wait for the migrate Job to succeed), then the image PR. Renovate's
+     own changes in protected paths (flux-operator/flux-instance, Cilium,
+     bootstrap helmfiles) are mergeable when you add nothing there; skip the
+     set as a whole only when a member needs a change you would have to
+     author in a protected path, e.g. a coupled version Renovate didn't bump.
+5. **Validate and merge.** Offline flate validation must pass, in CI's
+   changed-only mode: `git fetch origin main`, `git worktree add --detach /tmp/flate-orig origin/main`
+   (once; `git -C /tmp/flate-orig checkout --detach origin/main` to refresh), then
+   `./scripts/flate-test.sh --path ./kubernetes/flux/cluster --path-orig /tmp/flate-orig/kubernetes/flux/cluster --allow-missing-secrets --no-progress`.
+   Drop `--path-orig` (full mode, as CI does) when the PR changes `.mise.toml`,
+   `.github/workflows/flate.yaml` or `scripts/flate-test.sh`. Strictly one bump
+   per push — a failing bump must revert cleanly. Before each push run
+   `/opt/venv/bin/python3 -I -m agent_stack_policies.manifests_cli origin/<branch> HEAD`;
    push with `git push origin HEAD:<branch>` only when it prints `ok`, then
-   wait for the PR's checks. Merge with the `land_renovate_pr` tool (`number`
-   only); it squash-merges the verified head and returns the merge SHA, which
-   is the "close PR" step. When it refuses, read the reason: wait for pending
-   checks, fix a failing one on the branch, or skip the PR.
+   wait for the PR's checks (`gh pr checks <n> -R lkshrk/h-cloud --watch`).
+   Merge with the `land_renovate_pr` tool (`number` only); it squash-merges the
+   verified head and returns the merge SHA, which is the "close PR" step. When
+   it refuses, read the reason: wait for pending checks with `gh pr checks
+   --watch` before calling it again (three identical calls in a row are
+   denied), fix a failing one on the branch, or skip the PR.
 6. **Health gate (mandatory, per merge).** Request a reconcile of the source
    and the affected Kustomization (`flux reconcile ks <name> -n <namespace> --with-source`;
    an app's Kustomization lives in its app namespace, e.g. `litellm-proxy` in `ai`),

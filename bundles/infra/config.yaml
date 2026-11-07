@@ -33,30 +33,53 @@ prompt: |
     `kubernetes/apps/kube-system/**`, `kubernetes/flux/**`, `.github/**`,
     `talos/**`, any `*.sops.yaml` or any `ks.yaml`. Outside the checkout you
     write only the knowledge vault (`~/knowledge`) and `/tmp`.
-  - Only `.yaml`, `.yml`, `.json` and `.md` files may change. Added or
-    changed documents must be workloads, Service, ConfigMap, PVC, Ingress,
-    HTTPRoute, PDB, HPA, monitoring CRs, an existing HelmRelease or a kustomize
-    Kustomization; no new service accounts, host access, privileges or Secret
-    references, no namespace changes, and a HelmRelease keeps its chart, source,
-    post-renderers, valuesFrom and its rbac, serviceAccount, secret and
-    extra-manifest values. A kustomization may only change `images` and add
-    local resources. `policies/README.md` in agent-stack, Post-run check, has
-    the full rules.
-  - A PR that needs any change outside these limits is skipped: leave it
+  - Only `.yaml`, `.yml`, `.json` and `.md` files may change, as regular
+    files. A file may not contain CR, NEL, LS or PS characters, YAML tags or
+    directives, merge keys (`<<`) or duplicate keys, and every document is a
+    mapping. Added or changed documents must be Deployment, StatefulSet,
+    DaemonSet, Job, CronJob, Service, ConfigMap, PersistentVolumeClaim,
+    Ingress, HTTPRoute, PodDisruptionBudget, HorizontalPodAutoscaler,
+    ServiceMonitor, PodMonitor, PrometheusRule, an existing HelmRelease or a
+    kustomize Kustomization; other documents stay unchanged and nothing is
+    removed. No new or changed service account fields, host access,
+    privileges, security contexts (`runAsUser`, `runAsGroup`, `fsGroup` stay
+    integers of at least 1), node names, sysctls or priority classes; no new
+    Secret or credential reference (any key containing `secret`,
+    `imagePullSecrets`, auth blocks, csi/nfs/projected token volumes); a new
+    document sets no `metadata.namespace`. A HelmRelease keeps `chart`,
+    `chartRef`, `postRenderers`, `serviceAccountName`, `targetNamespace`,
+    `storageNamespace`, `kubeConfig`, `valuesFrom` and every values key about
+    rbac, service accounts, cluster roles, extra objects or manifests, host
+    network or paths, privileges and secrets; ConfigMap data that parses as
+    YAML follows the same rules. A PVC keeps `volumeName`, `dataSource`,
+    `dataSourceRef` and `storageClassName`. A kustomization may only change
+    `images` and add local `./<file>.yaml` resources.
+  - These limits apply to what you author. Renovate's own changes, also in
+    protected paths, are fine to merge when you add nothing there. A PR that
+    needs you to change anything outside these limits is skipped: leave it
     open, comment the reason, and list it in `skipped` for the owner.
   - You push only with `git push origin HEAD:renovate/<branch>` to the PR's
     own Renovate branch, one bump per push, never forced, never to `main`,
     never tags. Before every push run
-    `/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/<renovate branch> HEAD`
+    `/opt/venv/bin/python3 -I -m agent_stack_policies.manifests_cli origin/<renovate branch> HEAD`
     in the checkout and push only when it prints `ok`.
   - You merge only through the `land_renovate_pr` tool, never with `gh pr
     merge`, the merge API, GraphQL or a script. It merges Renovate PRs on
-    `main` whose checks are green and whose non-Renovate pushes pass the
-    same checks; when it refuses, fix the cause or skip the PR.
+    `main` whose checks are green (`Flate - Success` and `Verify SOPS Files
+    Are Encrypted` must succeed) and whose non-Renovate pushes pass the same
+    checks; when it refuses, fix the cause or skip the PR. Between two calls
+    for the same PR run `gh pr checks <n> -R lkshrk/h-cloud --watch`: three
+    identical calls in a row are denied.
   - gh: reads, `gh pr comment` and `gh pr close` (without
-    `--delete-branch`); nothing else mutates GitHub.
+    `--delete-branch`), on `lkshrk/h-cloud` only; nothing else mutates
+    GitHub. Never read files under `/agent-secrets`; gh and git read their
+    tokens themselves.
   - The cluster is read-only for you apart from Flux reconcile requests:
-    no apply, edit, delete, scale, restart or exec.
+    kubectl get, describe, logs, events, wait, auth, top, version,
+    api-resources and explain; flux reconcile (without `--force` or
+    `--reset`), get, logs, trace, tree, diff, stats, version and check; helm
+    template, show, pull, search, history, status, get, list, version, repo
+    add|update and dependency build.
 
   Shell: one plain command or pipeline per call. A command repeated with
   identical arguments three times in a row is denied, so wait inside one
@@ -98,7 +121,8 @@ tools:
   renovate_land:
     type: mcp
     command: /opt/venv/bin/python3
-    args: ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud"]
+    args: ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud",
+           "--require-check", "Flate - Success", "--require-check", "Verify SOPS Files Are Encrypted"]
 
 guardrails:
   ask_timeout: 300
@@ -138,6 +162,7 @@ guardrails:
             - "kubernetes/flux/**"
             - ".github/**"
             - "talos/**"
+            - "**/*.sops.yaml"
             - "**/ks.yaml"
           allow_only:
             - "kubernetes/apps/*/*/**/*"
@@ -149,6 +174,20 @@ guardrails:
       function:
         path: agent_stack_policies.infra_vcs.infra_vcs
         arguments: {}
+    infra_cluster:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.infra_cluster.infra_cluster
+        arguments: {}
+    no_secret_reads:
+      type: function
+      on: [tool_call]
+      function:
+        path: agent_stack_policies.secret_files.no_secret_reads
+        arguments:
+          secret_dir: /agent-secrets
+          token_file: /agent-secrets/github/hcloud
     no_process_secrets:
       type: function
       on: [tool_call]

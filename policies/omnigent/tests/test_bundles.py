@@ -807,7 +807,21 @@ CASES += [
             ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets --no-progress"}, "ALLOW"),
             ("Bash", {"command": "rg -n litellm kubernetes/apps/kube-system kubernetes/flux"}, "ALLOW"),
             ("Bash", {"command": "cat kubernetes/apps/ai/litellm-proxy/ks.yaml"}, "ALLOW"),
-            ("Bash", {"command": "/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/renovate/litellm HEAD"}, "ALLOW"),
+            ("Bash", {"command": "/opt/venv/bin/python3 -I -m agent_stack_policies.manifests_cli origin/renovate/litellm HEAD"}, "ALLOW"),
+            ("Bash", {"command": "git worktree add --detach /tmp/flate-orig origin/main"}, "ALLOW"),
+            ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --path-orig /tmp/flate-orig/kubernetes/flux/cluster --allow-missing-secrets --no-progress"}, "ALLOW"),
+            ("Bash", {"command": "cat /agent-secrets/github/hcloud"}, "DENY"),
+            ("Bash", {"command": "GH_TOKEN=$(cat /agent-secrets/github/knowledge) gh api user"}, "DENY"),
+            ("Bash", {"command": "gh auth token"}, "DENY"),
+            ("Bash", {"command": "kubectl get hr -A"}, "ALLOW"),
+            ("Bash", {"command": "kubectl delete pod -n ai litellm-proxy-0"}, "DENY"),
+            ("Bash", {"command": "kubectl rollout restart deploy/litellm-proxy -n ai"}, "DENY"),
+            ("Bash", {"command": "kubectl annotate hr litellm-proxy -n ai reconcile.fluxcd.io/requestedAt=now"}, "DENY"),
+            ("Bash", {"command": "flux suspend hr litellm-proxy -n ai"}, "DENY"),
+            ("Bash", {"command": "flux reconcile hr litellm-proxy -n ai --force"}, "DENY"),
+            ("Bash", {"command": "helm upgrade litellm-proxy oci://x -n ai"}, "DENY"),
+            ("Bash", {"command": "helm rollback litellm-proxy 3 -n ai"}, "DENY"),
+            ("Bash", {"command": "git remote -v set-url origin https://github.com/lkshrk/other.git"}, "DENY"),
             ("Bash", {"command": "git push origin HEAD:renovate/litellm-proxy-1.x"}, "ALLOW"),
             ("Bash", {"command": "git push origin HEAD:main"}, "DENY"),
             ("Bash", {"command": "git push origin HEAD:feat/x"}, "DENY"),
@@ -1433,6 +1447,17 @@ class ContributionPromptTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
+class InfraConfigTest(unittest.TestCase):
+    def test_write_deny_is_the_post_run_protected_paths(self):
+        import yaml
+
+        from agent_stack_policies.infra_paths import PROTECTED_PATHS
+
+        policies = yaml.safe_load((BUNDLES / "infra" / "config.yaml").read_text())["guardrails"]["policies"]
+        self.assertEqual(policies["infra_paths"]["function"]["arguments"]["write_deny"], list(PROTECTED_PATHS))
+
+
+@unittest.skipUnless(HAS_YAML, "needs PyYAML, which the Omnigent images and CI provide")
 class GitDirPathGuardTest(unittest.TestCase):
     def test_every_writer_path_guard_denies_git_internals(self):
         import yaml
@@ -2045,10 +2070,12 @@ class BundleVerdictTest(unittest.TestCase):
             ("Bash", {"command": "helm show chart oci://ghcr.io/berriai/litellm-helm --version 1.2.3"}),
             ("Bash", {"command": "git switch -c renovate/litellm-proxy-1.x origin/renovate/litellm-proxy-1.x"}),
             ("Edit", {"file_path": HCLOUD_APP, "old_string": "a", "new_string": "b"}),
-            ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets --no-progress"}),
+            ("Bash", {"command": "git fetch origin main"}),
+            ("Bash", {"command": "git worktree add --detach /tmp/flate-orig origin/main"}),
+            ("Bash", {"command": "./scripts/flate-test.sh --path ./kubernetes/flux/cluster --path-orig /tmp/flate-orig/kubernetes/flux/cluster --allow-missing-secrets --no-progress"}),
             ("Bash", {"command": f"git add {HCLOUD_APP}"}),
             ("Bash", {"command": 'git commit -m "fix(litellm-proxy): set the new env var"'}),
-            ("Bash", {"command": "/opt/venv/bin/python3 -m agent_stack_policies.manifests_cli origin/renovate/litellm-proxy-1.x HEAD"}),
+            ("Bash", {"command": "/opt/venv/bin/python3 -I -m agent_stack_policies.manifests_cli origin/renovate/litellm-proxy-1.x HEAD"}),
             ("Bash", {"command": "git push origin HEAD:renovate/litellm-proxy-1.x"}),
             ("Bash", {"command": "gh pr checks 1519 -R lkshrk/h-cloud --watch --fail-fast"}),
             ("renovate_land__land_renovate_pr", {"number": 1519}),
@@ -2078,12 +2105,16 @@ class BundleVerdictTest(unittest.TestCase):
         self.assertEqual(spec.guardrails.ask_timeout, 300)
         servers = sorted((m.name, m.command, m.args) for m in spec.mcp_servers)
         self.assertEqual(servers, [
-            ("renovate_land", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud"]),
+            ("renovate_land", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.renovate_land", "--repo", "lkshrk/h-cloud",
+                                                         "--require-check", "Flate - Success",
+                                                         "--require-check", "Verify SOPS Files Are Encrypted"]),
             ("result_check", "/opt/venv/bin/python3", ["-I", "-m", "agent_stack_policies.mcp"]),
         ])
         self.assertEqual([s.name for s in spec.skills], ["upgrade-h-cloud"])
         limits = [p.function.arguments for p in agent_policies(spec) if p.name == "max_tool_calls_per_session"]
         self.assertEqual(limits, [{"limit": 1500}])
+        secrets = [p.function.arguments for p in agent_policies(spec) if p.name == "no_secret_reads"]
+        self.assertEqual(secrets, [{"secret_dir": "/agent-secrets", "token_file": "/agent-secrets/github/hcloud"}])
 
     def test_path_guard_exactly_on_writing_agents(self):
         from omnigent.spec import load
