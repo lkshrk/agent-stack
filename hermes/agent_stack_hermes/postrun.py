@@ -438,8 +438,11 @@ class GitHubReader:
         size = body.get("size")
         if not isinstance(size, int) or size > MAX_CONTENT_BYTES or body.get("encoding") != "base64":
             return Content("larger than 1 MB")
+        content = body.get("content")
+        if not isinstance(content, str):
+            raise GitHubError("file content missing or not a string")
         try:
-            data = base64.b64decode(_optional_str(body.get("content"), "content"), validate=False)
+            data = base64.b64decode(content, validate=False)
         except (ValueError, TypeError):
             raise GitHubError("file content is not base64") from None
         if len(data) != size:

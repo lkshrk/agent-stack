@@ -1284,6 +1284,12 @@ class FileContentTest(ReaderCase):
         for payload, state in cases:
             self.assertEqual(self.reader([jr(payload)]).file_content(REPO, "a.yaml", "x").state, state)
 
+    def test_zero_byte_file_is_present_and_empty(self):
+        body = {**recorded("contents_h-cloud_servicemonitor.json"), "size": 0, "content": ""}
+        self.assertEqual(self.reader([jr(body)]).file_content(REPO, "a.yaml", "x"), Content("present", b""))
+        with self.assertRaises(GitHubError):
+            self.reader([jr({**body, "content": None, "size": 3})]).file_content(REPO, "a.yaml", "x")
+
     def test_size_mismatch_or_error_raises(self):
         body = recorded("contents_h-cloud_servicemonitor.json")
         err = urllib.error.HTTPError(API, 403, "no", {}, io.BytesIO(b"x"))
