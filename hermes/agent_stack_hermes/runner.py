@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
-from agent_stack_hermes.postrun import PR_URL, GitHubReader, agent_actors, token_files, violations
+from agent_stack_hermes.postrun import PR_URL, GitHubReader, InfraReads, agent_actors, token_files, violations
 from agent_stack_hermes.retry import OutageClock, unreachable
 from agent_stack_hermes.runspec import (
     INVALID_RESULT,
@@ -52,6 +52,7 @@ TOOL_SCHEMA = {
 }
 MAX_REASON_CHARS = 300
 ACTIVITY_SLACK_SECONDS = 60
+MAX_RESULT_PRS = 100
 
 
 @dataclass(frozen=True)
@@ -271,13 +272,35 @@ def _on_repo(url: str, repo: str) -> bool:
     return bool(match) and f"{match.group(1)}/{match.group(2)}".lower() == repo.lower()
 
 
+def _infra_reads(gh, repo: str, default: str) -> InfraReads:
+    return InfraReads(
+        lambda sha: gh.merged_pulls(repo, sha),
+        lambda number: gh.pull_commits(repo, number),
+        lambda sha: gh.commit_files(repo, sha),
+        lambda sha: gh.tag(repo, sha),
+        lambda commit: gh.reachable(repo, commit, default),
+    )
+
+
+def _infra_notes(result: dict, pulls: dict, landed: list[dict]) -> list[str]:
+    listed = result.get("merged")
+    entries: list = listed if isinstance(listed, list) else []
+    merged = [e["pr"] for e in entries if isinstance(e, dict) and isinstance(e.get("pr"), str)]
+    known = {url.lower() for url in merged}
+    notes = [f"{r['pr']} was merged by the agent but is not in merged[]" for r in landed if r["pr"].lower() not in known]
+    notes += [f"{url} is in merged[] but GitHub shows it unmerged" for url in merged if url in pulls and not pulls[url].merged]
+    return notes
+
+
 def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str, ...], omni, gh) -> _Verdict:
     result = outcome.result if isinstance(outcome.result, dict) else {}
     infra = spec.bundle == "infra"
     pr_url = None if infra else _pr_url(result, omni, session_id)
     at, before = _refs_before(comments)
-    pull = gh.pull(pr_url) if pr_url else None
     urls = _infra_prs(result) if infra else []
+    if len(urls) > MAX_RESULT_PRS:
+        return _blocked("permission", f"post-run check: too many PRs in the result ({len(urls)} > {MAX_RESULT_PRS})")
+    pull = gh.pull(pr_url) if pr_url else None
     foreign = [f"{url}: PR is not in {spec.repo}" for url in urls if not _on_repo(url, spec.repo)]
     pulls = {url: gh.pull(url) for url in urls if _on_repo(url, spec.repo)}
     files = gh.changed_files(spec.repo, pull.base_ref, pull.head_ref) if pull and spec.bundle == "documenter" else []
@@ -288,15 +311,19 @@ def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str
         default = gh.default_branch(spec.repo)
         branches = (spec.ref, default)
     since = at - ACTIVITY_SLACK_SECONDS
+    landed: list[dict] = []
     found = foreign + violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
                                  lambda ref: gh.activity(spec.repo, ref, since),
                                  lambda tag: gh.release_author(spec.repo, tag), gh.agents, branches,
-                                 tagger=lambda sha: gh.tagger(spec.repo, sha),
-                                 merged=lambda sha: gh.merged_pulls(spec.repo, sha), default=default, pulls=pulls)
+                                 infra=_infra_reads(gh, spec.repo, default) if infra and default else None,
+                                 default=default, pulls=pulls, observed=landed)
     if found:
         return _blocked("permission", "post-run check: " + "; ".join(found))
     if not outcome.done:
         return _blocked(outcome.block_class or "environment", outcome.reason)
+    post_run: str | dict = "ok"
+    if infra:
+        post_run = {"status": "ok", "landed": landed, "notes": _infra_notes(result, pulls, landed)}
     metadata = {
         "omnigent_session_id": session_id,
         "bundle": spec.bundle,
@@ -304,7 +331,7 @@ def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str
         "result": outcome.result,
         "gaps": result.get("gaps") or [],
         "doc_gaps": result.get("doc_gaps") or [],
-        "post_run": "ok",
+        "post_run": post_run,
     }
     summary = f"{spec.bundle} {outcome.reason}" + (f": {pr_url}" if pr_url else "")
     return _Verdict("completed", summary, metadata=metadata)

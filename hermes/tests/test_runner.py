@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import Activity, GitHubError, MergedPull, PullHead
+from agent_stack_hermes.postrun import Activity, GitHubError, MergedPull, PullCommit, PullHead, TagObject
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -147,14 +147,28 @@ class FakeOmnigent:
 
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
-                 agents=frozenset({AGENT}), taggers=None, merges=None, pulls=None, default="trunk"):
+                 agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
+                 commit_files=None, reachable=()):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
-        self.taggers, self.merges, self.pulls, self.default = dict(taggers or {}), dict(merges or {}), dict(pulls or {}), default
+        self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
+        self.commits, self.commit_file_map, self.reachable_commits = dict(commits or {}), dict(commit_files or {}), set(reachable)
 
-    def tagger(self, repo, sha):
-        self._call("tagger", repo, sha)
-        return self.taggers.get(sha)
+    def tag(self, repo, sha):
+        self._call("tag", repo, sha)
+        return self.tags.get(sha)
+
+    def reachable(self, repo, commit, branch):
+        self._call("reachable", repo, commit, branch)
+        return commit in self.reachable_commits
+
+    def pull_commits(self, repo, number):
+        self._call("pull_commits", repo, number)
+        return list(self.commits.get(number, ()))
+
+    def commit_files(self, repo, sha):
+        self._call("commit_files", repo, sha)
+        return list(self.commit_file_map.get(sha, ()))
 
     def merged_pulls(self, repo, sha):
         self._call("merged_pulls", repo, sha)
@@ -175,7 +189,7 @@ class FakeGitHub:
 
     def pull(self, pr_url):
         self._call("pull", pr_url)
-        return self.pulls.get(pr_url, PullHead(BRANCH, REPO, "main", REPO, "main"))
+        return self.pulls.get(pr_url, PullHead(BRANCH, REPO, "main", REPO, "main", True))
 
     def changed_files(self, repo, base, head):
         self._call("changed_files", repo, base, head)
@@ -619,12 +633,13 @@ class RunnerTest(RunnerCase):
         out = self.run_slice(snapshot(), refs=(moved,), gh_fail={"release_author": GitHubError("HTTP 403", 403)})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
-    def test_workflow_tag_without_release_completes_by_tagger(self):
+    def test_polly_tag_without_release_stays_unattributed(self):
         moved = {**AFTER, "refs/tags/2026.11.0": "d" * 40}
-        out = self.run_slice(snapshot(), refs=(moved,), gh={"taggers": {"d" * 40: "h-cloud-workflow[bot]"}})
-        self.assertEqual(out["state"], "completed")
-        self.assertEqual(self.calls("tagger"), [("tagger", REPO, "d" * 40)])
-        self.assertEqual([c[2] for c in self.calls("activity")], ["refs/heads/main", "refs/tags/2026.11.0"])
+        gh = {"tags": {"d" * 40: TagObject("h-cloud-workflow[bot]", "e" * 40)}, "reachable": {"e" * 40}}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
+        self.assertFalse(self.calls("tag") + self.calls("reachable"))
 
     def test_multiple_sessions_for_card_blocks_environment(self):
         sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
@@ -808,17 +823,18 @@ def infra_result(**over):
 
 
 def landed(sha=MERGED, **over):
-    fields = {"merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
+    fields = {"number": 7, "merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
               "head_ref": "renovate/chart-1.x", "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT}
     return MergedPull(**{**fields, **over})
 
 
 class InfraRunnerTest(RunnerCase):
-    def run_infra(self, result=None, merges=None, entries=None, pulls=None, moved=MERGED, **kw):
+    def run_infra(self, result=None, merges=None, entries=None, pulls=None, moved=MERGED, gh_extra=None, extra_refs=None,
+                  **kw):
         gh = {"default": "main", "merges": {MERGED: [landed()]} if merges is None else merges,
               "activity": {"refs/heads/main": [(AGENT, "a" * 40, MERGED, "pr_merge")] if entries is None else entries},
-              "pulls": pulls or {}}
-        refs = ({**AFTER, "refs/heads/main": moved},)
+              "pulls": pulls or {}, **(gh_extra or {})}
+        refs = ({**AFTER, "refs/heads/main": moved, **(extra_refs or {})},)
         return self.run_slice(snapshot(infra_result() if result is None else result), bundle="infra", refs=refs, gh=gh,
                               **kw)
 
@@ -853,6 +869,57 @@ class InfraRunnerTest(RunnerCase):
         out = self.run_infra(result=result)
         self.assert_blocked(out, "needs_input", f"BLOCKED{{permission}}: post-run check: {foreign}: PR is not in {REPO}")
         self.assertNotIn(foreign, [c[1] for c in self.calls("pull")])
+
+    def test_landed_merges_and_agent_commits_go_into_the_metadata(self):
+        out = self.run_infra(gh_extra={"commits": {7: [PullCommit("f" * 40, AGENT, "web-flow")]},
+                                       "commit_files": {"f" * 40: ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}})
+        self.assertEqual(out["state"], "completed", out)
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"], {
+            "status": "ok",
+            "landed": [{"pr": RENOVATE_PR, "merge_commit_sha": MERGED,
+                        "agent_commits": [{"sha": "f" * 40, "files": ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}]}],
+            "notes": [],
+        })
+
+    def test_agent_commit_on_protected_path_blocks(self):
+        out = self.run_infra(gh_extra={"commits": {7: [PullCommit("f" * 40, AGENT, "web-flow")]},
+                                       "commit_files": {"f" * 40: ["talos/talconfig.yaml"]}})
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertIn(f"{RENOVATE_PR}: agent commit {'f' * 40} touches protected path talos/talconfig.yaml",
+                      self.calls("block")[0][3])
+
+    def test_result_mismatches_are_notes_not_violations(self):
+        result = infra_result(merged=[{"pr": OTHER_PRS[0], "verdict": "clean", "summary": "Bumped."}],
+                              skipped=[{"pr": RENOVATE_PR, "verdict": "high-risk", "summary": "Left."}])
+        pulls = {OTHER_PRS[0]: PullHead("renovate/y", REPO, "main", REPO, "main", False)}
+        out = self.run_infra(result=result, pulls=pulls)
+        self.assertEqual(out["state"], "completed", out)
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"]["notes"], [
+            f"{RENOVATE_PR} was merged by the agent but is not in merged[]",
+            f"{OTHER_PRS[0]} is in merged[] but GitHub shows it unmerged",
+        ])
+
+    def test_too_many_result_prs_block_without_lookups(self):
+        many = [{"pr": f"https://github.com/{REPO}/pull/{n}", "verdict": "stale", "summary": "Old."}
+                for n in range(100, 100 + runner.MAX_RESULT_PRS)]
+        out = self.run_infra(result=infra_result(closed=many))
+        self.assert_blocked(out, "needs_input", f"BLOCKED{{permission}}: post-run check: too many PRs in the result")
+        self.assertFalse(self.calls("pull"))
+
+    def test_result_pr_owner_case_differs_from_the_spec(self):
+        body = render_card_body(None, RunSpec("infra", "Example-Org/Example-Repo", "main", "upgrade"), "text")
+        out = self.run_infra(body=body)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual([c[1] for c in self.calls("pull")], [RENOVATE_PR, *OTHER_PRS])
+
+    def test_monthly_workflow_tag_completes(self):
+        tag = {"refs/tags/2026.11.0": "d" * 40}
+        gh_extra = {"tags": {"d" * 40: TagObject("h-cloud-workflow[bot]", "e" * 40)}, "reachable": {"e" * 40}}
+        out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("reachable"), [("reachable", REPO, "e" * 40, "main")])
 
     def test_blocked_infra_result_still_checks_main(self):
         result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}

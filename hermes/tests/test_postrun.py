@@ -13,8 +13,13 @@ from agent_stack_hermes.postrun import (
     Activity,
     GitHubError,
     GitHubReader,
+    PROTECTED_PATHS,
+    PULLS_RETRY_SECONDS,
+    InfraReads,
     MergedPull,
+    PullCommit,
     PullHead,
+    TagObject,
     agent_actors,
     token_files,
     violations,
@@ -71,7 +76,8 @@ class ReaderCase(unittest.TestCase):
 
     def reader(self, responses):
         self.opener = FakeOpener(responses)
-        return GitHubReader(self.token_file, opener=self.opener)
+        self.sleeps = []
+        return GitHubReader(self.token_file, opener=self.opener, sleep=self.sleeps.append)
 
 
 AGENT = "h-cloud-npa[bot]"
@@ -95,19 +101,12 @@ class Lookup:
         return [e for e in self.entries if e.ref == ref]
 
 
-class Merges:
-    def __init__(self, **pulls):
-        self.pulls = pulls
-        self.asked = []
-
-    def __call__(self, sha):
-        self.asked.append(sha)
-        return list(self.pulls.get(sha, ()))
+RENOVATE = "renovate-master[bot]"
 
 
 def renovate_pull(sha="m", **over):
-    fields = {"merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO, "head_ref": "renovate/x-1.x",
-              "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT}
+    fields = {"number": 7, "merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
+              "head_ref": "renovate/x-1.x", "head_repo": REPO, "author": RENOVATE, "merged_by": AGENT}
     return MergedPull(**{**fields, **over})
 
 
@@ -125,21 +124,45 @@ class Releases:
         return self.authors.get(tag)
 
 
-class Taggers(Releases):
-    pass
+class FakeInfra:
+    def __init__(self, pulls=None, commits=None, files=None, tags=None, reachable=()):
+        self.pulls, self.commits, self.files = pulls or {}, commits or {}, files or {}
+        self.tags, self.reachable_commits = tags or {}, set(reachable)
+        self.asked = []
+
+    def reads(self):
+        return InfraReads(self.merged, self.pull_commits, self.commit_files, self.tag, self.reachable)
+
+    def merged(self, sha):
+        self.asked.append(("merged", sha))
+        return list(self.pulls.get(sha, ()))
+
+    def pull_commits(self, number):
+        self.asked.append(("commits", number))
+        return list(self.commits.get(number, [PullCommit("r1", RENOVATE, "web-flow")]))
+
+    def commit_files(self, sha):
+        self.asked.append(("files", sha))
+        return list(self.files.get(sha, ()))
+
+    def tag(self, sha):
+        self.asked.append(("tag", sha))
+        return self.tags.get(sha)
+
+    def reachable(self, commit):
+        self.asked.append(("reachable", commit))
+        return commit in self.reachable_commits
 
 
 class ViolationsTest(unittest.TestCase):
     base = {"refs/heads/main": "a", "refs/heads/feat/x": "b", "refs/tags/v1": "t"}
 
     def check(self, after, before=None, pull=HEAD, files=(), bundle="coder", lookup=None, agents=AGENTS, branches=(),
-              releases=None, taggers=None):
+              releases=None):
         self.lookup = lookup or Lookup()
         self.releases = releases or Releases()
-        self.taggers = taggers or Taggers()
         before = self.base if before is None else before
-        return violations(bundle, REPO, before, after, pull, list(files), self.lookup, self.releases, agents, branches,
-                          tagger=self.taggers)
+        return violations(bundle, REPO, before, after, pull, list(files), self.lookup, self.releases, agents, branches)
 
     def test_head_branch_move_allowed(self):
         self.assertEqual(self.check({**self.base, "refs/heads/feat/x": "c"}), [])
@@ -230,47 +253,24 @@ class ViolationsTest(unittest.TestCase):
                 self.assertEqual(out, ["tag moved: refs/tags/v1"])
         self.assertEqual(releases.asked, [])
 
-    def test_tag_without_release_or_tagger_is_unattributed(self):
-        out = self.check({**self.base, "refs/tags/v2": "t2"})
-        self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
-        asked = (self.releases.asked, self.lookup.asked, self.taggers.asked)
-        self.assertEqual(asked, (["v2"], [MAIN, "refs/tags/v2"], ["t2"]))
+    def test_tag_without_release_is_unattributed(self):
+        lookup = Lookup(entry("refs/tags/2026.11.0", "github-actions[bot]", NULL_SHA, "t2"))
+        out = self.check({**self.base, "refs/tags/2026.11.0": "t2"}, lookup=lookup)
+        self.assertEqual(out, ["ref moved (unattributed): refs/tags/2026.11.0"])
+        self.assertEqual((self.releases.asked, lookup.asked), (["2026.11.0"], [MAIN]))
 
-    def test_tag_without_release_attributed_by_activity(self):
-        lookup = Lookup(entry("refs/tags/v2", "github-actions[bot]", NULL_SHA, "t2"))
-        self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup), [])
-        self.assertEqual(self.taggers.asked, [])
-
-    def test_tag_created_by_agent_per_activity_is_violation(self):
-        lookup = Lookup(entry("refs/tags/v2", AGENT, NULL_SHA, "t2"))
-        out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup, taggers=Taggers(t2="lkshrk"))
-        self.assertEqual(out, ["ref moved by agent: refs/tags/v2"])
-
-    def test_tag_activity_not_reaching_the_tag_is_unattributed(self):
-        for actor in ("github-actions[bot]", ""):
-            lookup = Lookup(entry("refs/tags/v2", actor, NULL_SHA, "t9"))
-            out = self.check({**self.base, "refs/tags/v2": "t2"}, lookup=lookup, taggers=Taggers(t2="lkshrk"))
-            self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"], actor)
-
-    def test_tag_without_release_attributed_by_tagger(self):
-        taggers = Taggers(t2="h-cloud-workflow[bot]")
-        self.assertEqual(self.check({**self.base, "refs/tags/v2": "t2"}, taggers=taggers), [])
-        self.assertEqual(taggers.asked, ["t2"])
-
-    def test_tag_tagged_by_agent_is_violation(self):
-        out = self.check({**self.base, "refs/tags/v2": "t2"}, taggers=Taggers(t2="H-Cloud-NPA[bot]"))
-        self.assertEqual(out, ["ref moved by agent: refs/tags/v2"])
-
-    def test_moved_tag_is_violation_despite_tagger(self):
-        out = self.check({**self.base, "refs/tags/v1": "t2"}, taggers=Taggers(t2="h-cloud-workflow[bot]"))
-        self.assertEqual(out, ["tag moved: refs/tags/v1"])
-        self.assertEqual(self.taggers.asked, [])
+    def test_non_infra_ignores_infra_reads_for_tags(self):
+        reads = FakeInfra(tags={"t2": TagObject("h-cloud-workflow[bot]", "c1")}, reachable={"c1"})
+        for bundle in ("polly", "documenter", "planner"):
+            self.lookup = Lookup()
+            out = violations(bundle, REPO, self.base, {**self.base, "refs/tags/2026.11.0": "t2"}, HEAD, [], self.lookup,
+                             Releases(), AGENTS, (), infra=reads.reads(), default="main")
+            self.assertEqual(out, ["ref moved (unattributed): refs/tags/2026.11.0"], bundle)
+        self.assertEqual((reads.asked, self.lookup.asked), ([], [MAIN]))
 
     def test_release_without_author_is_unattributed(self):
         out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""))
         self.assertEqual(out, ["ref moved (unattributed): refs/tags/v2"])
-        out = self.check({**self.base, "refs/tags/v2": "t2"}, releases=Releases(v2=""), taggers=Taggers(t2="x[bot]"))
-        self.assertEqual(out, [])
 
     def test_deleted_tag_is_unattributed(self):
         releases = Releases(v1="github-actions[bot]")
@@ -367,30 +367,46 @@ class ViolationsTest(unittest.TestCase):
 
 class InfraViolationsTest(unittest.TestCase):
     base = {MAIN: "a", "refs/heads/renovate/x-1.x": "r"}
+    PR7 = "https://github.com/acme/app/pull/7"
 
-    def check(self, after, entries, merges=None, bundle="infra", agents=AGENTS, pulls=None, default="main"):
-        self.merges = merges or Merges()
+    def check(self, after, entries, fake=None, bundle="infra", agents=AGENTS, pulls=None, default="main"):
+        self.fake = fake or FakeInfra()
+        self.observed = []
         lookup = Lookup(*entries)
         return violations(bundle, REPO, self.base, after, None, [], lookup, Releases(), agents, ("main",),
-                          tagger=Taggers(), merged=self.merges, default=default, pulls=pulls or {})
+                          infra=self.fake.reads(), default=default, pulls=pulls or {}, observed=self.observed)
 
-    def test_agent_landed_renovate_pr_allowed(self):
-        out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]))
+    def landed_ok(self):
+        return FakeInfra(pulls={"m": [renovate_pull()]})
+
+    def assert_agent_violation(self, out, contains=""):
+        self.assertEqual(len(out), 1, out)
+        self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+        self.assertIn(contains, out[0])
+
+    def agent_commit(self, files, author=AGENT, committer="web-flow"):
+        return FakeInfra(pulls={"m": [renovate_pull()]}, commits={7: [PullCommit("f1", author, committer)]},
+                         files={"f1": files})
+
+    def test_agent_landed_renovate_pr_allowed_and_observed(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m")], self.landed_ok())
         self.assertEqual(out, [])
-        self.assertEqual(self.merges.asked, ["m"])
+        self.assertEqual(self.fake.asked, [("merged", "m"), ("commits", 7)])
+        self.assertEqual(self.observed, [{"pr": self.PR7, "merge_commit_sha": "m", "agent_commits": []}])
 
     def test_chain_of_agent_merges_and_owner_push_allowed(self):
         entries = [merge("a", "m1"), entry(MAIN, "lkshrk", "m1", "o"), merge("o", "m2")]
-        merges = Merges(m1=[renovate_pull("m1")], m2=[renovate_pull("m2", merged_by="H-Cloud-NPA[bot]")])
-        self.assertEqual(self.check({MAIN: "m2"}, entries, merges), [])
-        self.assertEqual(self.merges.asked, ["m1", "m2"])
+        fake = FakeInfra(pulls={"m1": [renovate_pull("m1", number=1)],
+                                "m2": [renovate_pull("m2", number=2, merged_by="H-Cloud-NPA[bot]")]})
+        self.assertEqual(self.check({MAIN: "m2"}, entries, fake), [])
+        self.assertEqual([o["pr"] for o in self.observed],
+                         ["https://github.com/acme/app/pull/1", "https://github.com/acme/app/pull/2"])
 
     def test_agent_push_is_violation(self):
         for kind in ("push", "force_push", "merge_queue_merge", ""):
-            out = self.check({MAIN: "m"}, [merge("a", "m", kind=kind)], Merges(m=[renovate_pull()]))
-            self.assertEqual(len(out), 1, kind)
-            self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
-            self.assertEqual(self.merges.asked, [])
+            out = self.check({MAIN: "m"}, [merge("a", "m", kind=kind)], self.landed_ok())
+            self.assert_agent_violation(out)
+            self.assertEqual(self.fake.asked, [])
 
     def test_merge_not_matching_rules_is_violation(self):
         bad = {
@@ -408,41 +424,101 @@ class InfraViolationsTest(unittest.TestCase):
         }
         for name, pull in bad.items():
             with self.subTest(name):
-                out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[pull]))
-                self.assertEqual(len(out), 1, out)
-                self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+                self.assert_agent_violation(self.check({MAIN: "m"}, [merge("a", "m")], FakeInfra(pulls={"m": [pull]})))
+                self.assertEqual(self.observed, [])
 
     def test_not_exactly_one_pr_is_violation(self):
         for pulls in ([], [renovate_pull(), renovate_pull()]):
-            out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=pulls))
-            self.assertEqual(len(out), 1, pulls)
-            self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
+            self.assert_agent_violation(self.check({MAIN: "m"}, [merge("a", "m")], FakeInfra(pulls={"m": pulls})))
+
+    def test_bad_second_agent_entry_after_a_good_one_is_violation(self):
+        entries = [merge("a", "m1"), merge("m1", "m2", kind="push")]
+        fake = FakeInfra(pulls={"m1": [renovate_pull("m1")], "m2": [renovate_pull("m2")]})
+        self.assert_agent_violation(self.check({MAIN: "m2"}, entries, fake), "push activity")
+        entries = [merge("a", "m1"), merge("m1", "m2")]
+        fake = FakeInfra(pulls={"m1": [renovate_pull("m1")], "m2": [renovate_pull("m2", author="lkshrk")]})
+        self.assert_agent_violation(self.check({MAIN: "m2"}, entries, fake), "author")
+
+    def test_agent_fix_commit_on_allowed_path_passes_and_is_reported(self):
+        commits = {7: [PullCommit("r1", RENOVATE, "web-flow"), PullCommit("f1", AGENT, "web-flow")]}
+        path = "kubernetes/apps/ai/litellm/app/helmrelease.yaml"
+        fake = FakeInfra(pulls={"m": [renovate_pull()]}, commits=commits, files={"f1": [path]})
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], fake), [])
+        self.assertEqual(fake.asked, [("merged", "m"), ("commits", 7), ("files", "f1")])
+        self.assertEqual(self.observed[0]["agent_commits"], [{"sha": "f1", "files": [path]}])
+
+    def test_agent_commit_on_protected_path_is_violation(self):
+        paths = (
+            "kubernetes/apps/security/kyverno/policies/agent-github-tokens/mutatingpolicy.yaml",
+            "kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml",
+            "kubernetes/apps/ai/hermes/app/helmrelease.yaml",
+            "kubernetes/apps/ai/contribution-approver/app/helmrelease.yaml",
+            "kubernetes/flux/cluster/ks.yaml",
+            ".github/workflows/tag.yaml",
+            "talos/talconfig.yaml",
+            "kubernetes/apps/ai/litellm/app/secret.sops.yaml",
+            "root.sops.yaml",
+        )
+        self.assertEqual(len(PROTECTED_PATHS), 8)
+        for path in paths:
+            with self.subTest(path):
+                out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit(["README.md", path]))
+                self.assert_agent_violation(out, self.PR7)
+                self.assertIn(path, out[0])
+                self.assertEqual(self.observed, [])
+
+    def test_similar_but_unprotected_paths_pass(self):
+        for path in ("kubernetes/apps/securityx/a.yaml", "kubernetes/apps/ai/hermes-webui/a.yaml", "docs/.github.md",
+                     "talosx/a.yaml", "a.sops.yml"):
+            self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit([path])), [], path)
+
+    def test_rename_into_or_out_of_protected_path_is_violation(self):
+        for listed in (["talos/x.yaml", "docs/x.yaml"], ["docs/x.yaml", ".github/x.yaml"]):
+            out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit(listed))
+            self.assert_agent_violation(out, "protected path")
+
+    def test_missing_login_is_treated_as_agent(self):
+        for author, committer in (("", "web-flow"), (RENOVATE, ""), ("", "")):
+            out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit([".github/x.yaml"], author, committer))
+            self.assert_agent_violation(out, "protected path")
+
+    def test_renovate_only_commits_pass_even_on_protected_paths(self):
+        commits = {7: [PullCommit("r1", RENOVATE, "web-flow"), PullCommit("r2", "Renovate-Master[bot]", RENOVATE)]}
+        fake = FakeInfra(pulls={"m": [renovate_pull()]}, commits=commits, files={"r1": [".github/x.yaml"]})
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], fake), [])
+        self.assertNotIn(("files", "r1"), fake.asked)
 
     def test_broken_chain_after_landed_merge_is_unattributed(self):
-        out = self.check({MAIN: "z"}, [merge("a", "m")], Merges(m=[renovate_pull()]))
+        out = self.check({MAIN: "z"}, [merge("a", "m")], self.landed_ok())
         self.assertEqual(out, ["ref moved (unattributed): refs/heads/main"])
 
     def test_case_insensitive_repo_and_logins(self):
         pull = renovate_pull(base_repo="ACME/app", head_repo="Acme/App", author="Renovate-Master[bot]")
-        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[pull])), [])
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], FakeInfra(pulls={"m": [pull]})), [])
 
     def test_other_protected_branch_still_violation(self):
         base = {**self.base, "refs/heads/release": "q"}
         lookup = Lookup(Activity("refs/heads/release", 1000.0, AGENT, "q", "m", "pr_merge"))
-        merges = Merges(m=[renovate_pull(base_ref="release")])
+        fake = FakeInfra(pulls={"m": [renovate_pull(base_ref="release")]})
         out = violations("infra", REPO, base, {**base, "refs/heads/release": "m"}, None, [], lookup, Releases(), AGENTS,
-                         ("main", "release"), tagger=Taggers(), merged=merges, default="main", pulls={})
+                         ("main", "release"), infra=fake.reads(), default="main", pulls={})
         self.assertEqual(out, ["ref moved by agent: refs/heads/release"])
-        self.assertEqual(merges.asked, [])
+        self.assertEqual(fake.asked, [])
 
     def test_other_bundles_keep_the_plain_rule(self):
         for bundle in ("polly", "documenter"):
-            out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]), bundle=bundle)
+            out = self.check({MAIN: "m"}, [merge("a", "m")], self.landed_ok(), bundle=bundle)
             self.assertEqual(out, ["ref moved by agent: refs/heads/main"], bundle)
-            self.assertEqual(self.merges.asked, [])
+            self.assertEqual(self.fake.asked, [])
+
+    def test_missing_reads_or_default_fall_back_to_the_plain_rule(self):
+        for infra, default in ((None, "main"), (self.landed_ok().reads(), None)):
+            out = violations("infra", REPO, self.base, {MAIN: "m"}, None, [], Lookup(merge("a", "m")), Releases(),
+                             AGENTS, ("main",), infra=infra, default=default)
+            self.assertEqual(out, ["ref moved by agent: refs/heads/main"])
 
     def test_no_agent_actors_is_violation(self):
-        out = self.check({MAIN: "m"}, [merge("a", "m")], Merges(m=[renovate_pull()]), agents=frozenset())
+        out = self.check({MAIN: "m"}, [merge("a", "m")], self.landed_ok(), agents=frozenset())
         self.assertEqual(out, ["ref moved: refs/heads/main"])
 
     def test_every_result_pr_is_checked(self):
@@ -461,6 +537,78 @@ class InfraViolationsTest(unittest.TestCase):
         ])
 
 
+class InfraTagTest(unittest.TestCase):
+    base = {MAIN: "a"}
+    TAG = "refs/tags/2026.11.0"
+
+    def check(self, name="2026.11.0", sha="t2", fake=None, entries=(), releases=None):
+        self.fake = fake or FakeInfra()
+        self.lookup = Lookup(*entries)
+        return violations("infra", REPO, self.base, {**self.base, f"refs/tags/{name}": sha}, None, [], self.lookup,
+                          releases or Releases(), AGENTS, ("main",), infra=self.fake.reads(), default="main")
+
+    def workflow(self, tagger="h-cloud-workflow[bot]", reachable=("c1",)):
+        return FakeInfra(tags={"t2": TagObject(tagger, "c1")}, reachable=reachable)
+
+    def test_monthly_workflow_tag_passes_by_tagger(self):
+        for name in ("2026.11.0", "2026.1.0", "2027.12.14"):
+            fake = self.workflow()
+            self.assertEqual(self.check(name, fake=fake), [], name)
+            self.assertEqual(fake.asked, [("tag", "t2"), ("reachable", "c1")])
+
+    def test_recorded_annotated_tag_ref_points_at_the_tag_object(self):
+        [ref] = recorded("matching_refs_tag_h-cloud_2026.11.0.json")
+        tag = recorded("tag_h-cloud_2026.11.0.json")
+        tag_sha, commit = tag["sha"], tag["object"]["sha"]
+        self.assertEqual((ref["object"]["type"], ref["object"]["sha"]), ("tag", tag_sha))
+        fake = FakeInfra(tags={tag_sha: TagObject(tag["tagger"]["name"], commit)}, reachable={commit})
+        self.assertEqual(self.check(sha=tag_sha, fake=fake), [])
+        self.assertEqual(fake.asked, [("tag", tag_sha), ("reachable", commit)])
+        self.assertEqual(self.check(sha=tag_sha, entries=[entry(self.TAG, "x[bot]", NULL_SHA, tag_sha)]), [])
+        out = self.check(sha=tag_sha, entries=[entry(self.TAG, "x[bot]", NULL_SHA, commit)])
+        self.assertEqual(out, [f"ref moved (unattributed): {self.TAG}"])
+
+    def test_other_tag_names_are_unattributed(self):
+        for name in ("v1.2.3", "2026.11", "2026.111.0", "26.11.0", "2026.11.0-rc1"):
+            fake = self.workflow()
+            self.assertEqual(self.check(name, fake=fake), [f"ref moved (unattributed): refs/tags/{name}"], name)
+            self.assertEqual(fake.asked, [])
+
+    def test_tag_off_the_default_branch_is_unattributed(self):
+        self.assertEqual(self.check(fake=self.workflow(reachable=())), [f"ref moved (unattributed): {self.TAG}"])
+
+    def test_lightweight_or_taggerless_tag_is_unattributed(self):
+        for fake in (FakeInfra(), FakeInfra(tags={"t2": TagObject("", "c1")}, reachable={"c1"}),
+                     FakeInfra(tags={"t2": TagObject("h-cloud-workflow[bot]", "")}, reachable={""})):
+            self.assertEqual(self.check(fake=fake), [f"ref moved (unattributed): {self.TAG}"])
+
+    def test_tagged_by_agent_is_violation(self):
+        out = self.check(fake=self.workflow(tagger="H-Cloud-NPA[bot]"))
+        self.assertEqual(out, [f"ref moved by agent: {self.TAG}"])
+
+    def test_activity_attributes_first(self):
+        self.assertEqual(self.check(entries=[entry(self.TAG, "github-actions[bot]", NULL_SHA, "t2")]), [])
+        self.assertEqual(self.fake.asked, [])
+        out = self.check(entries=[entry(self.TAG, AGENT, NULL_SHA, "t2")], fake=self.workflow())
+        self.assertEqual(out, [f"ref moved by agent: {self.TAG}"])
+        for actor in ("github-actions[bot]", ""):
+            out = self.check(entries=[entry(self.TAG, actor, NULL_SHA, "t9")], fake=self.workflow())
+            self.assertEqual(out, [f"ref moved (unattributed): {self.TAG}"], actor)
+
+    def test_release_author_still_wins(self):
+        fake = self.workflow(tagger=AGENT)
+        self.assertEqual(self.check(fake=fake, releases=Releases(**{"2026.11.0": "lkshrk"})), [])
+        self.assertEqual(fake.asked, [])
+
+    def test_moved_tag_is_violation(self):
+        before = {**self.base, self.TAG: "t1"}
+        fake = self.workflow()
+        out = violations("infra", REPO, before, {**before, self.TAG: "t2"}, None, [], Lookup(), Releases(), AGENTS,
+                         ("main",), infra=fake.reads(), default="main")
+        self.assertEqual(out, [f"tag moved: {self.TAG}"])
+        self.assertEqual(fake.asked, [])
+
+
 class TokenFilesTest(unittest.TestCase):
     def test_parsed(self):
         value = " routivo=/var/run/agent/github/review, LKSHRK=/var/run/agent/github/hcloud-ro ,"
@@ -473,6 +621,16 @@ class TokenFilesTest(unittest.TestCase):
         for value in ("routivo", "=/x", "routivo=", "a=/x,A=/y", "a b=/x"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 token_files(value)
+
+    def test_malformed_entry_is_named_by_index_only(self):
+        with self.assertRaises(ValueError) as cm:
+            token_files("routivo=/var/run/a, s3cr3t-looking-value ")
+        self.assertIn("entry 2", str(cm.exception))
+        self.assertNotIn("s3cr3t", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            token_files("Lkshrk=/x,lkshrk=/y")
+        self.assertIn("entry 2", str(cm.exception))
+        self.assertNotIn("/y", str(cm.exception))
 
 
 class MultiOwnerTokenTest(unittest.TestCase):
@@ -783,17 +941,25 @@ class MergedPullsTest(ReaderCase):
         got = r.merged_pulls("lkshrk/h-cloud", self.SHA)
         self.assertEqual(got, [MergedPull(True, self.SHA, "main", "lkshrk/h-cloud",
                                           "renovate/ghcr.io-lkshrk-agent-stack-omnigent-host-1.x", "lkshrk/h-cloud",
-                                          "renovate-master[bot]", "renovate-master[bot]")])
+                                          "renovate-master[bot]", "renovate-master[bot]", 1519)])
         urls = [q.full_url for q in self.opener.requests]
         self.assertIn(f"/repos/lkshrk/h-cloud/commits/{self.SHA}/pulls", urls[0])
         self.assertTrue(urls[1].endswith("/repos/lkshrk/h-cloud/pulls/1519"))
+        self.assertEqual(self.sleeps, [])
 
-    def test_several_or_no_pulls_skip_the_detail(self):
+    def test_several_pulls_skip_the_detail(self):
         listed = recorded("commit_pulls_h-cloud_1519.json")
-        r = self.reader([jr(listed + listed), jr([])])
+        r = self.reader([jr(listed + listed)])
         self.assertEqual([p.merged_by for p in r.merged_pulls("lkshrk/h-cloud", self.SHA)], ["", ""])
+        self.assertEqual(len(self.opener.requests), 1)
+
+    def test_no_pulls_is_retried_once_after_a_delay(self):
+        r = self.reader([jr([]), jr([])])
         self.assertEqual(r.merged_pulls("lkshrk/h-cloud", self.SHA), [])
-        self.assertEqual(len(self.opener.requests), 2)
+        self.assertEqual((len(self.opener.requests), self.sleeps), (2, [PULLS_RETRY_SECONDS]))
+        listed = recorded("commit_pulls_h-cloud_1519.json")
+        r = self.reader([jr([]), jr(listed), jr(recorded("pull_h-cloud_1519.json"))])
+        self.assertEqual([p.number for p in r.merged_pulls("lkshrk/h-cloud", self.SHA)], [1519])
 
     def test_unmerged_and_deleted_fork(self):
         listed = recorded("commit_pulls_h-cloud_1519.json")
@@ -805,7 +971,8 @@ class MergedPullsTest(ReaderCase):
     def test_wrong_shape_raises(self):
         listed = recorded("commit_pulls_h-cloud_1519.json")
         detail = recorded("pull_h-cloud_1519.json")
-        bad = ({**detail, "base": None}, {**detail, "user": None}, {**detail, "merged_by": "x"}, [], {**detail, "merged_at": 5})
+        bad = ({**detail, "base": None}, {**detail, "user": None}, {**detail, "merged_by": "x"}, [],
+               {**detail, "merged_at": 5}, {**detail, "number": "1"})
         for body in bad:
             with self.subTest(body=body), self.assertRaises(GitHubError):
                 self.reader([jr(listed), jr(body)]).merged_pulls("lkshrk/h-cloud", self.SHA)
@@ -819,27 +986,87 @@ class MergedPullsTest(ReaderCase):
             self.reader([err]).merged_pulls("lkshrk/h-cloud", self.SHA)
 
 
-class TaggerTest(ReaderCase):
+class PullCommitsTest(ReaderCase):
+    def test_recorded_commits(self):
+        r = self.reader([jr(recorded("pull_commits_h-cloud_1519.json"))])
+        got = r.pull_commits("lkshrk/h-cloud", 1519)
+        self.assertEqual(got, [PullCommit("c9018854bca2115d2b5373058095ce1056ecd3d3", "renovate-master[bot]", "web-flow")])
+        self.assertIn("/repos/lkshrk/h-cloud/pulls/1519/commits?per_page=100", self.opener.requests[0].full_url)
+
+    def test_paginates_and_unlinked_users_are_empty(self):
+        nxt = f'<{API}/repositories/1/pulls/7/commits?page=2>; rel="next"'
+        r = self.reader([jr([{"sha": "a", "author": None, "committer": None}], {"Link": nxt}),
+                         jr([{"sha": "b", "author": {"login": "x[bot]"}, "committer": {"login": "web-flow"}}])])
+        self.assertEqual(r.pull_commits(REPO, 7), [PullCommit("a", "", ""), PullCommit("b", "x[bot]", "web-flow")])
+
+    def test_wrong_shape_raises(self):
+        for body in ({}, ["x"], [{"sha": ""}], [{"sha": "a", "author": "x"}]):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).pull_commits(REPO, 7)
+
+
+class CommitFilesTest(ReaderCase):
+    SHA = "c9018854bca2115d2b5373058095ce1056ecd3d3"
+
+    def test_recorded_commit(self):
+        r = self.reader([jr(recorded("commit_h-cloud_c901885.json"))])
+        self.assertEqual(r.commit_files("lkshrk/h-cloud", self.SHA),
+                         ["kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml"])
+        self.assertIn(f"/repos/lkshrk/h-cloud/commits/{self.SHA}", self.opener.requests[0].full_url)
+
+    def test_paginates_and_includes_rename_sources(self):
+        nxt = f'<{API}/repositories/1/commits/{self.SHA}?page=2>; rel="next"'
+        r = self.reader([jr({"files": [{"filename": "a.yaml"}]}, {"Link": nxt}),
+                         jr({"files": [{"filename": "docs/b.yaml", "previous_filename": "talos/b.yaml"}]})])
+        self.assertEqual(r.commit_files(REPO, self.SHA), ["a.yaml", "docs/b.yaml", "talos/b.yaml"])
+        self.assertIn("page=2", self.opener.requests[1].full_url)
+
+    def test_wrong_shape_raises(self):
+        for body in ([], {}, {"files": {}}, {"files": ["x"]}, {"files": [{"filename": ""}]}):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).commit_files(REPO, self.SHA)
+
+
+class TagObjectTest(ReaderCase):
     SHA = "14300c762a6295307e64914059a0809e1d2c584d"
 
     def test_recorded_annotated_tag(self):
         r = self.reader([jr(recorded("tag_h-cloud_2026.11.0.json"))])
-        self.assertEqual(r.tagger("lkshrk/h-cloud", self.SHA), "h-cloud-workflow[bot]")
+        self.assertEqual(r.tag("lkshrk/h-cloud", self.SHA),
+                         TagObject("h-cloud-workflow[bot]", "5a5ee096a0fa04ac3dd7934177b8b80719737dfc"))
         self.assertTrue(self.opener.requests[0].full_url.endswith(f"/repos/lkshrk/h-cloud/git/tags/{self.SHA}"))
 
     def test_lightweight_tag_is_none(self):
         err = urllib.error.HTTPError(API, 404, "Not Found", {}, io.BytesIO(b"{}"))
-        self.assertIsNone(self.reader([err]).tagger("lkshrk/h-cloud", "5a5ee096a0fa04ac3dd7934177b8b80719737dfc"))
+        self.assertIsNone(self.reader([err]).tag("lkshrk/h-cloud", "5a5ee096a0fa04ac3dd7934177b8b80719737dfc"))
 
-    def test_missing_tagger_is_empty(self):
-        body = {k: v for k, v in recorded("tag_h-cloud_2026.11.0.json").items() if k != "tagger"}
-        self.assertEqual(self.reader([jr(body)]).tagger("lkshrk/h-cloud", self.SHA), "")
+    def test_missing_tagger_or_non_commit_object_is_empty(self):
+        body = recorded("tag_h-cloud_2026.11.0.json")
+        no_tagger = {k: v for k, v in body.items() if k != "tagger"}
+        self.assertEqual(self.reader([jr(no_tagger)]).tag("lkshrk/h-cloud", self.SHA).tagger, "")
+        nested = {**body, "object": {**body["object"], "type": "tag"}}
+        self.assertEqual(self.reader([jr(nested)]).tag("lkshrk/h-cloud", self.SHA).commit, "")
 
     def test_error_and_wrong_shape_raise(self):
         err = urllib.error.HTTPError(API, 403, "no", {}, io.BytesIO(b"x"))
-        for item in (err, OSError("reset"), jr([]), jr({"tagger": "x"}), jr({"tagger": {"name": 5}})):
+        body = recorded("tag_h-cloud_2026.11.0.json")
+        for item in (err, OSError("reset"), jr([]), jr({**body, "tagger": "x"}), jr({**body, "tagger": {"name": 5}}),
+                     jr({**body, "object": None})):
             with self.subTest(item=item), self.assertRaises(GitHubError):
-                self.reader([item]).tagger("lkshrk/h-cloud", self.SHA)
+                self.reader([item]).tag("lkshrk/h-cloud", self.SHA)
+
+
+class ReachableTest(ReaderCase):
+    def test_ahead_or_identical_is_reachable(self):
+        for status, want in (("ahead", True), ("identical", True), ("behind", False), ("diverged", False)):
+            r = self.reader([jr({"status": status, "ahead_by": 1, "behind_by": 0})])
+            self.assertEqual(r.reachable("lkshrk/h-cloud", "5a5ee09", "main"), want, status)
+        self.assertIn("/repos/lkshrk/h-cloud/compare/5a5ee09...main", self.opener.requests[0].full_url)
+
+    def test_wrong_shape_raises(self):
+        for body in ([], {}, {"status": 3}):
+            with self.subTest(body=body), self.assertRaises(GitHubError):
+                self.reader([jr(body)]).reachable(REPO, "c", "main")
 
 
 class CompareTest(ReaderCase):

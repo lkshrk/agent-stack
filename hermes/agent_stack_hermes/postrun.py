@@ -1,8 +1,10 @@
 import datetime
+import fnmatch
 import functools
 import http.client
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +23,20 @@ NULL_SHA = "0" * 40
 NO_TOKEN_STATUS = 401
 RENOVATE = "renovate-master[bot]"
 RENOVATE_PREFIX = "renovate/"
+RENOVATE_COMMITTERS = frozenset({RENOVATE, "web-flow"})
+PROTECTED_PATHS = (
+    "kubernetes/apps/security/**",
+    "kubernetes/apps/omnigent-sandboxes/**",
+    "kubernetes/apps/ai/hermes/**",
+    "kubernetes/apps/ai/contribution-approver/**",
+    "kubernetes/flux/**",
+    ".github/**",
+    "talos/**",
+    "**/*.sops.yaml",
+)
+MONTHLY_TAG = re.compile(r"\d{4}\.\d{1,2}\.\d+")
+REACHABLE_STATUSES = ("ahead", "identical")
+PULLS_RETRY_SECONDS = 5
 _OWNER = re.compile(r"[A-Za-z0-9-]+")
 
 RefMap = dict[str, str]
@@ -40,6 +56,7 @@ class PullHead:
     base_ref: str
     base_repo: str
     default_branch: str
+    merged: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +79,39 @@ class MergedPull:
     head_repo: str
     author: str
     merged_by: str
+    number: int = 0
+
+
+@dataclass(frozen=True)
+class PullCommit:
+    sha: str
+    author: str
+    committer: str
+
+
+@dataclass(frozen=True)
+class TagObject:
+    tagger: str
+    commit: str
+
+
+@dataclass(frozen=True)
+class InfraReads:
+    merged_pulls: Callable[[str], list[MergedPull]]
+    pull_commits: Callable[[int], list[PullCommit]]
+    commit_files: Callable[[str], list[str]]
+    tag: Callable[[str], TagObject | None]
+    reachable: Callable[[str], bool]
+
+
+def protected_path(path: str) -> bool:
+    for pattern in PROTECTED_PATHS:
+        if pattern.endswith("/**"):
+            if path.startswith(pattern[:-2]):
+                return True
+        elif fnmatch.fnmatchcase(path, pattern.removeprefix("**/")):
+            return True
+    return False
 
 
 def agent_actors(value: str | None) -> frozenset[str]:
@@ -70,14 +120,14 @@ def agent_actors(value: str | None) -> frozenset[str]:
 
 def token_files(value: str | None) -> dict[str, str]:
     out: dict[str, str] = {}
-    for item in (value or "").split(","):
+    for index, item in enumerate((value or "").split(","), 1):
         if not item.strip():
             continue
         owner, sep, path = (part.strip() for part in item.partition("="))
         if not sep or not _OWNER.fullmatch(owner) or not path:
-            raise ValueError(f"malformed token file entry {item.strip()!r}: want owner=path")
+            raise ValueError(f"entry {index} is malformed: want owner=path")
         if owner.lower() in out:
-            raise ValueError(f"owner {owner!r} listed twice")
+            raise ValueError(f"entry {index} repeats an owner")
         out[owner.lower()] = path
     return out
 
@@ -100,7 +150,9 @@ class GitHubReader:
         opener=urllib.request.urlopen,
         agents=frozenset(),
         token_files: dict[str, str] | None = None,
+        sleep=time.sleep,
     ):
+        self._sleep = sleep
         self._token_file = token_file
         self._token_files = {owner.lower(): path for owner, path in (token_files or {}).items()}
         self.agents = frozenset(agents)
@@ -157,9 +209,11 @@ class GitHubReader:
             out.update(self._refs_under(repo, kind))
         return out
 
-    def _pages(self, url: str, what: str, owner: str):
+    def _pages(self, url: str, what: str, owner: str, key: str | None = None):
         for _ in range(MAX_PAGES):
             body, link = self._get(url, owner)
+            if key is not None:
+                body = body.get(key) if isinstance(body, dict) else None
             if not isinstance(body, list):
                 raise GitHubError(f"{what} response is not a list")
             yield body
@@ -244,6 +298,7 @@ class GitHubReader:
             _str(base.get("ref"), "base ref"),
             _str(base_repo.get("full_name"), "base repo name"),
             _str(base_repo.get("default_branch"), "default branch"),
+            bool(_optional_str(body.get("merged_at"), "merged_at")),
         )
 
     def changed_files(self, repo: str, base: str, head: str) -> list[str]:
@@ -265,10 +320,12 @@ class GitHubReader:
         return out
 
     def merged_pulls(self, repo: str, sha: str) -> list[MergedPull]:
-        listed: list = []
         url = f"{self._api}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}/pulls?per_page=100"
-        for body in self._pages(url, "commit pulls", _owner(repo)):
-            listed.extend(body)
+        listed = [item for body in self._pages(url, "commit pulls", _owner(repo)) for item in body]
+        if not listed:
+            # GitHub links a merge commit to its PR with a short delay.
+            self._sleep(PULLS_RETRY_SECONDS)
+            listed = [item for body in self._pages(url, "commit pulls", _owner(repo)) for item in body]
         for item in listed:
             if not isinstance(item, dict) or not _is_int(item.get("number")):
                 raise GitHubError("commit pull entry has the wrong shape")
@@ -277,21 +334,53 @@ class GitHubReader:
         detail, _ = self._get(f"{self._api}/repos/{repo}/pulls/{listed[0]['number']}", _owner(repo))
         return [_merged_pull(detail)]
 
-    def tagger(self, repo: str, sha: str) -> str | None:
+    def pull_commits(self, repo: str, number: int) -> list[PullCommit]:
+        out: list[PullCommit] = []
+        for body in self._pages(f"{self._api}/repos/{repo}/pulls/{number}/commits?per_page=100", "pull commits",
+                                _owner(repo)):
+            for item in body:
+                if not isinstance(item, dict):
+                    raise GitHubError("pull commit entry has the wrong shape")
+                out.append(PullCommit(_str(item.get("sha"), "commit sha"), _login(item.get("author"), "commit author"),
+                                      _login(item.get("committer"), "commit committer")))
+        return out
+
+    def commit_files(self, repo: str, sha: str) -> list[str]:
+        out: list[str] = []
+        url = f"{self._api}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}?per_page=100"
+        for files in self._pages(url, "commit files", _owner(repo), key="files"):
+            for entry in files:
+                if not isinstance(entry, dict):
+                    raise GitHubError("commit file entry has the wrong shape")
+                out.append(_str(entry.get("filename"), "filename"))
+                previous = entry.get("previous_filename")
+                if previous is not None:
+                    out.append(_str(previous, "previous filename"))
+        return out
+
+    def tag(self, repo: str, sha: str) -> TagObject | None:
         try:
             body, _ = self._get(f"{self._api}/repos/{repo}/git/tags/{urllib.parse.quote(sha, safe='')}", _owner(repo))
         except GitHubError as exc:
             if exc.status == 404:
                 return None
             raise
-        if not isinstance(body, dict):
+        if not isinstance(body, dict) or not isinstance(body.get("object"), dict):
             raise GitHubError("tag response has the wrong shape")
         tagger = body.get("tagger")
-        if tagger is None:
-            return ""
-        if not isinstance(tagger, dict):
+        if tagger is not None and not isinstance(tagger, dict):
             raise GitHubError("tagger has the wrong shape")
-        return _str(tagger.get("name"), "tagger name")
+        name = _str(tagger.get("name"), "tagger name") if tagger else ""
+        target = body["object"]
+        commit = _str(target.get("sha"), "tag object sha") if target.get("type") == "commit" else ""
+        return TagObject(name, commit)
+
+    def reachable(self, repo: str, commit: str, branch: str) -> bool:
+        spec = f"{urllib.parse.quote(commit, safe='')}...{urllib.parse.quote(branch, safe='')}"
+        body, _ = self._get(f"{self._api}/repos/{repo}/compare/{spec}?per_page=1", _owner(repo))
+        if not isinstance(body, dict):
+            raise GitHubError("compare response has the wrong shape")
+        return _str(body.get("status"), "compare status") in REACHABLE_STATUSES
 
 
 def _is_int(value) -> bool:
@@ -323,6 +412,8 @@ def _merged_pull(body) -> MergedPull:
         raise GitHubError("pull base repo missing")
     if not isinstance(body.get("user"), dict):
         raise GitHubError("pull author missing")
+    if not _is_int(body.get("number")):
+        raise GitHubError("pull number missing or not an integer")
     return MergedPull(
         bool(_optional_str(body.get("merged_at"), "merged_at")),
         _optional_str(body.get("merge_commit_sha"), "merge commit sha"),
@@ -332,6 +423,7 @@ def _merged_pull(body) -> MergedPull:
         _str(head_repo.get("full_name"), "head repo name") if head_repo else "",
         _login(body["user"], "pull author"),
         _login(body.get("merged_by"), "merged_by"),
+        body["number"],
     )
 
 
@@ -379,29 +471,45 @@ def _attributed(ref: str, old: str, new: str, entries: list[Activity]) -> str | 
     return None
 
 
+def _by_agent(entries: list[Activity], agents: frozenset[str]) -> bool:
+    return any(e.actor.lower() in agents for e in entries if e.actor)
+
+
+Landed = Callable[[Activity], "tuple[str | None, dict | None]"]
+
+
 def _branch(
-    ref: str, old: str, new: str, entries: list[Activity], agents: frozenset[str],
-    landed: Callable[[Activity], str | None] | None = None,
+    ref: str, old: str, new: str, entries: list[Activity], agents: frozenset[str], landed: Landed | None,
+    observed: list[dict],
 ) -> str | None:
+    seen: list[dict] = []
     for e in entries:
         if not (e.actor and e.actor.lower() in agents):
             continue
         if not landed:
             return f"ref moved by agent: {ref}"
-        why = landed(e)
+        why, record = landed(e)
         if why:
             return f"ref moved by agent: {ref} ({why})"
-    return _attributed(ref, old, new, entries)
+        seen.append(record or {})
+    reason = _attributed(ref, old, new, entries)
+    if not reason:
+        observed.extend(seen)
+    return reason
+
+
+def _renovate_commit(commit: PullCommit) -> bool:
+    return commit.author.lower() == RENOVATE and commit.committer.lower() in RENOVATE_COMMITTERS
 
 
 def _renovate_merge(
-    entry: Activity, merged: Callable[[str], list[MergedPull]], repo: str, default: str, agents: frozenset[str]
-) -> str | None:
+    entry: Activity, reads: InfraReads, repo: str, default: str, agents: frozenset[str]
+) -> tuple[str | None, dict | None]:
     if entry.activity_type != "pr_merge":
-        return f"{entry.activity_type or 'untyped'} activity, not a PR merge"
-    pulls = merged(entry.after)
+        return f"{entry.activity_type or 'untyped'} activity, not a PR merge", None
+    pulls = reads.merged_pulls(entry.after)
     if len(pulls) != 1:
-        return f"{len(pulls)} PRs for {entry.after}, want exactly one"
+        return f"{len(pulls)} PRs for {entry.after}, want exactly one", None
     pull = pulls[0]
     checks = (
         (pull.merged, "PR is not merged"),
@@ -412,23 +520,49 @@ def _renovate_merge(
         (pull.author.lower() == RENOVATE, f"PR author is not {RENOVATE}"),
         (pull.merged_by.lower() in agents, "PR was not merged by an agent"),
     )
-    return next((why for ok, why in checks if not ok), None)
+    why = next((why for ok, why in checks if not ok), None)
+    if why:
+        return why, None
+    url = f"https://github.com/{repo}/pull/{pull.number}"
+    agent_commits = []
+    for commit in reads.pull_commits(pull.number):
+        if _renovate_commit(commit):
+            continue
+        files = reads.commit_files(commit.sha)
+        bad = next((path for path in files if protected_path(path)), None)
+        if bad:
+            return f"{url}: agent commit {commit.sha} touches protected path {bad}", None
+        agent_commits.append({"sha": commit.sha, "files": files})
+    return None, {"pr": url, "merge_commit_sha": entry.after, "agent_commits": agent_commits}
+
+
+def _monthly_tag(
+    ref: str, sha: str, activity: Callable[[str], list[Activity]], reads: InfraReads, agents: frozenset[str]
+) -> str | None:
+    entries = activity(ref)
+    if entries:
+        if _by_agent(entries, agents):
+            return f"ref moved by agent: {ref}"
+        return _attributed(ref, NULL_SHA, sha, entries)
+    if not MONTHLY_TAG.fullmatch(ref.removeprefix("refs/tags/")):
+        return f"ref moved (unattributed): {ref}"
+    tag = reads.tag(sha)
+    if tag is None or not tag.tagger or not tag.commit:
+        return f"ref moved (unattributed): {ref}"
+    if tag.tagger.lower() in agents:
+        return f"ref moved by agent: {ref}"
+    return None if reads.reachable(tag.commit) else f"ref moved (unattributed): {ref}"
 
 
 def _tag(
-    ref: str, sha: str | None, release: Callable[[str], str | None], activity: Callable[[str], list[Activity]],
-    tagger: Callable[[str], str | None], agents: frozenset[str],
+    ref: str, sha: str | None, release: Callable[[str], str | None], agents: frozenset[str],
+    fallback: Callable[[str, str], str | None] | None,
 ) -> str | None:
     if sha is None:
         return f"ref moved (unattributed): {ref}"
     author = release(ref.removeprefix("refs/tags/"))
-    if not author:
-        entries = activity(ref)
-        if entries:
-            if any(e.actor.lower() in agents for e in entries if e.actor):
-                return f"ref moved by agent: {ref}"
-            return _attributed(ref, NULL_SHA, sha, entries)
-        author = tagger(sha)
+    if not author and fallback:
+        return fallback(ref, sha)
     if author and author.lower() in agents:
         return f"ref moved by agent: {ref}"
     return None if author else f"ref moved (unattributed): {ref}"
@@ -446,20 +580,23 @@ def violations(
     agents: frozenset[str],
     branches: tuple[str, ...] = (),
     *,
-    tagger: Callable[[str], str | None] = lambda sha: None,
-    merged: Callable[[str], list[MergedPull]] | None = None,
+    infra: InfraReads | None = None,
     default: str | None = None,
     pulls: Mapping[str, PullHead] | None = None,
+    observed: list[dict] | None = None,
 ) -> list[str]:
     from agent_stack_policies import vcs
 
     pulls = pulls or {}
+    observed = [] if observed is None else observed
     listed = [pull, *pulls.values()] if pull else list(pulls.values())
     heads = set(branches) | {name for p in listed for name in (p.base_ref, p.default_branch)}
     protected = {"refs/heads/" + name for name in heads}
-    landed: Callable[[Activity], str | None] | None = None
-    if bundle == "infra" and merged and default:
-        landed = functools.partial(_renovate_merge, merged=merged, repo=repo, default=default, agents=agents)
+    landed: Landed | None = None
+    tag_fallback = None
+    if bundle == "infra" and infra and default:
+        landed = functools.partial(_renovate_merge, reads=infra, repo=repo, default=default, agents=agents)
+        tag_fallback = functools.partial(_monthly_tag, activity=activity, reads=infra, agents=agents)
     found = []
     for ref in sorted(set(before) | set(after) | protected):
         old, new = before.get(ref, NULL_SHA), after.get(ref, NULL_SHA)
@@ -471,9 +608,10 @@ def violations(
         elif not agents:
             reason = f"ref moved: {ref}"
         elif is_tag:
-            reason = _tag(ref, after.get(ref), release, activity, tagger, agents)
+            reason = _tag(ref, after.get(ref), release, agents, tag_fallback)
         else:
-            reason = _branch(ref, old, new, activity(ref), agents, landed if ref == f"refs/heads/{default}" else None)
+            on_default = ref == f"refs/heads/{default}"
+            reason = _branch(ref, old, new, activity(ref), agents, landed if on_default else None, observed)
         if reason:
             found.append(reason)
     if pull:
