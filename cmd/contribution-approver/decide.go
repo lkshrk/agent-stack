@@ -91,6 +91,11 @@ func (d *decider) decide(w http.ResponseWriter, r *http.Request) {
 		d.tell(ctx, text)
 		http.Error(w, "expired code", http.StatusGone)
 		return
+	case codeSuperseded:
+		log.Printf("contribution-approver: %s with a superseded code for %s#%d", req.Action, p.pr.fork, p.pr.number)
+		d.tell(ctx, fmt.Sprintf("That announcement is outdated: %s#%d has a newer announcement. Nothing was submitted.", p.pr.fork, p.pr.number))
+		http.Error(w, "superseded code", http.StatusGone)
+		return
 	case codeExpiredStale:
 		log.Printf("contribution-approver: %s with an expired code for a changed head of %s#%d", req.Action, p.pr.fork, p.pr.number)
 		d.tell(ctx, fmt.Sprintf("That code expired and %s#%d has changed or been decided since. Nothing was submitted; the normal poll announces any new ready head.", p.pr.fork, p.pr.number))

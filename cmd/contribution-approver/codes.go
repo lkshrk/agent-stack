@@ -22,9 +22,10 @@ type prKey struct {
 }
 
 type pending struct {
-	pr      prKey
-	sha     string
-	expires time.Time
+	pr         prKey
+	sha        string
+	expires    time.Time
+	superseded bool
 }
 
 type sentAnnouncement struct {
@@ -45,6 +46,7 @@ const (
 	codeUnknown codeStatus = iota
 	codeExpired
 	codeExpiredStale
+	codeSuperseded
 	codeValid
 )
 
@@ -147,8 +149,13 @@ func (s *codeStore) issue(k prKey, sha string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	s.dropLive(k)
-	// Expired codes stay as tombstones so a late reply maps back to its pull request.
+	for code, p := range s.byCode {
+		if p.pr == k && !p.superseded && now.Before(p.expires) {
+			p.superseded = true
+			s.byCode[code] = p
+		}
+	}
+	// Expired and superseded codes stay as tombstones so a late reply maps back to its pull request.
 	for code, p := range s.byCode {
 		if !now.Before(p.expires.Add(tombstoneTTL)) {
 			delete(s.byCode, code)
@@ -181,6 +188,9 @@ func (s *codeStore) take(code string) (pending, codeStatus) {
 	now := s.now()
 	if !now.Before(p.expires.Add(tombstoneTTL)) {
 		return pending{}, codeUnknown
+	}
+	if p.superseded {
+		return p, codeSuperseded
 	}
 	a, current := s.announced[p.pr]
 	current = current && a.sha == p.sha
@@ -248,7 +258,7 @@ func (s *codeStore) live() int {
 	defer s.mu.Unlock()
 	n := 0
 	for _, p := range s.byCode {
-		if s.now().Before(p.expires) {
+		if !p.superseded && s.now().Before(p.expires) {
 			n++
 		}
 	}
@@ -258,7 +268,7 @@ func (s *codeStore) live() int {
 func (s *codeStore) dropLive(k prKey) {
 	now := s.now()
 	for code, p := range s.byCode {
-		if p.pr == k && now.Before(p.expires) {
+		if p.pr == k && !p.superseded && now.Before(p.expires) {
 			delete(s.byCode, code)
 		}
 	}
