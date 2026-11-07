@@ -152,7 +152,10 @@ rules are the owner's, only the environment differs.
    file first) — findings summary, relevance verdict, changes applied,
    health-gate outcome. A merged PR with no comment is an incomplete step.
 10. **Next.** Success (or failure recovered forward) → immediately the next
-    PR on the list. Only stop early if the cluster is unstable.
+    PR on the list. Only stop early if the cluster is unstable, or at the
+    caps: at most 50 merges per sweep (`land_renovate_pr` refuses more) and
+    at most 100 PRs in the result (more blocks the card); leave the rest
+    untouched for the next sweep.
 11. **Close the sweep.** Update the vault: new pitfalls via `raw/sessions/` +
     page edit, and record per-dep verdicts ("no relevant finding @ vX") in the
     upgrade-deps runbook so the next sweep starts from them; commit and run

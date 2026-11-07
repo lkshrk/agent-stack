@@ -69,7 +69,9 @@ prompt: |
     Are Encrypted` must succeed) and whose non-Renovate pushes pass the same
     checks; when it refuses, fix the cause or skip the PR. Between two calls
     for the same PR run `gh pr checks <n> -R lkshrk/h-cloud --watch`: three
-    identical calls in a row are denied.
+    identical calls in a row are denied. One sweep merges at most 50 PRs
+    (the tool refuses the 51st) and its result lists at most 100 PRs (more
+    blocks the card); leave the rest untouched for the next sweep.
   - gh: reads, `gh pr comment` and `gh pr close` (without
     `--delete-branch`), on `lkshrk/h-cloud` only; nothing else mutates
     GitHub. Never read files under `/agent-secrets`; gh and git read their
