@@ -147,6 +147,20 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.infra_vcs.infra_vcs",
+        "kind": "factory",
+        "name": "infra_vcs",
+        "description": (
+            "Limit git pushes to `git push origin HEAD:<branch_prefix><branch>`, deny git remote changes, and allow "
+            "only gh reads plus PR comments and closes; merging goes through the land_renovate_pr tool."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"branch_prefix": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.readonly.read_only_shell",
         "kind": "factory",
         "name": "read_only_shell",
