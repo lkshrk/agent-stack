@@ -203,7 +203,7 @@ func TestCodesExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.markAnnounced(prKey{testFork, 1}, shaA, code)
+	s.markAnnounced(prKey{testFork, 1}, shaA, code, "")
 	c.advance(30*time.Minute + time.Second)
 	if _, st := s.take(code); st != codeExpired {
 		t.Fatal("an expired code was not reported as expired")

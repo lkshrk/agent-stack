@@ -449,12 +449,12 @@ func TestASupersededRecordIsPurgedWithTheOtherCodeMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.markAnnounced(k, shaA, old)
+	s.markAnnounced(k, shaA, old, "")
 	fresh, err := s.issue(k, shaB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.markAnnounced(k, shaB, fresh)
+	s.markAnnounced(k, shaB, fresh, "")
 	if n := s.live(); n != 1 {
 		t.Fatalf("live codes = %d, want 1", n)
 	}
@@ -573,7 +573,7 @@ func TestACodeRepliedBeforeItsAnnouncementIsDeliveredDecidesNothing(t *testing.T
 			h := newHarness(t)
 			setup(h)
 			var early *httptest.ResponseRecorder
-			h.signal.whenSent(func(msg string) { early = approveWith(h, codeIn(t, msg)) })
+			h.signal.whenSent(func(msg string) { early = replyFromHook(t, h, msg) })
 			h.poller.poll(context.Background())
 
 			if early == nil || early.Code != http.StatusNotFound {
@@ -583,6 +583,64 @@ func TestACodeRepliedBeforeItsAnnouncementIsDeliveredDecidesNothing(t *testing.T
 				t.Fatalf("reviews = %v, want none", r)
 			}
 		})
+	}
+}
+
+// replyFromHook approves with msg's code from a fake server goroutine, so it must not call t.Fatal.
+func replyFromHook(t *testing.T, h *harness, msg string) *httptest.ResponseRecorder {
+	m := announcedCode.FindStringSubmatch(msg)
+	if m == nil {
+		t.Errorf("announcement has no code: %q", msg)
+		return nil
+	}
+	return approveWith(h, m[1])
+}
+
+func TestACodeRepliedWhileTheReviewsAreListedApproves(t *testing.T) {
+	for name, setup := range map[string]func(h *harness){
+		"first announcement": func(h *harness) { h.gh.readyPR(7, shaA) },
+		"same head again": func(h *harness) {
+			announce(t, h, 7, shaA)
+			h.codes.requestReannouncement(prKey{testFork, 7}, 0)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			setup(h)
+			var reply *httptest.ResponseRecorder
+			h.signal.whenSent(func(msg string) {
+				h.gh.beforeNext(http.MethodGet, "/repos/"+testFork+"/pulls/7/reviews", func() { reply = replyFromHook(t, h, msg) })
+			})
+			h.poller.poll(context.Background())
+
+			if reply == nil || reply.Code != http.StatusOK {
+				t.Fatalf("reply = %v, want 200", reply)
+			}
+			if r := h.gh.reviewCalls(); len(r) != 1 || r[0].body["commit_id"] != shaA {
+				t.Fatalf("reviews = %v, want one on %s", r, shaA)
+			}
+		})
+	}
+}
+
+func TestACodeWhoseReviewListingFailedIsRefusedAndAnnouncedAgain(t *testing.T) {
+	h := newHarness(t)
+	h.gh.readyPR(7, shaA)
+	reviews := "/repos/" + testFork + "/pulls/7/reviews"
+	h.signal.whenSent(func(string) { h.gh.fail(http.MethodGet, reviews, http.StatusBadGateway) })
+	h.poller.poll(context.Background())
+	h.gh.fail(http.MethodGet, reviews, 0)
+	code := codeIn(t, lastMessage(h))
+
+	if rec := approveWith(h, code); rec.Code != http.StatusConflict {
+		t.Fatalf("reply = %d, want 409", rec.Code)
+	}
+	if r := h.gh.reviewCalls(); len(r) != 0 {
+		t.Fatalf("reviews = %v, want none", r)
+	}
+	h.poller.poll(context.Background())
+	if announcements(h) != 2 {
+		t.Fatalf("announcements = %d, want 2", announcements(h))
 	}
 }
 
