@@ -88,6 +88,8 @@ A second run changes nothing. The disable-before-Actions order only protects a f
 
 The code works once and expires after 30 minutes. Replying with an expired code within 24 hours brings a new announcement with a new code, if the fork PR is still ready on the same head. A newer announcement of the same fork PR replaces its code. An approving review in GitHub doesn't need the code.
 
+A retry announcement, for example after a failed review read, also replaces the code, so a reply with the older code gets the outdated text; use the newest announcement.
+
 Replies to a code that submit nothing:
 
 | Notice | Meaning |
@@ -183,20 +185,20 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 
 Prove each of these before the first real contribution, and approve nothing real until the list is done. Run this phase only after the first fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
 
-- [ ] The setup clears the fork's "Actions disabled" banner through the API. Checked only on an upstream with Actions turned off: neither fork showed the banner any more.
+- [ ] The setup clears the fork's "Actions disabled" banner through the API. The 2026-11-06 rollout reported it cleared on lkshrk/omnigent, but no log was kept; the stand-in checks only tested an upstream with Actions turned off.
 - [x] Disabling a workflow works before Actions are enabled. The setup relies on it: it disables upstream workflows before it enables Actions.
 - [x] GitHub lists a newly committed workflow while Actions are disabled.
 - [x] GitHub allows disabling a `dynamic/` workflow, or refuses it. It refuses with 422 "Unable to disable this workflow."; the setup skips `dynamic/`.
 - [x] `gh` OAuth tokens send `X-OAuth-Scopes`, so the setup's scope check works.
 - [ ] A setup that fails at step 6 on a fresh fork leaves Actions off until it runs again: note how that looks and how to spot it. Read from the code only: `--check` reports `drift: workflow <path> is active`; no stand-in had upstream workflows to show it live.
-- [x] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected.
+- [x] A bot push to the default branch or to `upstream/**`, and a bot push that touches `.github/workflows/`, are rejected. Proven live: pushes to `main`, creating `upstream/pr-9100` and a branch adding `.github/workflows/` were rejected, and a REST move of `main` got 422; updating an existing `upstream/**` branch was not tested.
 - [x] A `contribution-ci` run's "Set up job" log shows only `Contents: read`, and the bot token can read fork CI.
 - [x] A fork PR approved in GitHub and one approved over Signal each publish once.
 - [ ] A quote reply of just `approve` to a real announcement with a long body reaches the approver (Signal clients may truncate quoted text or name the author by UUID only). Only short bodies were tested.
 - [ ] A non-owner review publishes nothing, and a stale code publishes nothing. The stale code was proven. The bot can't approve its own PR, so a non-owner review needs a second account; unit tests cover the owner-only rule.
 - [x] A commit pushed after the review isn't published.
 - [x] A body edit after the review is refused, and the approval is dismissed.
-- [x] A later reject or dismissal stops a republish.
+- [x] A later reject or dismissal stops a republish. A later reject stopped a republish; a dismissal was not tested live.
 - [x] Closing the upstream pull request doesn't reopen it.
 - [x] One issue draft publishes, and a comment draft is refused with the comment-drafts notice.
 - [x] A draft's `updated_at` equals the second of its `approved-upstream` labeled event.
