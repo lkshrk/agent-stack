@@ -147,6 +147,16 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.infra_cluster.infra_cluster",
+        "kind": "factory",
+        "name": "infra_cluster",
+        "description": (
+            "Keep kubectl, flux and helm to read verbs; flux reconcile (without --force or --reset) is the only "
+            "cluster request allowed."
+        ),
+        "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "handler": "agent_stack_policies.infra_vcs.infra_vcs",
         "kind": "factory",
         "name": "infra_vcs",
