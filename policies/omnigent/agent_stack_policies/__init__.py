@@ -33,11 +33,15 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.paths.path_guard",
         "kind": "factory",
         "name": "path_guard",
-        "description": "Deny writes, apply_patch changes and shell access to forbidden paths.",
+        "description": (
+            "Deny writes, apply_patch changes and shell access to forbidden paths, and writes alone to "
+            "write_deny paths."
+        ),
         "params_schema": {
             "type": "object",
             "properties": {
                 "deny": {"type": "array", "items": {"type": "string"}},
+                "write_deny": {"type": "array", "items": {"type": "string"}},
                 "allow_only": {"type": "array", "items": {"type": "string"}},
                 "exempt": {"type": "array", "items": {"type": "string"}},
                 "startup_files": {"type": "array", "items": {"type": "string"}},

@@ -771,3 +771,47 @@ class ShellWriteScopeTest(unittest.TestCase):
     def test_without_allow_only_unchanged(self):
         guard = path_guard(deny=[WORKFLOWS])
         self.assertEqual(guard(tool_call_event("bash", {"command": "echo x > src/app.py"}))["result"], "ALLOW")
+
+
+class WriteDenyTest(unittest.TestCase):
+    def guard(self):
+        return path_guard(
+            deny=["**/*.sops.yaml"],
+            write_deny=["kubernetes/apps/kube-system/**", "kubernetes/flux/**", "**/ks.yaml"],
+            allow_only=["kubernetes/apps/*/*/**/*", "/tmp/**"],
+        )
+
+    def verdict(self, tool, arguments):
+        return self.guard()(tool_call_event(tool, arguments))["result"]
+
+    def test_write_deny_blocks_writes_inside_the_allowed_scope(self):
+        for path in ("kubernetes/apps/kube-system/cilium/app/values.yaml", "kubernetes/apps/ai/litellm/app/ks.yaml",
+                     "/home/omnigent/work/h-cloud/kubernetes/apps/kube-system/cilium/app/values.yaml",
+                     "/home/omnigent/work/h-cloud/kubernetes/apps/ai/litellm/app/ks.yaml"):
+            with self.subTest(path):
+                self.assertEqual(self.verdict("Write", {"file_path": path, "content": "x"}), "DENY")
+                if not path.startswith("/"):
+                    self.assertEqual(self.verdict("Bash", {"command": f"sed -i s/a/b/ {path}"}), "DENY")
+        patch_text = "*** Begin Patch\n*** Update File: kubernetes/apps/kube-system/cilium/app/values.yaml\n@@\n-a\n+b\n*** End Patch"
+        self.assertEqual(self.verdict("apply_patch", {"command": patch_text}), "DENY")
+
+    def test_write_deny_leaves_reads_alone(self):
+        for command in ("./scripts/flate-test.sh --path ./kubernetes/flux/cluster --allow-missing-secrets",
+                        "cat kubernetes/apps/kube-system/cilium/app/helmrelease.yaml",
+                        "rg -n tag kubernetes/apps/ai/litellm/ks.yaml"):
+            with self.subTest(command):
+                self.assertEqual(self.verdict("Bash", {"command": command}), "ALLOW")
+
+    def test_allowed_app_writes_pass(self):
+        path = "kubernetes/apps/ai/litellm/app/helmrelease.yaml"
+        self.assertEqual(self.verdict("Edit", {"file_path": path, "old_string": "a", "new_string": "b"}), "ALLOW")
+        self.assertEqual(self.verdict("Bash", {"command": f"sed -i s/a/b/ {path}"}), "ALLOW")
+        self.assertEqual(self.verdict("Write", {"file_path": "/tmp/chart/values.yaml", "content": "x"}), "ALLOW")
+        self.assertEqual(self.verdict("Write", {"file_path": "kubernetes/apps/ai/ns.yaml", "content": "x"}), "DENY")
+
+    def test_write_deny_alone_scopes_shell_writes(self):
+        guard = path_guard(write_deny=["talos/**"])
+        self.assertEqual(guard(tool_call_event("Bash", {"command": "echo x > talos/a.yaml"}))["result"], "DENY")
+        self.assertEqual(guard(tool_call_event("Write", {"file_path": "talos/a.yaml", "content": "x"}))["result"], "DENY")
+        self.assertEqual(guard(tool_call_event("Bash", {"command": "cat talos/a.yaml"}))["result"], "ALLOW")
+        self.assertEqual(guard(tool_call_event("Bash", {"command": "echo x > src/a.py"}))["result"], "ALLOW")

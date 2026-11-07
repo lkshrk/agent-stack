@@ -245,8 +245,11 @@ def path_guard(
     exempt: list[str] | None = None,
     startup_files: list[str] | None = None,
     startup_home: str | None = None,
+    write_deny: list[str] | None = None,
 ) -> Callable[[Event], Decision | None]:
     forbidden = forbidden_matcher(deny, exempt)
+    write_forbidden = forbidden_matcher(write_deny, None)
+    has_write_deny = bool(write_deny)
     has_denied = bool(deny)
     allowed_only = list(allow_only) if allow_only is not None else None
     startup = frozenset(startup_files or [])
@@ -275,6 +278,8 @@ def path_guard(
             return _deny(f"path {path} tries to escape with '..'")
         if forbidden(path):
             return _deny(f"forbidden path {path}")
+        if write_forbidden(path):
+            return _deny(f"path {path} is not writable")
         if allowed_only is not None and not matches_allowed(path, allowed_only):
             return _deny(f"path {path} is outside allowed paths")
         return None
@@ -318,6 +323,8 @@ def path_guard(
             if startup_path(raw):
                 return _deny(f"startup file {raw} is not writable")
             target = posixpath.normpath(raw)
+            if write_forbidden(target):
+                return _deny(f"shell write to {target} is not allowed")
             if scope is not None:
                 if escapes(target) or raw.startswith("~") or (target.startswith("/") and not scratch(target)):
                     return _deny(f"shell write to {raw} leaves the checkout; write a relative path or under /tmp")
@@ -336,13 +343,13 @@ def path_guard(
         except OpaqueCommand as error:
             return _deny(str(error))
         except ValueError:
-            if has_denied or allowed_only is not None:
+            if has_denied or has_write_deny or allowed_only is not None:
                 return _deny("unparseable shell command while forbidden or allowed paths are set")
             return allow()
         reason = shell_shape_problem(statements)
         if reason:
             return _deny(reason)
-        if allowed_only is not None or startup:
+        if allowed_only is not None or startup or has_write_deny:
             decision = check_scope(command, list(allowed_only) if allowed_only is not None else None)
             if decision:
                 return decision
