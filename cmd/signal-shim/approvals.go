@@ -32,7 +32,7 @@ var (
 		"source": true, "sourceNumber": true, "sourceUuid": true, "sourceName": true, "sourceDevice": true,
 		"timestamp": true, "serverReceivedTimestamp": true, "serverDeliveredTimestamp": true, "dataMessage": true,
 	}
-	dataMessageKeys = map[string]bool{"timestamp": true, "message": true, "expiresInSeconds": true, "groupInfo": true, "quote": true}
+	dataMessageKeys = map[string]bool{"timestamp": true, "message": true, "expiresInSeconds": true, "groupInfo": true, "quote": true, "hasProfileKey": true}
 )
 
 type decision struct {
