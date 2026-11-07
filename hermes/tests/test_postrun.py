@@ -500,12 +500,17 @@ class InfraViolationsTest(unittest.TestCase):
             "kubernetes/apps/ai/contribution-approver/app/helmrelease.yaml",
             "kubernetes/apps/actions-runner-system/arc/app/helmrelease.yaml",
             "kubernetes/apps/flux-system/flux-operator/app/helmrelease.yaml",
+            "kubernetes/apps/ai/omnigent/app/helmrelease.yaml",
+            "kubernetes/apps/system-upgrade/tuppr/app/plan.yaml",
+            "kubernetes/apps/kube-system/cilium/app/helm/values.yaml",
+            "kubernetes/apps/ai/litellm/ks.yaml",
+            "kubernetes/apps/ai/litellm/app/ks.yaml",
             "kubernetes/apps/ai/litellm/app/secret.sops.yaml",
             "kubernetes/flux/cluster/ks.yaml",
             ".github/workflows/tag.yaml",
             "talos/talconfig.yaml",
         )
-        self.assertEqual(len(PROTECTED_PATHS), 10)
+        self.assertEqual(len(PROTECTED_PATHS), 14)
         for path in never:
             with self.subTest(path):
                 out = self.landed(self.agent_push([change(), change(path)]))
@@ -521,7 +526,8 @@ class InfraViolationsTest(unittest.TestCase):
 
     def test_paths_inside_other_apps_pass(self):
         for path in ("kubernetes/apps/securityx/a/app.yaml", "kubernetes/apps/ai/hermes-webui/app/x.yaml",
-                     "kubernetes/apps/kube-system/cilium/app/helm/values.yaml", "kubernetes/apps/ai/litellm/ks.yaml"):
+                     "kubernetes/apps/ai/omnigent-x/app/a.yaml", "kubernetes/apps/ai/litellm/app/notks.yaml",
+                     "kubernetes/apps/ai/litellm/app/ks.yaml.md"):
             self.assertEqual(self.landed(self.agent_push([change(path)])), [], path)
 
     def test_rename_into_or_out_of_disallowed_path_is_violation(self):
@@ -537,11 +543,13 @@ class InfraViolationsTest(unittest.TestCase):
                 self.assert_agent_violation(out, f"adds kind {kind} in {APP}")
         out = self.landed(self.agent_push([change(patch="@@ -1 +1,2 @@\n spec:\n+  targetNamespace: kube-system")]))
         self.assert_agent_violation(out, f"sets targetNamespace in {APP}")
+        out = self.landed(self.agent_push([change(patch="@@ -1 +1,2 @@\n spec:\n+      serviceAccountName: flux")]))
+        self.assert_agent_violation(out, f"sets serviceAccountName in {APP}")
 
     def test_unprivileged_or_removed_kinds_pass(self):
         for patch in ("@@ -1 +1 @@\n+kind: HelmRelease", "@@ -1 +1 @@\n+kind: NetworkPolicy",
                       "@@ -1 +1 @@\n-kind: ClusterRole", "@@ -1 +1 @@\n+  # kind: Role in a comment",
-                      "@@ -1 +1 @@\n-  targetNamespace: x"):
+                      "@@ -1 +1 @@\n-  targetNamespace: x", "@@ -1 +1 @@\n-  serviceAccountName: x"):
             self.assertEqual(self.landed(self.agent_push([change(patch=patch)])), [], patch)
 
     def test_missing_patch_is_violation_unless_a_pure_rename(self):

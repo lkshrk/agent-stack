@@ -31,10 +31,14 @@ PROTECTED_PATHS = (
     "kubernetes/apps/ai/contribution-approver/**",
     "kubernetes/apps/actions-runner-system/**",
     "kubernetes/apps/flux-system/**",
+    "kubernetes/apps/ai/omnigent/**",
+    "kubernetes/apps/system-upgrade/**",
+    "kubernetes/apps/kube-system/**",
     "kubernetes/flux/**",
     ".github/**",
     "talos/**",
     "**/*.sops.yaml",
+    "**/ks.yaml",
 )
 AGENT_ALLOWED_ROOT = ("kubernetes", "apps")
 AGENT_ALLOWED_MIN_SEGMENTS = 5
@@ -53,7 +57,10 @@ PRIVILEGED_KINDS = (
     "CiliumClusterwideNetworkPolicy",
 )
 _PRIVILEGED_LINE = re.compile(r"^\+\s*kind:\s*(" + "|".join(PRIVILEGED_KINDS) + r")\b", re.ASCII | re.MULTILINE)
-_TARGET_NAMESPACE_LINE = re.compile(r"^\+\s*targetNamespace:", re.ASCII | re.MULTILINE)
+_SCOPE_LINES = (
+    ("targetNamespace", re.compile(r"^\+\s*targetNamespace:", re.ASCII | re.MULTILINE)),
+    ("serviceAccountName", re.compile(r"^\+\s*serviceAccountName:", re.ASCII | re.MULTILINE)),
+)
 MONTHLY_TAG = re.compile(r"[0-9]{4}\.[0-9]{1,2}\.[0-9]+", re.ASCII)
 TAG_WORKFLOW = "tag.yaml"
 MAX_UNTRUSTED_PUSHES = 20
@@ -140,7 +147,7 @@ def protected_path(path: str) -> bool:
         if pattern.endswith("/**"):
             if path.startswith(pattern[:-2]):
                 return True
-        elif fnmatch.fnmatchcase(path, pattern.removeprefix("**/")):
+        elif fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], pattern.removeprefix("**/")):
             return True
     return False
 
@@ -597,9 +604,8 @@ def _change_problem(change: FileChange) -> str | None:
     kind = _PRIVILEGED_LINE.search(change.patch)
     if kind:
         return f"adds kind {kind.group(1)} in {change.filename}"
-    if _TARGET_NAMESPACE_LINE.search(change.patch):
-        return f"sets targetNamespace in {change.filename}"
-    return None
+    field = next((name for name, line in _SCOPE_LINES if line.search(change.patch)), None)
+    return f"sets {field} in {change.filename}" if field else None
 
 
 def _reported(push: Activity, changes: list[FileChange]) -> dict:
