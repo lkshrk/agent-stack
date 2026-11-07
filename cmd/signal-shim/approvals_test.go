@@ -47,6 +47,14 @@ func with(dm map[string]any, key string, v any) map[string]any {
 	return dm
 }
 
+func announcementText(code string) string {
+	return "Ready to publish upstream: Fix the thing\nhttps://example.invalid/pr/1\n\nReply \"approve " + code + "\" to publish this commit upstream or \"reject " + code + "\" to request changes. The code works once and expires in 30 minutes."
+}
+
+func announcementQuote(author, text string) map[string]any {
+	return map[string]any{"id": 1761244000000, "author": author, "authorNumber": author, "authorUuid": "uuid-quoted", "text": text, "attachments": []any{}}
+}
+
 func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 	route := &approvalRoute{owner: testOwner}
 	noSourceNumber, _ := json.Marshal(map[string]any{"account": testAccount, "envelope": map[string]any{"source": testOwner, "dataMessage": groupText("approve 12345678")}})
@@ -63,17 +71,35 @@ func TestApprovalMatchAcceptsOnlyTheOwnersExactDecision(t *testing.T) {
 		{"sync message", envelope(testOwner, nil, map[string]any{"syncMessage": map[string]any{"sentMessage": groupText("approve 12345678")}}), nil},
 		{"sync next to data", envelope(testOwner, groupText("approve 12345678"), map[string]any{"syncMessage": map[string]any{"readMessages": []any{1}}}), nil},
 		{"edit", envelope(testOwner, nil, map[string]any{"editMessage": map[string]any{"targetSentTimestamp": 1, "dataMessage": groupText("approve 12345678")}}), nil},
-		{"quote reply", envelope(testOwner, with(groupText("approve 12345678"), "quote", map[string]any{"id": 1, "author": testAccount, "text": "x"}), nil), nil},
+		{"quote reply with code", envelope(testOwner, with(groupText("approve 12345678"), "quote", map[string]any{"id": 1, "author": "+4915559999", "text": "x"}), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"code in text wins over the quote", envelope(testOwner, with(groupText("reject 12345678"), "quote", announcementQuote(testAccount, announcementText("87654321"))), nil), &decision{Action: "reject", Code: "12345678"}},
+		{"bare approve quoting the announcement", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, announcementText("12345678"))), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"bare Reject quoting the announcement", envelope(testOwner, with(groupText(" Reject\n"), "quote", announcementQuote(testAccount, announcementText("87654321"))), nil), &decision{Action: "reject", Code: "87654321"}},
+		{"bare approve quoting by author only", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorUuid": "uuid-bot", "text": announcementText("12345678"), "attachments": []any{}, "mentions": []any{}, "textStyles": []any{map[string]any{"style": "BOLD"}}}), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"bare approve quoting with a null authorNumber", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorNumber": nil, "text": announcementText("12345678")}), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"bare approve quoting someone else", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote("+4915559999", announcementText("12345678"))), nil), nil},
+		{"bare approve quoting a spoofed author", envelope(testOwner, with(groupText("approve"), "quote", map[string]any{"id": 1, "author": testAccount, "authorNumber": "+4915559999", "text": announcementText("12345678")}), nil), nil},
+		{"bare approve quoting a non-announcement", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, "Published upstream: https://example.invalid/pr/1")), nil), nil},
+		{"bare approve quoting two code lines", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, announcementText("12345678")+"\n"+announcementText("87654321"))), nil), nil},
+		{"bare approve quoting mismatched codes", envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, `Reply "approve 12345678" to publish this commit upstream or "reject 87654321" to request changes.`)), nil), nil},
+		{"bare approve without a quote", envelope(testOwner, groupText("approve"), nil), nil},
+		{"bare approve with a mention", envelope(testOwner, with(with(groupText("approve"), "quote", announcementQuote(testAccount, announcementText("12345678"))), "mentions", []any{map[string]any{"start": 0}}), nil), nil},
+		{"bare approve with words", envelope(testOwner, with(groupText("approve it"), "quote", announcementQuote(testAccount, announcementText("12345678"))), nil), nil},
+		{"edit of a bare approve", envelope(testOwner, nil, map[string]any{"editMessage": map[string]any{"targetSentTimestamp": 1, "dataMessage": with(groupText("approve"), "quote", announcementQuote(testAccount, announcementText("12345678")))}}), nil},
+		{"quote that is not an object", envelope(testOwner, with(groupText("approve"), "quote", "x"), nil), nil},
 		{"reaction", envelope(testOwner, with(groupText(""), "reaction", map[string]any{"emoji": "👍", "targetSentTimestamp": 1}), nil), nil},
 		{"attachment", envelope(testOwner, with(groupText("approve 12345678"), "attachments", []any{map[string]any{"id": "a"}}), nil), nil},
 		{"mention", envelope(testOwner, with(groupText("approve 12345678"), "mentions", []any{map[string]any{"start": 0}}), nil), nil},
 		{"view once", envelope(testOwner, with(groupText("approve 12345678"), "viewOnce", true), nil), nil},
 		{"styled", envelope(testOwner, with(groupText("approve 12345678"), "textStyles", []any{map[string]any{"style": "BOLD"}}), nil), nil},
 		{"empty fields are fine", envelope(testOwner, with(with(groupText("approve 12345678"), "mentions", []any{}), "quote", nil), nil), &decision{Action: "approve", Code: "12345678"}},
-		{"capitalised", envelope(testOwner, groupText("Approve 12345678"), nil), nil},
-		{"trailing space", envelope(testOwner, groupText("approve 12345678 "), nil), nil},
-		{"trailing newline", envelope(testOwner, groupText("approve 12345678\n"), nil), nil},
-		{"double space", envelope(testOwner, groupText("approve  12345678"), nil), nil},
+		{"capitalised", envelope(testOwner, groupText("Approve 12345678"), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"upper case", envelope(testOwner, groupText("REJECT 12345678"), nil), &decision{Action: "reject", Code: "12345678"}},
+		{"padded", envelope(testOwner, groupText("  approve 12345678 \n"), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"double space", envelope(testOwner, groupText("approve  12345678"), nil), &decision{Action: "approve", Code: "12345678"}},
+		{"trailing word", envelope(testOwner, groupText("approve 12345678 please"), nil), nil},
+		{"no space", envelope(testOwner, groupText("approve12345678"), nil), nil},
+		{"non-ascii digits", envelope(testOwner, groupText("approve １２３４５６７８"), nil), nil},
 		{"short code", envelope(testOwner, groupText("approve 1234567"), nil), nil},
 		{"long code", envelope(testOwner, groupText("approve 123456789"), nil), nil},
 		{"prefixed", envelope(testOwner, groupText("please approve 12345678"), nil), nil},
@@ -229,12 +255,12 @@ func TestEventsRouteOwnerDecisionToApproverNotHermes(t *testing.T) {
 	sc, done := openEvents(t, s)
 	defer done()
 
-	f.push <- envelope(testOwner, groupText("approve 12345678"), nil)
-	f.push <- envelope(testOwner, with(groupText("reject 12345678"), "quote", map[string]any{"id": 1, "author": testAccount}), nil)
+	f.push <- envelope(testOwner, with(groupText("approve"), "quote", announcementQuote(testAccount, announcementText("12345678"))), nil)
+	f.push <- envelope(testOwner, with(groupText("reject"), "quote", announcementQuote("+4915559999", announcementText("12345678"))), nil)
 	f.push <- envelope("+4915559999", groupText("approve 12345678"), nil)
 	f.push <- envelope(testOwner, groupText("hello hermes"), nil)
 
-	for _, want := range []string{"reject 12345678", "approve 12345678", "hello hermes"} {
+	for _, want := range []string{"reject", "approve 12345678", "hello hermes"} {
 		if got := nextMessage(t, sc); got != want {
 			t.Fatalf("Hermes received %q, want %q", got, want)
 		}

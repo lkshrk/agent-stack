@@ -20,14 +20,16 @@ const (
 )
 
 var (
-	decisionText = regexp.MustCompile(`^(approve|reject) ([0-9]{8})$`)
-	e164         = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
+	decisionText     = regexp.MustCompile(`^(?i:(approve|reject))\s+([0-9]{8})$`)
+	bareDecisionText = regexp.MustCompile(`^(?i:(approve|reject))$`)
+	announcementCode = regexp.MustCompile(`(?m)^Reply "approve ([0-9]{8})" to publish this commit upstream or "reject ([0-9]{8})"`)
+	e164             = regexp.MustCompile(`^\+[1-9][0-9]{6,14}$`)
 
 	envelopeKeys = map[string]bool{
 		"source": true, "sourceNumber": true, "sourceUuid": true, "sourceName": true, "sourceDevice": true,
 		"timestamp": true, "serverReceivedTimestamp": true, "serverDeliveredTimestamp": true, "dataMessage": true,
 	}
-	dataMessageKeys = map[string]bool{"timestamp": true, "message": true, "expiresInSeconds": true, "groupInfo": true}
+	dataMessageKeys = map[string]bool{"timestamp": true, "message": true, "expiresInSeconds": true, "groupInfo": true, "quote": true}
 )
 
 type decision struct {
@@ -90,17 +92,41 @@ func (a *approvalRoute) match(data []byte) (decision, bool) {
 	if !ok {
 		return decision{}, false
 	}
-	m := decisionText.FindStringSubmatch(text)
-	if m == nil {
+	action, code, ok := decisionIn(strings.TrimSpace(text), dm["quote"], str(msg["account"]))
+	if !ok {
 		return decision{}, false
 	}
-	d := decision{Action: m[1], Code: m[2], account: str(msg["account"]), recipient: a.owner}
+	d := decision{Action: action, Code: code, account: str(msg["account"]), recipient: a.owner}
 	if g, _ := dm["groupInfo"].(map[string]any); g != nil {
 		if id := str(g["groupId"]); id != "" {
 			d.recipient = "group." + base64.StdEncoding.EncodeToString([]byte(id))
 		}
 	}
 	return d, true
+}
+
+func decisionIn(text string, quote any, account string) (action, code string, ok bool) {
+	if m := decisionText.FindStringSubmatch(text); m != nil {
+		return strings.ToLower(m[1]), m[2], true
+	}
+	m := bareDecisionText.FindStringSubmatch(text)
+	q, _ := quote.(map[string]any)
+	if m == nil || q == nil || account == "" {
+		return "", "", false
+	}
+	author := str(q["authorNumber"])
+	if author == "" {
+		author = str(q["author"])
+	}
+	if author != account {
+		return "", "", false
+	}
+	quoted, _ := q["text"].(string)
+	codes := announcementCode.FindAllStringSubmatch(quoted, -1)
+	if len(codes) != 1 || codes[0][1] != codes[0][2] {
+		return "", "", false
+	}
+	return strings.ToLower(m[1]), codes[0][1], true
 }
 
 func onlyKnown(obj map[string]any, known map[string]bool) bool {
