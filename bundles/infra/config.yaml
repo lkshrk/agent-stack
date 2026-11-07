@@ -51,7 +51,10 @@ prompt: |
     `storageNamespace`, `kubeConfig`, `valuesFrom` and every values key about
     rbac, service accounts, cluster roles, extra objects or manifests, host
     network or paths, privileges and secrets; ConfigMap data that parses as
-    YAML follows the same rules. A PVC keeps `volumeName`, `dataSource`,
+    YAML follows the same rules. Image repositories stay fixed: an image
+    changes only its tag or digest, `repository` and `registry` values stay,
+    no container with a new image is added, and a kustomize image keeps its
+    `name` and `newName`. A PVC keeps `volumeName`, `dataSource`,
     `dataSourceRef` and `storageClassName`. A kustomization may only change
     `images` and add local `./<file>.yaml` resources.
   - These limits apply to what you author. Renovate's own changes, also in
