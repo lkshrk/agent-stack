@@ -184,7 +184,9 @@ A draft labelled `upstream-comment` is refused with "comment drafts are not publ
 
 ## Go-live checks
 
-Prove each of these before the first real contribution, and approve nothing real until the list is done. Run this phase only after the first fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
+These checks ran on 2026-11-07 against a stand-in. The ticked items were proven live. The owner accepted the open items as residuals, for the reasons given with each. Real contributions may start.
+
+To run them again, wait until the fork's rollout is complete, after the pre-merge `READS PASS` re-run of the octo-sts proof and the Kyverno follow-up (merge order in h-cloud's `kubernetes/apps/ai/contribution-approver/README.md`): that proof checks that the App covers exactly `lkshrk/omnigent`, so a stand-in onboarded earlier makes it fail. Use a stand-in: a throwaway upstream repository in an organisation the owner owns, with its fork `lkshrk/<name>` as a temporary registry entry. `lkshrk/omnigent` can't be used, because it sits in Omnigent's fork network, and the registry refuses an upstream owned by `lkshrk`.
 
 - [ ] The setup clears the fork's "Actions disabled" banner through the API. The 2026-11-06 rollout reported it cleared on lkshrk/omnigent, but no log was kept; the stand-in checks only tested an upstream with Actions turned off.
 - [x] Disabling a workflow works before Actions are enabled. The setup relies on it: it disables upstream workflows before it enables Actions.
