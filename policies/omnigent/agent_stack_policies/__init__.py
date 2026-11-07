@@ -206,7 +206,7 @@ POLICY_REGISTRY: list[dict] = [
         "params_schema": {
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["planner", "security", "documenter", "polly"]},
+                "kind": {"type": "string", "enum": ["planner", "security", "documenter", "polly", "infra"]},
                 "await_dispatches": {"type": "boolean"},
             },
             "required": ["kind"],

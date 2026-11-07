@@ -7,7 +7,7 @@ from collections.abc import Callable
 from ._event import Decision, Event, allow, deny, is_response, response_text, session_state, turn_final
 from .spawn import COLLECT_STATE_KEY, DISPATCH_STATE_KEY, awaiting
 
-KINDS = ("planner", "security", "documenter", "polly")
+KINDS = ("planner", "security", "documenter", "polly", "infra")
 STATUSES = ("DONE", "DONE_WITH_CONCERNS", "BLOCKED")
 BLOCK_CLASSES = ("decision", "permission", "dependency", "environment")
 RISK_CLASSES = ("low", "medium", "high")
@@ -15,7 +15,14 @@ SEVERITIES = ("critical", "high", "medium", "low")
 GATES = ("gate:plan", "gate:split", "gate:pr")
 STUB_CLASSES = ("cosmetic", "internal")
 GAP_CLASSES = (*STUB_CLASSES, "behaviour", "data", "security", "public_api", "cost")
-NO_STUB = {"planner": "a plan", "security": "a security review", "documenter": "a documenter result outside delta mode"}
+NO_STUB = {
+    "planner": "a plan",
+    "security": "a security review",
+    "documenter": "a documenter result outside delta mode",
+    "infra": "an infra result",
+}
+INFRA_LISTS = ("merged", "skipped", "closed", "failed")
+INFRA_VERDICTS = ("clean", "relevant", "high-risk", "stale")
 MAX_CHILDREN = 8
 MAX_ERRORS_SHOWN = 5
 MAX_DEPTH = 64
@@ -28,6 +35,7 @@ _GAP_ID = re.compile(r"gap-[1-9][0-9]*")
 _GAP_REF = re.compile(r"(gap-[1-9][0-9]*)(?![\w-])")
 _LOCATION = re.compile(r"[^\s:]+:[1-9][0-9]*")
 _PULL_URL = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/[1-9][0-9]*")
+_SHA = re.compile(r"[0-9a-f]{7,40}")
 
 
 def extract_result(text: str) -> dict | None:
@@ -282,6 +290,43 @@ def _check_polly(result: dict, errors: list[str]) -> None:
         errors.append("branch must be a non-empty string")
 
 
+def _check_infra(result: dict, errors: list[str]) -> None:
+    seen: set[str] = set()
+    for key in INFRA_LISTS:
+        entries = result.get(key)
+        if not isinstance(entries, list):
+            errors.append(f"{key} must be a list")
+            continue
+        for i, entry in enumerate(entries):
+            where = f"{key}[{i}]"
+            if not isinstance(entry, dict):
+                errors.append(f"{where} must be an object")
+                continue
+            pr = entry.get("pr")
+            if not isinstance(pr, str) or not _PULL_URL.fullmatch(pr):
+                errors.append(f"{where}.pr must be a https://github.com/<owner>/<repo>/pull/<n> URL")
+            elif pr in seen:
+                errors.append(f"{pr} is listed more than once")
+            else:
+                seen.add(pr)
+            version = entry.get("version")
+            if version is not None and not _text(version):
+                errors.append(f"{where}.version must be a non-empty string when given")
+            if entry.get("verdict") not in INFRA_VERDICTS:
+                errors.append(f"{where}.verdict must be one of {'|'.join(INFRA_VERDICTS)}")
+            if not _text(entry.get("summary")):
+                errors.append(f"{where}.summary must be a non-empty string")
+            if key == "failed" and not _text(entry.get("rca")):
+                errors.append(f"{where}.rca must be a non-empty string")
+    vault = result.get("vault")
+    if not isinstance(vault, dict) or "commit" not in vault:
+        errors.append("vault must be an object with commit")
+        return
+    commit = vault["commit"]
+    if commit is not None and not (isinstance(commit, str) and _SHA.fullmatch(commit)):
+        errors.append("vault.commit must be a commit sha or null")
+
+
 def _check_gate(result: dict, errors: list[str]) -> None:
     gate = result.get("gate")
     if (gate is not None or result.get("status") != "BLOCKED") and gate not in GATES:
@@ -352,7 +397,13 @@ def _check_assumptions(result: dict, gap_ids: set[str], errors: list[str]) -> No
             errors.append(f"assumptions[{i}] must start with a gap id from gaps, e.g. 'gap-1: ...'")
 
 
-_CHECKS = {"planner": _check_planner, "security": _check_security, "documenter": _check_documenter, "polly": _check_polly}
+_CHECKS = {
+    "planner": _check_planner,
+    "security": _check_security,
+    "documenter": _check_documenter,
+    "polly": _check_polly,
+    "infra": _check_infra,
+}
 
 
 def validate_result(kind: str, result: dict) -> list[str]:
