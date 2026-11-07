@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.10
+# syntax=docker/dockerfile:1.10@sha256:865e5dd094beca432e8c0a1d5e1c465db5f998dca4e439981029b3b81fb39ed5
 ARG OMNIGENT_HOST_IMAGE=ghcr.io/omnigent-ai/omnigent-host:v0.21.0.dev20261031@sha256:e0073f41be7dacb6cb73438692bf8108a10c03dfd961251ad05c81e95119e9c9
 
 FROM ${OMNIGENT_HOST_IMAGE} AS upstream-env
