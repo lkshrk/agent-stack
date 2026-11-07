@@ -33,6 +33,12 @@ type CardLink struct {
 	RootIssueID string `json:"root_issue_id"`
 }
 
+type CardRun struct {
+	Bundle string `json:"bundle"`
+	Repo   string `json:"repo"`
+	Ref    string `json:"ref"`
+}
+
 type Card struct {
 	ID          string         `json:"id"`
 	Status      string         `json:"status"`
@@ -43,6 +49,7 @@ type Card struct {
 	BlockReason string         `json:"block_reason"`
 	Summary     string         `json:"summary"`
 	Link        *CardLink      `json:"link"`
+	Run         *CardRun       `json:"run"`
 	Metadata    map[string]any `json:"metadata"`
 }
 

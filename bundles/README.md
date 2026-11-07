@@ -14,6 +14,12 @@ A bundle's `model` doesn't choose the model of a session started from the Omnige
 
 The Hermes session tool `omnigent_run` validates each bundle's result, runs the post-run check (`policies/README.md`, Post-run check) and stores the result's `gaps` and `doc_gaps` in the card metadata; linear-bridge lists them in its evidence comment on the Linear issue. Workers never create sub-issues.
 
+## Starting an infra sweep
+
+Ask Hermes in Signal to "upgrade h-cloud" (or "run the Renovate sweep"; extra text, such as "skip cilium", goes to the agent as its task). The default profile's `upgrade-h-cloud` skill (`config/hermes/profiles/default/skills/`) runs `runner-start infra '<request>'` (`hermes/agent_stack_hermes/start.py`), which creates one `omnigent-runner` card with `agent-stack-link: null` and `agent-stack-run: {"bundle":"infra","repo":"lkshrk/h-cloud","ref":"main","input":"<request or the default task>"}`. It refuses while an infra card is not done or archived, blocked ones included: archive a blocked card (`hermes kanban archive <id>`) to start a new sweep. Hermes itself never touches h-cloud.
+
+When a runner card without a Linear link completes or blocks, linear-bridge sends the owner one Signal message (`cmd/README.md`, linear-bridge): for infra the merged PRs, the agent's own pushes from `post_run.landed`, the skipped PRs with their reasons, closed and failed PRs (with RCA), post-run notes and the vault commit; for a blocked card its `BLOCKED` reason, marked 🔴 for a post-run check violation. Other bundles get a one-line status with the PR link.
+
 ## h-cloud contract for `infra`
 
 The infra bundle needs these values from h-cloud (rollout step 4) and from the Hermes runner's environment. They are the contract; change both sides together.

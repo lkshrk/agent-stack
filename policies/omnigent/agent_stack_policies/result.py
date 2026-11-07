@@ -34,7 +34,7 @@ _PLACEHOLDER = re.compile(r"\[NEEDS CLARIFICATION|\bTBD\b")
 _GAP_ID = re.compile(r"gap-[1-9][0-9]*")
 _GAP_REF = re.compile(r"(gap-[1-9][0-9]*)(?![\w-])")
 _LOCATION = re.compile(r"[^\s:]+:[1-9][0-9]*")
-_PULL_URL = re.compile(r"https://github\.com/[^/]+/[^/]+/pull/[1-9][0-9]*")
+_PULL_URL = re.compile(r"https://github\.com/[A-Za-z0-9-]+/[A-Za-z0-9._-]+/pull/[1-9][0-9]*")
 _SHA = re.compile(r"[0-9a-f]{7,40}")
 
 

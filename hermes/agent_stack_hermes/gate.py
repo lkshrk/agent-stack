@@ -53,6 +53,14 @@ def _link_of(body: str) -> LinearLink | None:
         return None
 
 
+def _run_of(body: str) -> dict | None:
+    try:
+        spec = parse_card_body(body or "")[1]
+    except ValueError:
+        return None
+    return None if spec is None else {"bundle": spec.bundle, "repo": spec.repo, "ref": spec.ref}
+
+
 class HermesKanbanAdmin:
     def __init__(self, db_path: Path | None = None):
         self._db_path = Path(db_path) if db_path else None
@@ -161,6 +169,7 @@ class HermesKanbanAdmin:
                 "session_id": link.session_id,
                 "root_issue_id": link.root_issue_id,
             },
+            "run": _run_of(task.body),
             "metadata": _json_object(done[0]) if done else None,
         }
 
