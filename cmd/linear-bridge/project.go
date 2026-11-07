@@ -146,6 +146,14 @@ type projector struct {
 	stallTicks   int
 	stallCards   map[string]bool
 	stallAlerted bool
+
+	reports  []queuedReport
+	reported map[string]bool
+}
+
+type queuedReport struct {
+	cardID, msg string
+	attempts    int
 }
 
 const (
@@ -204,6 +212,10 @@ func (p *projector) tick(ctx context.Context) error {
 	if p.warned == nil {
 		p.warned = map[string]bool{}
 	}
+	if p.reported == nil {
+		p.reported = map[string]bool{}
+	}
+	defer p.sendReports(ctx)
 	batch := p.batch
 	if batch <= 0 {
 		batch = defaultBatch
@@ -332,7 +344,8 @@ func (p *projector) project(ctx context.Context, cardID string, finished bool) e
 		return err
 	}
 	if card.Link == nil {
-		return p.report(ctx, card, finished)
+		p.report(card, finished)
+		return nil
 	}
 	p.identifiers[cardID] = card.Link.Identifier
 	key := strings.Join([]string{cardID, card.Status, strconv.FormatInt(card.RunID, 10), card.Outcome, card.BlockReason}, "|")
@@ -418,20 +431,45 @@ func (p *projector) setState(ctx context.Context, card Card, issue IssueInfo) er
 	return nil
 }
 
-func (p *projector) report(ctx context.Context, card Card, finished bool) error {
+func (p *projector) report(card Card, finished bool) {
 	if !finished {
-		return nil
+		return
 	}
 	msg, ok := runnerReport(card)
 	if !ok {
-		return nil
+		return
 	}
 	key := strings.Join([]string{card.ID, card.Status, strconv.FormatInt(card.RunID, 10), card.Outcome, card.BlockReason}, "|")
-	return p.step(key, "report", func() error {
+	if p.reported[key] {
+		return
+	}
+	p.reported[key] = true
+	p.reports = append(p.reports, queuedReport{cardID: card.ID, msg: msg})
+}
+
+func (p *projector) sendReports(ctx context.Context) {
+	pending := p.reports[:0]
+	for _, r := range p.reports {
+		if ctx.Err() != nil {
+			pending = append(pending, r)
+			continue
+		}
 		cctx, cancel := context.WithTimeout(ctx, notifyTimeout)
-		defer cancel()
-		return p.notify.Notify(cctx, msg)
-	})
+		err := p.notify.Notify(cctx, r.msg)
+		cancel()
+		if err == nil {
+			continue
+		}
+		r.attempts++
+		if r.attempts < maxReportAttempts {
+			pending = append(pending, r)
+			continue
+		}
+		msg := fmt.Sprintf("⚠️ runner report for card %s dropped after %d attempts: %s", clean(r.cardID, 40), r.attempts, shortErr(err))
+		log.Print("linear-bridge: " + msg)
+		p.alert(msg)
+	}
+	p.reports = pending
 }
 
 func (p *projector) alert(msg string) {

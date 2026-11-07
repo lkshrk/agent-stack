@@ -42,7 +42,7 @@ Receives signed Linear webhooks at `POST /webhooks/linear` (`GET /healthz` for p
 - A new agent session gets a thought: "Received. Checking readiness." for the owner, a refusal for anyone else.
 - A prompted agent session is logged.
 
-Every 30 s it also reads the Kanban gate's event stream (`hermes/agent_stack_hermes/gate.py`) and projects cards with a Linear link onto their issue: status, agent activity, an evidence comment, and a 🔴 Signal alert for a post-run check violation. A card for `omnigent-runner` without a Linear link, such as an infra sweep, has no issue: when a batch holds its `completed`, `blocked`, `gave_up` or `block_loop_detected` event, the owner gets one Signal report instead (`report.go`). A report that can't be sent holds the cursor and is retried; a restart between sending and moving the cursor can send it twice.
+Every 30 s it also reads the Kanban gate's event stream (`hermes/agent_stack_hermes/gate.py`) and projects cards with a Linear link onto their issue: status, agent activity, an evidence comment, and a 🔴 Signal alert for a post-run check violation. A card for `omnigent-runner` without a Linear link, such as an infra sweep, has no issue: when a batch holds its `completed`, `blocked`, `gave_up` or `block_loop_detected` event, the owner gets one Signal report instead (`report.go`). Every card field in it is reduced to one clean, clipped line, PR links are printed only as `https://github.com/<owner>/<repo>/pull/<n>`, and the whole message stays under 2000 characters. Reports wait in an in-memory queue that never holds the cursor: an unsent report is retried on the next ticks and, after 10 failed attempts, dropped with one alert attempt. A restart loses queued reports.
 
 | Variable | Meaning |
 | --- | --- |

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const pr = "https://github.com/lkshrk/h-cloud/pull/"
@@ -76,6 +79,7 @@ func TestInfraReportCapsAndClips(t *testing.T) {
 	long := strings.Repeat("word ", 80)
 	for i := 0; i < reportMaxItems+3; i++ {
 		entries = append(entries, `{"pr":"`+pr+`1","verdict":"clean","summary":"`+long+`"}`)
+		long = "s"
 	}
 	c := infraCard(t, `{"status":"DONE","merged":[`+strings.Join(entries, ",")+`],"skipped":[],"closed":[],"failed":[],"vault":{"commit":null}}`, `"ok"`)
 	got, _ := runnerReport(c)
@@ -179,33 +183,131 @@ func (f *failingNotifier) Notify(ctx context.Context, t string) error {
 	return f.err
 }
 
-func TestReportFailureKeepsCursor(t *testing.T) {
-	c := Card{ID: "t_2", Status: "blocked", Assignee: runnerAssignee, RunID: 1, BlockReason: "BLOCKED{environment}: x"}
-	k := &projKanban{events: []CardEvent{{ID: 3, CardID: "t_2", Kind: "blocked"}}, cards: map[string]Card{"t_2": c}}
-	n := &failingNotifier{err: errors.New("signal down")}
-	p := newProjector(k, &fakeLinear{}, n)
-	if err := p.tick(context.Background()); err == nil {
-		t.Fatal("want error")
-	}
-	if len(k.setCursor) != 0 {
-		t.Fatalf("cursor = %v", k.setCursor)
-	}
-	n.err = nil
+func TestReportSendFailureDoesNotBlockProjection(t *testing.T) {
+	runner := Card{ID: "t_2", Status: "blocked", Assignee: runnerAssignee, RunID: 1, BlockReason: "BLOCKED{environment}: x"}
+	linked := linkedCard("a", "running")
+	linked.RunID = 1
+	k := &projKanban{events: []CardEvent{{ID: 3, CardID: "t_2", Kind: "blocked"}, {ID: 4, CardID: "a", Kind: "claimed"}},
+		cards: map[string]Card{"t_2": runner, "a": linked}}
+	l := &fakeLinear{issue: projIssue("s-todo")}
+	n := &failingNotifier{err: errors.New("signal send returned 502")}
+	p := newProjector(k, l, n)
 	if err := p.tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(n.msgs) != 2 || len(k.setCursor) != 1 {
-		t.Fatalf("msgs = %q cursor = %v", n.msgs, k.setCursor)
+	if len(k.setCursor) != 1 || k.setCursor[0] != 4 || len(l.states) != 1 {
+		t.Fatalf("cursor = %v states = %v", k.setCursor, l.states)
+	}
+	if len(n.msgs) != 1 || len(p.reports) != 1 {
+		t.Fatalf("msgs = %q queued = %d", n.msgs, len(p.reports))
+	}
+	for i := 0; i < maxReportAttempts+3; i++ {
+		if err := p.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(n.msgs) != maxReportAttempts+1 || len(p.reports) != 0 {
+		t.Fatalf("msgs = %d queued = %d", len(n.msgs), len(p.reports))
+	}
+	last := n.msgs[len(n.msgs)-1]
+	if !strings.HasPrefix(last, "⚠️ runner report for card t_2 dropped") {
+		t.Fatalf("alert = %q", last)
 	}
 }
 
-func TestSignalNotifier4xxIsPermanent(t *testing.T) {
+func TestQueuedReportRetriedUntilSent(t *testing.T) {
+	runner := Card{ID: "t_2", Status: "blocked", Assignee: runnerAssignee, RunID: 1, BlockReason: "BLOCKED{environment}: x"}
+	k := &projKanban{events: []CardEvent{{ID: 3, CardID: "t_2", Kind: "blocked"}}, cards: map[string]Card{"t_2": runner}}
+	n := &failingNotifier{err: errors.New("down")}
+	p := newProjector(k, &fakeLinear{}, n)
+	if err := p.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	n.err = nil
+	for i := 0; i < 3; i++ {
+		if err := p.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(n.msgs) != 2 || n.msgs[0] != n.msgs[1] || len(p.reports) != 0 {
+		t.Fatalf("msgs = %q queued = %d", n.msgs, len(p.reports))
+	}
+}
+
+func TestSignalNotifier4xxIsNotPermanent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 	}))
 	defer srv.Close()
 	n := &signalNotifier{base: srv.URL, http: http.DefaultClient}
-	if err := n.Notify(context.Background(), "x"); !isPermanent(err) {
+	if err := n.Notify(context.Background(), "x"); err == nil || isPermanent(err) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestHostileFieldsAreSanitized(t *testing.T) {
+	c := infraCard(t, `{"status":"DONE\nforged",
+		"merged":[{"pr":"`+pr+`1\n🔴 fake alert","version":"1.0\n• injected","summary":"ok\u2028line\u202eRTL\u0000"},
+		          {"pr":"https://evil.example/a/b/pull/1","summary":"x"},
+		          {"pr":"`+pr+`2","version":7,"summary":["not","text"]}],
+		"skipped":"not a list","closed":[1,"x",null],"failed":[{"pr":"`+pr+`3","summary":"s","rca":{"deep":"\nobj"}}],
+		"vault":{"commit":"abc\ndef0123"}}`,
+		`{"notes":["note\n🔴 forged",3],"landed":[{"pr":"`+pr+`2\n","agent_pushes":[{"files":["a\nb.yaml",5]}]}]}`)
+	got, ok := runnerReport(c)
+	if !ok {
+		t.Fatal("no report")
+	}
+	lines := strings.Split(got, "\n")
+	for _, line := range lines {
+		for _, r := range line {
+			if r < 0x20 || r == 0x2028 || r == 0x202e || r == 0x7f {
+				t.Fatalf("control rune %U in %q", r, line)
+			}
+		}
+		if strings.HasPrefix(line, "🔴") || strings.HasPrefix(line, "• injected") {
+			t.Fatalf("injected line %q", line)
+		}
+	}
+	for _, want := range []string{
+		"🟡 infra on lkshrk/h-cloud done forged: 3 merged, 0 skipped, 0 closed, 1 failed",
+		"• (invalid PR) 1.0 • injected: ok lineRTL",
+		"• (invalid PR): x",
+		"• #2 7: [\"not\",\"text\"] " + pr + "2",
+		"• (invalid PR): 1 push, a b.yaml, 5",
+		"• #3: s; RCA: {\"deep\":\"\\nobj\"} " + pr + "3",
+		"• note 🔴 forged",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "evil.example") || strings.Contains(got, "Vault") {
+		t.Errorf("invalid URL printed:\n%s", got)
+	}
+}
+
+func TestReportTotalLengthCapped(t *testing.T) {
+	var entries []string
+	long := strings.Repeat("ü", 400)
+	for i := 1; i <= 200; i++ {
+		entries = append(entries, `{"pr":"`+pr+strconv.Itoa(i)+`","verdict":"clean","summary":"`+long+`","rca":"`+long+`"}`)
+	}
+	list := strings.Join(entries, ",")
+	c := infraCard(t, `{"status":"DONE_WITH_CONCERNS","merged":[`+list+`],"skipped":[`+list+`],"closed":[`+list+`],"failed":[`+list+`],"vault":{"commit":null}}`, `"ok"`)
+	got, _ := runnerReport(c)
+	if n := utf8.RuneCountInString(got); n > reportMaxChars {
+		t.Fatalf("report has %d runes", n)
+	}
+	lines := strings.Split(got, "\n")
+	if !regexp.MustCompile(`^… \d+ more lines$`).MatchString(lines[len(lines)-1]) {
+		t.Fatalf("tail = %q", lines[len(lines)-1])
+	}
+	if !strings.HasPrefix(lines[0], "🟡 infra on lkshrk/h-cloud done with concerns: 200 merged") {
+		t.Fatalf("head = %q", lines[0])
+	}
+	blocked := Card{ID: "t", Status: "blocked", Assignee: runnerAssignee, RunID: 1, BlockReason: strings.Repeat("x\n", 5000)}
+	msg, _ := runnerReport(blocked)
+	if utf8.RuneCountInString(msg) > reportMaxChars || strings.Count(msg, "\n") != 1 {
+		t.Fatalf("blocked report = %d runes, %d lines", utf8.RuneCountInString(msg), strings.Count(msg, "\n")+1)
 	}
 }
