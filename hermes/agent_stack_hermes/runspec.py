@@ -18,6 +18,7 @@ MODELS = {
     "polly": "anthropic-auto",
     "infra": "anthropic-auto",
 }
+REPOS = {"infra": "lkshrk/h-cloud"}
 LAUNCH_ARGS = {"security-review": ["--profile", "security-review"]}
 MAX_RUNTIME = {"planner": 7200, "security-review": 3600, "documenter": 7200, "polly": 21600, "infra": 21600}
 LINK_PREFIX = "agent-stack-link: "
@@ -50,6 +51,9 @@ class RunSpec:
             raise ValueError(f"unknown bundle {self.bundle!r}")
         if not isinstance(self.repo, str) or not _REPO.fullmatch(self.repo):
             raise ValueError(f"invalid repo {self.repo!r}")
+        pinned = REPOS.get(self.bundle)
+        if pinned and self.repo.lower() != pinned.lower():
+            raise ValueError(f"bundle {self.bundle} runs only on {pinned}")
         if not isinstance(self.ref, str) or not self.ref or _REF_BAD.search(self.ref):
             raise ValueError(f"invalid ref {self.ref!r}")
         if not isinstance(self.input, str):

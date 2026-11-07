@@ -3,8 +3,9 @@ import http.client
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from agent_stack_hermes import retry, runner
+from agent_stack_hermes import retry, runner, runspec
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
 from agent_stack_hermes.postrun import (
@@ -847,6 +848,12 @@ def landed(sha=MERGED, **over):
 
 
 class InfraRunnerTest(RunnerCase):
+    def setUp(self):
+        super().setUp()
+        pin = patch.dict(runspec.REPOS, {"infra": REPO})
+        pin.start()
+        self.addCleanup(pin.stop)
+
     def run_infra(self, result=None, merges=None, entries=None, pulls=None, moved=MERGED, gh_extra=None, extra_refs=None,
                   **kw):
         gh = {"default": "main", "merges": {MERGED: [landed()]} if merges is None else merges,

@@ -69,6 +69,13 @@ class RunSpecTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 RunSpec("polly", "o/r", ref, "x")
 
+    def test_infra_runs_only_on_h_cloud(self):
+        for repo in ("lkshrk/agent-stack", "lkshrk/h-cloud-x", "other/h-cloud"):
+            with self.assertRaises(ValueError):
+                RunSpec("infra", repo, "main", "x")
+        self.assertEqual(RunSpec("infra", "LKSHRK/H-Cloud", "main", "x").repo, "LKSHRK/H-Cloud")
+        self.assertEqual(RunSpec("polly", "lkshrk/agent-stack", "main", "x").bundle, "polly")
+
     def test_builtin_agent_id_polly(self):
         self.assertEqual(builtin_agent_id("polly"), hashlib.sha256(b"builtin:polly").hexdigest()[:32])
 
