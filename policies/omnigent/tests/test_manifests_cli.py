@@ -12,6 +12,7 @@ require_yaml()
 require_git()
 
 POLICIES = Path(__file__).resolve().parents[1]
+RUN_MODULE = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True)"
 APP = "kubernetes/apps/ai/litellm/app/"
 RELEASE = """\
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -63,9 +64,8 @@ class ManifestsCliTest(unittest.TestCase):
         self.git("commit", "-q", "-m", message)
 
     def run_cli(self, *args):
-        env = {**_environment(), "PYTHONPATH": str(POLICIES)}
-        return subprocess.run([sys.executable, "-m", "agent_stack_policies.manifests_cli", *args],
-                              cwd=self.tree, capture_output=True, text=True, env=env, timeout=60)
+        return subprocess.run([sys.executable, "-I", "-c", RUN_MODULE, str(POLICIES), "agent_stack_policies.manifests_cli", *args],
+                              cwd=self.tree, capture_output=True, text=True, env=_environment(), timeout=60)
 
     def check(self, *args):
         return self.run_cli(*(args or (self.base, "HEAD")))

@@ -14,6 +14,7 @@ import urllib.request
 from .infra_paths import MAX_PUSH_FILES, MAX_UNTRUSTED_PUSHES, RENOVATE, RENOVATE_PREFIX, agent_path_allowed
 
 PROTOCOL_VERSION = "2025-06-18"
+TOKEN_ENV = "HCLOUD_TOKEN_FILE"
 DEFAULT_TOKEN_FILE = "/agent-secrets/github/hcloud"
 DEFAULT_API = "https://api.github.com"
 DEFAULT_BASE = "main"
@@ -35,7 +36,7 @@ TOOL = {
     "description": (
         "Squash-merge one open Renovate PR of the configured repository after verifying it: author "
         f"{RENOVATE}, base main, head {RENOVATE_PREFIX}* in the same repository, mergeable, every check run "
-        "and status on the head green, and every push to the head by anyone but Renovate limited to app "
+        "and status on the head green, every required check a success, and every push to the head by anyone but Renovate limited to app "
         "paths and passing the manifest checker. Merges exactly the verified head SHA and returns the merge SHA."
     ),
     "inputSchema": {
@@ -173,7 +174,17 @@ def _verify_pull(body: dict, repo: str, base: str) -> str:
     return head["sha"]
 
 
-def _verify_checks(github: GitHub, repo: str, sha: str) -> None:
+def _verify_required(runs: list, required: tuple[str, ...]) -> None:
+    for name in required:
+        named = [run for run in runs if isinstance(run, dict) and run.get("name") == name]
+        if not named:
+            raise Refused(f"required check {name} has not run on the head; wait for CI")
+        for run in named:
+            if run.get("status") != "completed" or run.get("conclusion") != "success":
+                raise Refused(f"required check {name} is {run.get('status')}/{run.get('conclusion')}, not a success")
+
+
+def _verify_checks(github: GitHub, repo: str, sha: str, required: tuple[str, ...] = ()) -> None:
     runs, total = [], 0
     for page, body in github.pages(f"/repos/{repo}/commits/{sha}/check-runs?per_page=100", key="check_runs"):
         count = body.get("total_count") if isinstance(body, dict) else None
@@ -202,6 +213,7 @@ def _verify_checks(github: GitHub, repo: str, sha: str) -> None:
         if not isinstance(entry, dict) or entry.get("state") != "success":
             name = entry.get("context") if isinstance(entry, dict) else "?"
             raise Refused(f"status {name} is {entry.get('state') if isinstance(entry, dict) else '?'}")
+    _verify_required(runs, required)
 
 
 def _activity(item) -> dict:
@@ -298,12 +310,12 @@ def _verify_untrusted(github: GitHub, repo: str, pushes: list[dict], base_sha: s
                 raise Refused(f"{where}: " + "; ".join(found[:3]))
 
 
-def land(github: GitHub, repo: str, number: object, base: str = DEFAULT_BASE) -> dict:
+def land(github: GitHub, repo: str, number: object, base: str = DEFAULT_BASE, required: tuple[str, ...] = ()) -> dict:
     if not isinstance(number, int) or isinstance(number, bool) or number < 1:
         raise Refused("number must be a positive integer")
     body = _pull(github, repo, number)
     head_sha = _verify_pull(body, repo, base)
-    _verify_checks(github, repo, head_sha)
+    _verify_checks(github, repo, head_sha, tuple(required))
     pushes = _head_pushes(github, repo, body["head"]["ref"], head_sha)
     _verify_untrusted(github, repo, pushes, body["base"]["sha"])
     merged, _ = github.request("PUT", f"/repos/{repo}/pulls/{number}/merge", {"sha": head_sha, "merge_method": MERGE_METHOD})
@@ -319,7 +331,7 @@ class RpcError(Exception):
         self.code = code
 
 
-def _call(params: dict, github: GitHub, repo: str) -> dict:
+def _call(params: dict, github: GitHub, repo: str, required: tuple[str, ...]) -> dict:
     if params.get("name") != TOOL["name"]:
         raise RpcError(-32602, f"unknown tool {params.get('name')!r}")
     args = params.get("arguments")
@@ -327,14 +339,14 @@ def _call(params: dict, github: GitHub, repo: str) -> dict:
     try:
         if set(args) != {"number"}:
             raise Refused("pass only number; the repository is fixed by the bundle")
-        out = land(github, repo, args["number"])
+        out = land(github, repo, args["number"], required=required)
     except Refused as exc:
         return {"content": [{"type": "text", "text": f"not merged: {exc}"}], "isError": True}
     text = f"merged {out['pr']} at head {out['head_sha']} as {out['sha']}"
     return {"content": [{"type": "text", "text": text}], "structuredContent": out, "isError": False}
 
 
-def respond(line: str, github: GitHub, repo: str) -> dict | None:
+def respond(line: str, github: GitHub, repo: str, required: tuple[str, ...] = ()) -> dict | None:
     try:
         message = json.loads(line)
     except (ValueError, RecursionError):
@@ -357,7 +369,7 @@ def respond(line: str, github: GitHub, repo: str) -> dict | None:
         elif method == "tools/list":
             result = {"tools": [TOOL]}
         elif method == "tools/call":
-            result = _call(params, github, repo)
+            result = _call(params, github, repo, required)
         else:
             raise RpcError(-32601, f"method {method!r} not found")
     except RpcError as exc:
@@ -371,12 +383,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python3 -m agent_stack_policies.renovate_land")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--api", default=DEFAULT_API)
+    parser.add_argument("--require-check", action="append", default=[], metavar="NAME")
     args = parser.parse_args(argv)
-    github = GitHub(os.environ.get("GH_TOKEN_FILE") or DEFAULT_TOKEN_FILE, api=args.api)
+    github = GitHub(os.environ.get(TOKEN_ENV) or DEFAULT_TOKEN_FILE, api=args.api)
+    required = tuple(args.require_check)
     for line in sys.stdin:
         if not line.strip():
             continue
-        reply = respond(line, github, args.repo)
+        reply = respond(line, github, args.repo, required)
         if reply is not None:
             sys.stdout.write(json.dumps(reply) + "\n")
             sys.stdout.flush()

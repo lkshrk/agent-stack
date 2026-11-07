@@ -21,6 +21,7 @@ from agent_stack_policies import renovate_land
 from agent_stack_policies.renovate_land import GitHub, Refused, land
 
 POLICIES = Path(__file__).resolve().parents[1]
+RUN_MODULE = "import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); runpy.run_module(sys.argv.pop(1), run_name='__main__', alter_sys=True)"
 REPO = "lkshrk/h-cloud"
 TOKEN = "ghs_secret-token-value"
 HEAD = "a1" * 20
@@ -105,18 +106,26 @@ class Fake:
             raise urllib.error.HTTPError(request.full_url, status, "error", http.client.HTTPMessage(), io.BytesIO(json.dumps(value).encode()))
         if isinstance(value, list) and value and callable(value[0]):
             value = value.pop(0)()
+        if isinstance(value, Paged):
+            return Response(value.body, {"Link": f'<{value.next}>; rel="next"'})
         return Response(value)
 
     def merges(self):
         return [body for key, body, _ in self.calls if key.startswith("PUT ")]
 
 
+class Paged:
+    def __init__(self, body, next_url):
+        self.body = body
+        self.next = next_url
+
+
 class Response:
     status = 200
 
-    def __init__(self, body):
+    def __init__(self, body, headers=None):
         self._raw = json.dumps(body).encode()
-        self.headers = {}
+        self.headers = headers or {}
 
     def read(self):
         return self._raw
@@ -137,13 +146,13 @@ class LandTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def land(self, fake, number: object = 7):
+    def land(self, fake, number: object = 7, required=()):
         github = GitHub(str(self.token_file), opener=fake, sleep=lambda _: None)
-        return land(github, REPO, number)
+        return land(github, REPO, number, required=required)
 
-    def refused(self, fake, text):
+    def refused(self, fake, text, required=()):
         with self.assertRaises(Refused) as caught:
-            self.land(fake)
+            self.land(fake, required=required)
         self.assertIn(text, str(caught.exception))
         self.assertEqual(fake.merges(), [])
         self.assertNotIn(TOKEN, str(caught.exception))
@@ -194,6 +203,80 @@ class LandTest(unittest.TestCase):
         fake = Fake({runs: {"total_count": 0, "check_runs": []},
                      statuses: {"state": "success", "total_count": 1, "statuses": [{"context": "ci", "state": "success"}]}})
         self.assertTrue(self.land(fake)["merged"])
+
+    def test_required_checks_must_each_succeed(self):
+        runs = f"GET /repos/{REPO}/commits/{HEAD}/check-runs?per_page=100"
+        statuses = f"GET /repos/{REPO}/commits/{HEAD}/status?per_page=100"
+        required = ("Flate - Success", "Verify SOPS Files Are Encrypted")
+
+        def checks(*entries):
+            return {"total_count": len(entries), "check_runs": [
+                {"name": name, "status": "completed", "conclusion": conclusion} for name, conclusion in entries]}
+
+        renovate_only = {
+            runs: checks(),
+            statuses: {"state": "success", "total_count": 1,
+                       "statuses": [{"context": "renovate/stability-days", "state": "success"}]},
+        }
+        self.refused(Fake(renovate_only), "Flate - Success", required)
+        for conclusion in ("skipped", "neutral"):
+            with self.subTest(conclusion):
+                fake = Fake({runs: checks(("Flate - Success", conclusion), ("Verify SOPS Files Are Encrypted", "success"))})
+                self.refused(fake, "Flate - Success", required)
+        self.refused(Fake({runs: checks(("Flate - Success", "success"))}), "Verify SOPS Files Are Encrypted", required)
+        fake = Fake({runs: checks(("Flate - Success", "success"), ("Verify SOPS Files Are Encrypted", "success"),
+                                  ("Flate - Diff", "skipped"))})
+        self.assertTrue(self.land(fake, required=required)["merged"])
+
+    def test_cancelled_and_truncated_checks_are_refused(self):
+        runs = f"GET /repos/{REPO}/commits/{HEAD}/check-runs?per_page=100"
+        statuses = f"GET /repos/{REPO}/commits/{HEAD}/status?per_page=100"
+        cancelled = {"total_count": 1, "check_runs": [{"name": "flate", "status": "completed", "conclusion": "cancelled"}]}
+        self.refused(Fake({runs: cancelled}), "cancelled")
+        truncated = {"state": "success", "total_count": 2, "statuses": [{"context": "ci", "state": "success"}]}
+        self.refused(Fake({statuses: truncated}), "truncated")
+
+    def test_check_runs_are_read_across_pages(self):
+        first = f"GET /repos/{REPO}/commits/{HEAD}/check-runs?per_page=100"
+        second = f"https://api.github.com/repositories/1/commits/{HEAD}/check-runs?per_page=100&page=2"
+        fake = Fake({
+            first: Paged({"total_count": 2, "check_runs": [{"name": "a", "status": "completed", "conclusion": "success"}]}, second),
+            f"GET /repositories/1/commits/{HEAD}/check-runs?per_page=100&page=2": {
+                "total_count": 2, "check_runs": [{"name": "b", "status": "completed", "conclusion": "failure"}]},
+        })
+        self.refused(fake, "check b concluded failure")
+
+    def test_pagination_may_not_leave_the_api_host(self):
+        first = f"GET /repos/{REPO}/commits/{HEAD}/check-runs?per_page=100"
+        fake = Fake({first: Paged({"total_count": 2, "check_runs": []}, "https://evil.example/x")})
+        self.refused(fake, "leaves the API host")
+
+    def test_activity_is_read_across_pages(self):
+        activity = f"GET /repos/{REPO}/activity?ref=refs%2Fheads%2Frenovate%2Flitellm-1.x&direction=desc&per_page=100"
+        fake = Fake({
+            activity: Paged([push("r1", HEAD)], "https://api.github.com/repositories/1/activity?page=2"),
+            "GET /repositories/1/activity?page=2": [push(NULL, "r1", kind="branch_creation")],
+        })
+        self.assertTrue(self.land(fake)["merged"])
+
+    def test_force_push_is_compared_from_the_pr_base(self):
+        activity = f"GET /repos/{REPO}/activity?ref=refs%2Fheads%2Frenovate%2Flitellm-1.x&direction=desc&per_page=100"
+        routes = {
+            activity: [push("r1", HEAD, actor="h-cloud-infra[bot]", kind="force_push"), push(NULL, "r1", kind="branch_creation")],
+            f"GET /repos/{REPO}/compare/{BASE}...{HEAD}": {"status": "behind", "files": []},
+        }
+        self.refused(Fake(routes), "not ahead")
+        routes[f"GET /repos/{REPO}/compare/{BASE}...{HEAD}"] = {"status": "ahead", "files": []}
+        self.assertTrue(self.land(Fake(routes))["merged"])
+
+    def test_push_without_an_actor_is_untrusted(self):
+        activity = f"GET /repos/{REPO}/activity?ref=refs%2Fheads%2Frenovate%2Flitellm-1.x&direction=desc&per_page=100"
+        fake = Fake({
+            activity: [push("r1", HEAD, actor=None), push(NULL, "r1", kind="branch_creation")],
+            f"GET /repos/{REPO}/compare/r1...{HEAD}": {"status": "ahead", "files": [{"filename": "talos/x.yaml"}]},
+        })
+        why = self.refused(fake, "talos/x.yaml")
+        self.assertIn("unknown", why)
 
     def test_head_history_must_reach_the_branch_creation(self):
         activity = f"GET /repos/{REPO}/activity?ref=refs%2Fheads%2Frenovate%2Flitellm-1.x&direction=desc&per_page=100"
@@ -312,12 +395,13 @@ class McpTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             token = Path(tmp) / "hcloud"
             token.write_text(TOKEN)
-            environ = {**os.environ, "PYTHONPATH": str(POLICIES), "GH_TOKEN_FILE": str(token), **(env or {})}
+            environ = {**os.environ, "HCLOUD_TOKEN_FILE": str(token), "GH_TOKEN_FILE": "/nonexistent", **(env or {})}
             stdin = "".join(json.dumps(m) + "\n" for m in messages)
             try:
                 proc = subprocess.run(
-                    [sys.executable, "-m", "agent_stack_policies.renovate_land", "--repo", REPO,
-                     "--api", f"http://127.0.0.1:{server.server_port}"],
+                    [sys.executable, "-I", "-c", RUN_MODULE, str(POLICIES), "agent_stack_policies.renovate_land",
+                     "--repo", REPO, "--api", f"http://127.0.0.1:{server.server_port}",
+                     "--require-check", "flate"],
                     input=stdin, capture_output=True, text=True, env=environ, timeout=60, check=True,
                 )
             finally:
@@ -345,6 +429,14 @@ class McpTest(unittest.TestCase):
         result = self.session(fake, self.INIT, self.call({"number": 7}))[2]["result"]
         self.assertTrue(result["isError"])
         self.assertIn("renovate-master[bot]", result["content"][0]["text"])
+        self.assertEqual(fake.merges(), [])
+
+    def test_required_check_from_the_arguments_is_enforced(self):
+        runs = f"GET /repos/{REPO}/commits/{HEAD}/check-runs?per_page=100"
+        fake = Fake({runs: {"total_count": 1, "check_runs": [{"name": "other", "status": "completed", "conclusion": "success"}]}})
+        result = self.session(fake, self.INIT, self.call({"number": 7}))[2]["result"]
+        self.assertTrue(result["isError"])
+        self.assertIn("flate", result["content"][0]["text"])
         self.assertEqual(fake.merges(), [])
 
     def test_agent_cannot_pick_the_repository(self):
