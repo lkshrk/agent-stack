@@ -145,7 +145,11 @@ class BypassTest(unittest.TestCase):
     def test_parse_errors_duplicates_and_aliases(self):
         self.assert_rejected(added("apiVersion: v1\nkind: [Service\n"), "does not parse")
         self.assert_rejected(added("apiVersion: v1\nkind: Service\nkind: ClusterRole\nmetadata: {name: x}\n"), "parse")
-        self.assert_rejected(added("a: &x {kind: ClusterRole}\nb: *x\n"), "aliases")
+        laughs = "a: &a [x, x, x, x, x, x, x, x, x, x]\n" + "".join(
+            f"{chr(98 + i)}: &{chr(98 + i)} [{', '.join([f'*{chr(97 + i)}'] * 10)}]\n" for i in range(6))
+        self.assert_rejected(added("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: l}\ndata:\n  " +
+                                   laughs.replace("\n", "\n  ")), "expands")
+        self.assert_rejected(added("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: r}\nloop: &l [*l]\n"), "expands")
         self.assert_rejected(added(SERVICE + "---\n" + SERVICE), "twice")
 
     def test_flux_kinds_in_an_app_file(self):
@@ -265,6 +269,16 @@ class LegitimateFixTest(unittest.TestCase):
         self.assertEqual(check_change(APP + "service.json", None, '{"apiVersion": "v1", "kind": "Service", '
                                                                   '"metadata": {"name": "web"}}'), [])
 
+    def test_anchors_and_aliases_as_used_in_h_cloud(self):
+        before = DEPLOYMENT.replace("          image: ghcr.io/acme/web:1.0.0\n",
+                                    "          image: ghcr.io/acme/web:1.0.0\n          livenessProbe: &probe\n"
+                                    "            httpGet: {path: /healthz, port: 8080}\n          readinessProbe: *probe\n")
+        after = before.replace("web:1.0.0", "web:1.0.1").replace("/healthz", "/ready")
+        self.assertEqual(changed(before, after), [])
+        sneaky = before.replace("livenessProbe: &probe", "securityContext: &probe").replace(
+            "httpGet: {path: /healthz, port: 8080}", "privileged: true")
+        self.assertTrue(changed(before, sneaky))
+
     def test_unchanged_non_allowlisted_document_may_stay(self):
         before = BINDING + "---\n" + CONFIGMAP
         self.assertEqual(check_change(APP + "mixed.yaml", before, BINDING + "---\n" + CONFIGMAP + '  b: "2"\n'), [])
@@ -274,6 +288,170 @@ class LegitimateFixTest(unittest.TestCase):
         self.assertNotIn(("rbac.authorization.k8s.io/v1", "ClusterRole"), ALLOWED_KINDS)
         self.assertIn("hostNetwork", POD_FIELDS)
         self.assertIn("postRenderers", HELMRELEASE_FIXED_FIELDS)
+
+
+POD = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pod
+spec:
+  template:
+    spec:
+      securityContext:
+        runAsUser: 1000
+      containers:
+        - name: a
+          image: ghcr.io/acme/a:1.0.0
+          envFrom:
+            - secretRef:
+                name: a-secret
+        - name: b
+          image: ghcr.io/acme/b:1.0.0
+"""
+
+VALUES_CM = """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-image-values
+data:
+  values.yaml: |
+    image:
+      tag: 1.0.0
+    rbac:
+      create: false
+  notes.txt: just text
+"""
+
+PVC = """\
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: ceph-block
+  resources:
+    requests:
+      storage: 1Gi
+"""
+
+
+class ReviewSixTest(unittest.TestCase):
+    def rejected(self, before, after, name="deployment.yaml", contains="", previous=None):
+        errors = check_change(APP + name, before, after, previous=previous)
+        self.assertTrue(errors, "expected a violation")
+        self.assertTrue(any(contains in e for e in errors), errors)
+
+    def test_rename_across_directories_counts_as_added(self):
+        other = "kubernetes/apps/ai/other/app/deployment.yaml"
+        self.rejected(DEPLOYMENT, DEPLOYMENT, previous=other, contains="secretKeyRef")
+        self.assertEqual(check_change(APP + "deployment.yaml", DEPLOYMENT, DEPLOYMENT, previous=APP + "old.yaml"), [])
+
+    def test_secret_like_keys_and_volume_sources(self):
+        additions = (
+            "      volumes:\n        - name: s\n          secret:\n            secretName: other\n",
+            "          env:\n            - name: X\n              value: x\n          bearerTokenSecret: {name: t}\n",
+            "      clientSecret: abc\n",
+            "      basicAuth: {username: {name: u}}\n",
+            "      authorization: {credentials: {name: c}}\n",
+            "      oauth2: {clientId: {secret: {name: c}}}\n",
+            "      volumes:\n        - name: c\n          csi: {driver: secrets-store.csi.k8s.io}\n",
+            "      volumes:\n        - name: f\n          flexVolume: {driver: x}\n",
+            "      volumes:\n        - name: n\n          nfs: {server: 10.0.0.1, path: /}\n",
+            "      volumes:\n        - name: i\n          iscsi: {targetPortal: x, iqn: y, lun: 0}\n",
+            "      volumes:\n        - name: p\n          projected:\n            sources:\n              - serviceAccountToken:"
+            " {path: token}\n",
+        )
+        for addition in additions:
+            with self.subTest(addition.strip()[:40]):
+                self.rejected(POD, POD + addition)
+
+    def test_more_pod_fields(self):
+        additions = (
+            "      shareProcessNamespace: true\n", "      hostUsers: false\n", "      nodeName: node-1\n",
+            "      priorityClassName: system-cluster-critical\n", "      hostAliases: [{ip: 1.2.3.4, hostnames: [x]}]\n",
+            "      securityContext:\n        sysctls: [{name: net.ipv4.ip_forward, value: '1'}]\n",
+            "          securityContext: {allowPrivilegeEscalation: true}\n",
+            "          securityContext: {runAsNonRoot: false}\n", "          securityContext: {procMount: Unmasked}\n",
+            "          securityContext: {seccompProfile: {type: Unconfined}}\n",
+            "          securityContext: {appArmorProfile: {type: Unconfined}}\n",
+            "          ports: [{containerPort: 80, hostPort: 80}]\n",
+        )
+        for addition in additions:
+            with self.subTest(addition.strip()[:40]):
+                self.rejected(POD, POD + addition)
+
+    def test_user_and_group_ids_must_be_plain_positive_ints(self):
+        for value in ("0", "'1000'", "1000.0", "true", "-1", "null"):
+            for field in ("runAsUser", "runAsGroup", "fsGroup"):
+                with self.subTest(field=field, value=value):
+                    after = POD.replace("runAsUser: 1000", f"runAsUser: 1000\n        {field}: {value}"
+                                        if field != "runAsUser" else f"runAsUser: {value}")
+                    self.rejected(POD, after, contains=field)
+        ok = POD.replace("runAsUser: 1000", "runAsUser: 1001\n        runAsGroup: 1001\n        fsGroup: 2000")
+        self.assertEqual(changed(POD, ok), [])
+
+    def test_copying_an_existing_secret_ref_to_another_container_is_caught(self):
+        after = POD + "          envFrom:\n            - secretRef:\n                name: a-secret\n"
+        self.rejected(POD, after, contains="secretRef")
+        reordered = POD.replace("        - name: a\n", "        - name: z\n          image: z:1\n        - name: a\n")
+        self.assertEqual(changed(POD, reordered), [])
+
+    def test_configmap_values_follow_the_values_rules(self):
+        for old, new in (("create: false", "create: true"), ("tag: 1.0.0", "tag: 1.0.0\n    rawResources: {x: {}}"),
+                         ("tag: 1.0.0", "tag: 1.0.0\n    serviceAccount: {name: admin}"),
+                         ("tag: 1.0.0", "tag: 1.0.0\n    persistence: {h: {type: hostPath, hostPath: /}}"),
+                         ("tag: 1.0.0", "tag: 1.0.0\n    env: [{valueFrom: {secretKeyRef: {name: s, key: k}}}]")):
+            with self.subTest(new.strip()[-30:]):
+                self.rejected(VALUES_CM, VALUES_CM.replace(old, new), "configmap.yaml")
+        bumped = VALUES_CM.replace("tag: 1.0.0", "tag: 1.0.1").replace("just text", '"plain: not: yaml: {"')
+        self.assertEqual(check_change(APP + "configmap.yaml", VALUES_CM, bumped), [])
+        tagged = VALUES_CM.replace("tag: 1.0.0", "tag: !!str 1.0.0")
+        self.rejected(VALUES_CM, tagged, "configmap.yaml", "data.values.yaml")
+
+    def test_configmap_binary_data_is_checked_too(self):
+        import base64
+
+        def binary(text):
+            encoded = base64.b64encode(text.encode()).decode()
+            return f"apiVersion: v1\nkind: ConfigMap\nmetadata: {{name: b}}\nbinaryData:\n  values.yaml: {encoded}\n"
+        self.rejected(binary("rbac: {create: false}\n"), binary("rbac: {create: true}\n"), "configmap.yaml")
+        self.assertEqual(check_change(APP + "configmap.yaml", binary("a: 1\n"), binary("a: 2\n")), [])
+
+    def test_more_sensitive_values(self):
+        release = HELMRELEASE.replace("rbac:\n      create: false", "controllers: {}")
+        for key in ("rawResources", "extraResources", "additionalResources", "extraManifests", "extraDeploy"):
+            with self.subTest(key):
+                self.rejected(release, release + f"    {key}: {{x: {{}}}}\n", "helmrelease.yaml", key)
+
+    def test_pvc_binding_fields(self):
+        for after in (PVC + "  volumeName: pv-secret\n", PVC + "  dataSource: {kind: PersistentVolumeClaim, name: x}\n",
+                      PVC + "  dataSourceRef: {kind: VolumeSnapshot, name: x}\n",
+                      PVC.replace("ceph-block", "openebs-hostpath")):
+            self.rejected(PVC, after, "pvc.yaml")
+        self.assertEqual(check_change(APP + "pvc.yaml", PVC, PVC.replace("1Gi", "2Gi")), [])
+
+    def test_removing_a_kustomization_is_a_violation(self):
+        self.rejected(KUSTOMIZATION, None, "kustomization.yaml", "removes")
+
+    def test_merge_keys_are_rejected(self):
+        payload = "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: m}\n<<: {kind: ClusterRole}\n"
+        self.assertTrue(any("merge keys" in e for e in added(payload)), added(payload))
+
+    def test_deep_nesting_is_an_error_not_a_crash(self):
+        self.assertTrue(added("a: " + "[" * 20000 + "]" * 20000 + "\n"))
+        self.assertTrue(added("{" * 5000 + "}" * 5000))
+
+    def test_line_separator_constants_are_escaped_in_the_source(self):
+        from pathlib import Path
+
+        import agent_stack_policies.manifests as manifests
+
+        source = Path(manifests.__file__).read_text(encoding="utf-8")
+        for char in (" ", " ", "\x85"):
+            self.assertNotIn(char, source)
 
 
 if __name__ == "__main__":

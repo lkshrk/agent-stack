@@ -1,15 +1,20 @@
+import base64
+import binascii
 import json
 import posixpath
 import re
+from collections import Counter
 
 import yaml
 
 ALLOWED_EXTENSIONS = (".yaml", ".yml", ".json", ".md")
 UNPARSED_EXTENSIONS = (".md",)
-FORBIDDEN_CHARACTERS = {"\r": "CR", "\x85": "NEL", " ": "LS", " ": "PS"}
+FORBIDDEN_CHARACTERS = {"\r": "CR", "\x85": "NEL", "\u2028": "LS", "\u2029": "PS"}
 KUSTOMIZE = ("kustomize.config.k8s.io/v1beta1", "Kustomization")
 KUSTOMIZATION_FILES = ("kustomization.yaml", "kustomization.yml", "Kustomization")
 HELMRELEASE = ("helm.toolkit.fluxcd.io/v2", "HelmRelease")
+CONFIGMAP = ("v1", "ConfigMap")
+PVC = ("v1", "PersistentVolumeClaim")
 ALLOWED_KINDS = frozenset({
     ("apps/v1", "Deployment"),
     ("apps/v1", "StatefulSet"),
@@ -37,9 +42,34 @@ POD_FIELDS = frozenset({
     "hostNetwork",
     "hostPID",
     "hostIPC",
+    "hostPort",
+    "hostUsers",
+    "hostAliases",
     "privileged",
+    "allowPrivilegeEscalation",
+    "runAsNonRoot",
+    "procMount",
+    "seccompProfile",
+    "appArmorProfile",
+    "shareProcessNamespace",
+    "nodeName",
+    "sysctls",
+    "priorityClassName",
 })
-SECRET_FIELDS = frozenset({"secretKeyRef", "secretRef", "secret", "imagePullSecrets"})
+ID_FIELDS = frozenset({"runAsUser", "runAsGroup", "fsGroup"})
+SECRET_KEY_PART = "secret"
+SECRET_SOURCES = frozenset({
+    "basicauth",
+    "authorization",
+    "oauth2",
+    "csi",
+    "flexvolume",
+    "nfs",
+    "iscsi",
+    "serviceaccounttoken",
+    "imagepullsecrets",
+})
+PVC_FIXED_FIELDS = ("volumeName", "dataSource", "dataSourceRef", "storageClassName")
 HELMRELEASE_FIXED_FIELDS = (
     "chart",
     "chartRef",
@@ -51,10 +81,16 @@ HELMRELEASE_FIXED_FIELDS = (
     "valuesFrom",
 )
 SENSITIVE_VALUES = re.compile(
-    r"rbac|serviceaccount|clusterrole|extraobjects|extramanifests|extradeploy|hostnetwork|hostpath|privileged|secret",
+    r"rbac|serviceaccount|clusterrole|extraobjects|extramanifests|extradeploy|extraresources|additionalresources"
+    r"|rawresources|hostnetwork|hostpath|privileged|secret",
     re.IGNORECASE | re.ASCII,
 )
 KUSTOMIZATION_MUTABLE = ("images", "resources")
+MAX_NESTING = 64
+MAX_EXPANDED_NODES = 100_000
+_OPENERS = (yaml.BlockSequenceStartToken, yaml.BlockMappingStartToken, yaml.FlowSequenceStartToken,
+            yaml.FlowMappingStartToken)
+_CLOSERS = (yaml.BlockEndToken, yaml.FlowSequenceEndToken, yaml.FlowMappingEndToken)
 _LOCAL_RESOURCE = re.compile(r"(\./)?[A-Za-z0-9][A-Za-z0-9._-]*\.ya?ml", re.ASCII)
 
 
@@ -65,6 +101,8 @@ class _UniqueKeyLoader(yaml.SafeLoader):
 def _unique_mapping(loader, node, deep=False):
     seen = set()
     for key_node, _ in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            raise yaml.constructor.ConstructorError(None, None, "merge keys are not allowed", key_node.start_mark)
         key = loader.construct_object(key_node, deep=True)
         try:
             duplicate = key in seen
@@ -91,16 +129,44 @@ def _decode(path: str, content: str | bytes) -> tuple[str | None, list[str]]:
     return content, []
 
 
+def _token_problem(text: str) -> str | None:
+    depth = 0
+    for token in yaml.scan(text, Loader=yaml.SafeLoader):
+        if isinstance(token, (yaml.TagToken, yaml.DirectiveToken)):
+            return "YAML tags and directives are not allowed"
+        depth += isinstance(token, _OPENERS) - isinstance(token, _CLOSERS)
+        if depth > MAX_NESTING:
+            return f"nests deeper than {MAX_NESTING} levels"
+    return None
+
+
+def _expands(docs: list) -> bool:
+    stack, seen = list(docs), 0
+    while stack:
+        node = stack.pop()
+        seen += 1
+        if seen > MAX_EXPANDED_NODES:
+            return True
+        if isinstance(node, dict):
+            stack.extend(node.keys())
+            stack.extend(node.values())
+        elif isinstance(node, list):
+            stack.extend(node)
+    return False
+
+
 def _documents(path: str, text: str) -> tuple[list | None, list[str]]:
     try:
-        for token in yaml.scan(text, Loader=yaml.SafeLoader):
-            if isinstance(token, (yaml.TagToken, yaml.DirectiveToken)):
-                return None, [f"{path}: YAML tags and directives are not allowed"]
-            if isinstance(token, yaml.AliasToken):
-                return None, [f"{path}: YAML aliases are not allowed"]
-        return [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None], []
-    except yaml.YAMLError as exc:
-        return None, [f"{path}: does not parse: {type(exc).__name__}"]
+        problem = _token_problem(text)
+        if problem:
+            return None, [f"{path}: {problem}"]
+        docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
+        if _expands(docs):
+            return None, [f"{path}: expands to more than {MAX_EXPANDED_NODES} nodes through aliases"]
+        return docs, []
+    except (yaml.YAMLError, RecursionError, ValueError) as exc:
+        detail = getattr(exc, "problem", None) if isinstance(exc, yaml.constructor.ConstructorError) else None
+        return None, [f"{path}: does not parse: {detail or type(exc).__name__}"]
 
 
 def _identity(path: str, doc: dict) -> tuple:
@@ -148,18 +214,93 @@ def _canon(value) -> str:
     return json.dumps(value, sort_keys=True, default=str)
 
 
-def _sensitive(doc) -> set[tuple[str, str]]:
-    found: set[tuple[str, str]] = set()
+def _secret_key(key) -> bool:
+    return isinstance(key, str) and (SECRET_KEY_PART in key.lower() or key.lower() in SECRET_SOURCES)
+
+
+def _plain_id(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
+def _sensitive(doc) -> Counter:
+    found: Counter = Counter()
     for _, key, value in _walk(doc):
-        if key in POD_FIELDS or key in SECRET_FIELDS:
-            found.add((key, _canon(value)))
+        if key in POD_FIELDS or _secret_key(key):
+            found[(key, _canon(value))] += 1
         elif key == "capabilities" and isinstance(value, dict):
             added = value.get("add")
             for cap in added if isinstance(added, list) else [added]:
-                found.add(("capabilities.add", _canon(cap)))
-        elif key == "runAsUser" and value == 0:
-            found.add(("runAsUser", "0"))
+                found[("capabilities.add", _canon(cap))] += 1
+        elif key in ID_FIELDS and not _plain_id(value):
+            found[(key, _canon(value))] += 1
     return found
+
+
+def _embedded(text: str):
+    if any(char in text for char in FORBIDDEN_CHARACTERS):
+        return None, "contains odd line breaks"
+    try:
+        problem = _token_problem(text)
+    except (yaml.YAMLError, RecursionError, ValueError):
+        return None, None
+    if problem:
+        return None, problem
+    try:
+        docs = [doc for doc in yaml.load_all(text, Loader=_UniqueKeyLoader) if doc is not None]
+    except yaml.constructor.ConstructorError:
+        return None, "has duplicate or merge keys"
+    except (yaml.YAMLError, RecursionError, ValueError):
+        return None, None
+    if _expands(docs):
+        return None, f"expands to more than {MAX_EXPANDED_NODES} nodes through aliases"
+    mappings = [doc for doc in docs if isinstance(doc, dict)]
+    if not mappings:
+        return None, None
+    if len(docs) != 1:
+        return None, "holds several YAML documents"
+    return mappings[0], None
+
+
+def _configmap_entries(doc: dict) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for key, value in _mapping(doc.get("data")).items():
+        if isinstance(value, str):
+            out[f"data.{key}"] = value
+    for key, value in _mapping(doc.get("binaryData")).items():
+        if isinstance(value, str):
+            try:
+                out[f"binaryData.{key}"] = base64.b64decode(value, validate=True).decode("utf-8")
+            except (binascii.Error, ValueError):
+                continue
+    return out
+
+
+def _values_rules(where: str, label: str, old, new) -> list[str]:
+    errors = []
+    before, after = _sensitive_values(old), _sensitive_values(new)
+    for trail in sorted(set(before) | set(after), key=str):
+        if before.get(trail) != after.get(trail):
+            errors.append(f"{where}: changes {label}.{'.'.join(map(str, trail))}")
+    for field, value in sorted(_sensitive(new or {}) - _sensitive(old or {})):
+        errors.append(f"{where}: adds or changes {field} in {label} ({value[:60]})")
+    return errors
+
+
+def _configmap_rules(where: str, old: dict | None, new: dict) -> list[str]:
+    errors = []
+    before, after = _configmap_entries(old or {}), _configmap_entries(new)
+    for entry, text in sorted(after.items()):
+        if before.get(entry) == text:
+            continue
+        values, why = _embedded(text)
+        if why:
+            errors.append(f"{where}: {entry} {why}")
+            continue
+        if values is None:
+            continue
+        prior, _ = _embedded(before[entry]) if entry in before else (None, None)
+        errors.extend(_values_rules(where, entry, prior or {}, values))
+    return errors
 
 
 def _sensitive_values(values) -> dict[tuple, str]:
@@ -186,6 +327,13 @@ def _field_rules(where: str, key: tuple, old: dict | None, new: dict) -> list[st
         for trail in sorted(set(before) | set(after), key=str):
             if before.get(trail) != after.get(trail):
                 errors.append(f"{where}: changes spec.values.{'.'.join(map(str, trail))}")
+    if key[:2] == CONFIGMAP:
+        errors.extend(_configmap_rules(where, old, new))
+    if key[:2] == PVC:
+        old_spec, new_spec = _mapping((old or {}).get("spec")), _mapping(new.get("spec"))
+        for field in PVC_FIXED_FIELDS:
+            if _canon(old_spec.get(field)) != _canon(new_spec.get(field)):
+                errors.append(f"{where}: changes spec.{field}")
     if key[:2] == KUSTOMIZE:
         errors.extend(_kustomization_rules(where, old or {}, new))
     return errors
@@ -229,7 +377,18 @@ def _parse(path: str, content: str | bytes | None) -> tuple[dict | None, list, l
     return keyed, other, errors
 
 
-def check_change(path: str, before: str | bytes | None, after: str | bytes | None) -> list[str]:
+def check_change(
+    path: str, before: str | bytes | None, after: str | bytes | None, previous: str | None = None
+) -> list[str]:
+    if previous and posixpath.dirname(previous) != posixpath.dirname(path):
+        before = None
+    try:
+        return _check(path, before, after)
+    except (RecursionError, ValueError) as exc:
+        return [f"{path}: cannot be checked: {type(exc).__name__}"]
+
+
+def _check(path: str, before: str | bytes | None, after: str | bytes | None) -> list[str]:
     if not path.endswith(ALLOWED_EXTENSIONS):
         return [f"{path}: only {', '.join(ALLOWED_EXTENSIONS)} files may change"]
     for content in (before, after):
@@ -261,6 +420,6 @@ def check_change(path: str, before: str | bytes | None, after: str | bytes | Non
             continue
         errors.extend(_field_rules(where, key, prior, doc))
     for key in old:
-        if key not in new and key[:2] not in ALLOWED_KINDS:
+        if key not in new and (key[:2] not in ALLOWED_KINDS or key[:2] == KUSTOMIZE):
             errors.append(f"{path}: {key[1]} {key[3] or '(unnamed)'}: removes a {key[0]} {key[1]}")
     return errors
