@@ -1,0 +1,280 @@
+import unittest
+
+from . import require_yaml
+
+require_yaml()
+
+from agent_stack_policies.manifests import ALLOWED_KINDS, HELMRELEASE_FIXED_FIELDS, POD_FIELDS, check_change
+
+APP = "kubernetes/apps/ai/litellm/app/"
+
+DEPLOYMENT = """\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ghcr.io/acme/web:1.0.0
+          env:
+            - name: LOG_LEVEL
+              value: info
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: web-secret
+                  key: token
+"""
+
+HELMRELEASE = """\
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: web
+spec:
+  interval: 1h
+  chartRef:
+    kind: OCIRepository
+    name: web
+  values:
+    resources:
+      limits:
+        memory: 512Mi
+    env:
+      LOG_LEVEL: info
+    ingress:
+      host: web.example.test
+    rbac:
+      create: false
+"""
+
+KUSTOMIZATION = """\
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./helmrelease.yaml
+  - ./service.yaml
+"""
+
+SERVICE = """\
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+"""
+
+CONFIGMAP = """\
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+data:
+  a: "1"
+"""
+
+BINDING = """\
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: web
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: web
+    namespace: ai
+"""
+
+
+def added(text, name="extra.yaml"):
+    return check_change(APP + name, None, text)
+
+
+def changed(before, after, name="deployment.yaml"):
+    return check_change(APP + name, before, after)
+
+
+class BypassTest(unittest.TestCase):
+    def assert_rejected(self, errors, contains=""):
+        self.assertTrue(errors, "expected a violation")
+        self.assertTrue(any(contains in e for e in errors), errors)
+
+    def test_cluster_role_in_every_spelling(self):
+        payloads = (
+            '{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"x"},"rules":[]}',
+            "{apiVersion: rbac.authorization.k8s.io/v1, kind: ClusterRole, metadata: {name: x}}",
+            "{kind: ClusterRole}",
+            '"apiVersion": "rbac.authorization.k8s.io/v1"\n"kind": "ClusterRole"\nmetadata: {name: x}\n',
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind : ClusterRole\nmetadata: {name: x}\n",
+            'apiVersion: rbac.authorization.k8s.io/v1\nkind: "Cluster\\x52ole"\nmetadata: {name: x}\n',
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind:\n  ClusterRole\nmetadata: {name: x}\n",
+            "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\napiVersion: rbac.authorization.k8s.io/v1\n"
+            "kind: ClusterRole\nmetadata: {name: x}\n",
+        )
+        for payload in payloads:
+            with self.subTest(payload[:40]):
+                self.assert_rejected(added(payload), "not an allowed kind")
+        for name in ("role.json", "role.yml"):
+            self.assert_rejected(added(payloads[0], name), "not an allowed kind")
+
+    def test_list_document_is_rejected(self):
+        self.assert_rejected(added("- apiVersion: rbac.authorization.k8s.io/v1\n  kind: ClusterRole\n"), "mapping")
+
+    def test_yaml_tags_and_directives_are_rejected(self):
+        for payload in ("apiVersion: v1\nkind: !!str ClusterRole\n", "%TAG ! tag:x,2000:\n---\nkind: !a ConfigMap\n",
+                        "apiVersion: v1\nkind: ConfigMap\ndata: !!binary aGk=\n"):
+            self.assert_rejected(added(payload), "tags")
+
+    def test_line_breaks_and_encoding(self):
+        for sep, name in (("\r", "CR"), ("\x85", "NEL"), (" ", "LS"), (" ", "PS")):
+            payload = SERVICE.replace("\n", sep, 3)
+            self.assert_rejected(added(payload), name)
+        self.assert_rejected(added(SERVICE.replace("\n", "\r\n")), "CR")
+        self.assert_rejected(added(b"apiVersion: v1\nkind: \xffService\n"), "UTF-8")
+        self.assert_rejected(check_change(APP + "README.md", None, "line\rbreak"), "CR")
+
+    def test_parse_errors_duplicates_and_aliases(self):
+        self.assert_rejected(added("apiVersion: v1\nkind: [Service\n"), "does not parse")
+        self.assert_rejected(added("apiVersion: v1\nkind: Service\nkind: ClusterRole\nmetadata: {name: x}\n"), "parse")
+        self.assert_rejected(added("a: &x {kind: ClusterRole}\nb: *x\n"), "aliases")
+        self.assert_rejected(added(SERVICE + "---\n" + SERVICE), "twice")
+
+    def test_flux_kinds_in_an_app_file(self):
+        for api, kind in (("kustomize.toolkit.fluxcd.io/v1", "Kustomization"), ("source.toolkit.fluxcd.io/v1", "GitRepository"),
+                          ("source.toolkit.fluxcd.io/v1", "OCIRepository"), ("source.toolkit.fluxcd.io/v1", "HelmRepository")):
+            payload = f"apiVersion: {api}\nkind: {kind}\nmetadata: {{name: x}}\nspec: {{}}\n"
+            self.assert_rejected(added(payload), f"{api} {kind}, which is not an allowed kind")
+
+    def test_kustomization_changes(self):
+        bad = {
+            "../../security": KUSTOMIZATION + "  - ../../security\n",
+            "a URL": KUSTOMIZATION + "  - https://example.test/x.yaml\n",
+            "a subdirectory": KUSTOMIZATION + "  - ./sub/x.yaml\n",
+            "patches": KUSTOMIZATION + "patches:\n  - path: p.yaml\n",
+            "namespace": KUSTOMIZATION + "namespace: kube-system\n",
+            "components": KUSTOMIZATION + "components:\n  - ../../components/x\n",
+            "secretGenerator": KUSTOMIZATION + "secretGenerator:\n  - name: x\n    literals: [a=b]\n",
+            "a removed resource": KUSTOMIZATION.replace("  - ./service.yaml\n", ""),
+        }
+        for name, after in bad.items():
+            with self.subTest(name):
+                self.assertTrue(check_change(APP + "kustomization.yaml", KUSTOMIZATION, after), name)
+        bare = "resources:\n  - ./helmrelease.yaml\n"
+        self.assertTrue(check_change(APP + "kustomization.yaml", bare, bare + "  - ../x.yaml\n"))
+
+    def test_edits_to_existing_rbac(self):
+        for old, new in (("name: view", "name: cluster-admin"), ("name: web\n    namespace", "name: other\n    namespace")):
+            after = BINDING.replace(old, new)
+            self.assert_rejected(check_change(APP + "rbac.yaml", BINDING, after), "not an allowed kind")
+        self.assert_rejected(check_change(APP + "rbac.yaml", BINDING, BINDING + "  - kind: User\n    name: x\n"))
+        self.assert_rejected(check_change(APP + "rbac.yaml", BINDING, None), "removes")
+
+    def test_new_secret_references(self):
+        after = DEPLOYMENT.replace("name: web-secret", "name: other-secret")
+        self.assert_rejected(changed(DEPLOYMENT, after), "secretKeyRef")
+        for addition in ("          envFrom:\n            - secretRef:\n                name: db\n",
+                         "      volumes:\n        - name: s\n          secret:\n            secretName: db\n",
+                         "      imagePullSecrets:\n        - name: regcred\n"):
+            self.assert_rejected(changed(DEPLOYMENT, DEPLOYMENT + addition))
+
+    def test_pod_fields(self):
+        for addition in ("      serviceAccountName: admin\n", "      serviceAccount: admin\n",
+                         "      automountServiceAccountToken: true\n", "      hostNetwork: true\n", "      hostPID: true\n",
+                         "      hostIPC: true\n",
+                         "      volumes:\n        - name: h\n          hostPath:\n            path: /\n",
+                         "          securityContext:\n            privileged: true\n",
+                         "          securityContext:\n            runAsUser: 0\n",
+                         "          securityContext:\n            capabilities:\n              add: [SYS_ADMIN]\n"):
+            with self.subTest(addition.strip()[:30]):
+                self.assertTrue(changed(DEPLOYMENT, DEPLOYMENT + addition))
+        cron = ("apiVersion: batch/v1\nkind: CronJob\nmetadata: {name: c}\nspec:\n  jobTemplate:\n    spec:\n      template:\n"
+                "        spec:\n          containers: [{name: c, image: x}]\n")
+        self.assertTrue(changed(cron, cron + "          hostNetwork: true\n", "cronjob.yaml"))
+
+    def test_new_document_may_not_set_a_namespace(self):
+        self.assert_rejected(added(CONFIGMAP.replace("name: web-config", "name: web-config\n  namespace: kube-system")),
+                             "metadata.namespace")
+        moved = SERVICE.replace("name: web", "name: web\n  namespace: security")
+        self.assert_rejected(changed(SERVICE, moved, "service.yaml"), "metadata.namespace")
+
+    def test_helmrelease_rules(self):
+        bad = {
+            "chartRef": HELMRELEASE.replace("name: web\n  values", "name: evil\n  values"),
+            "chart": HELMRELEASE.replace("  chartRef:\n    kind: OCIRepository\n    name: web\n",
+                                         "  chart:\n    spec:\n      chart: evil\n"),
+            "rbac": HELMRELEASE.replace("create: false", "create: true"),
+            "extraObjects": HELMRELEASE + "    extraObjects:\n      - apiVersion: v1\n        kind: Namespace\n",
+            "serviceAccount": HELMRELEASE + "    serviceAccount:\n      name: admin\n",
+            "hostNetwork": HELMRELEASE + "    hostNetwork: true\n",
+            "postRenderers": HELMRELEASE + "  postRenderers:\n    - kustomize: {patches: []}\n",
+            "targetNamespace": HELMRELEASE + "  targetNamespace: kube-system\n",
+            "valuesFrom": HELMRELEASE + "  valuesFrom:\n    - kind: Secret\n      name: x\n",
+            "secret value": HELMRELEASE + "    existingSecret: other\n",
+        }
+        for name, after in bad.items():
+            with self.subTest(name):
+                self.assertTrue(check_change(APP + "helmrelease.yaml", HELMRELEASE, after), name)
+        with_chart = HELMRELEASE.replace("  chartRef:\n    kind: OCIRepository\n    name: web\n",
+                                         "  chart:\n    spec:\n      chart: web\n      version: 1.0.0\n")
+        self.assertTrue(check_change(APP + "helmrelease.yaml", with_chart, with_chart.replace("chart: web", "chart: evil")))
+        self.assertTrue(added(HELMRELEASE, "new-helmrelease.yaml"))
+
+    def test_disallowed_extensions(self):
+        for name in ("script.sh", "Dockerfile", "values.toml", "x.yaml.sh"):
+            self.assertTrue(check_change(APP + name, None, "x"), name)
+
+
+class LegitimateFixTest(unittest.TestCase):
+    def test_image_tag_and_env_change(self):
+        after = DEPLOYMENT.replace("web:1.0.0", "web:1.0.1").replace("value: info", "value: debug")
+        self.assertEqual(changed(DEPLOYMENT, after), [])
+        extra_env = DEPLOYMENT.replace("          env:\n", "          env:\n            - name: NEW\n              value: x\n")
+        self.assertEqual(changed(DEPLOYMENT, extra_env), [])
+
+    def test_helmrelease_values_change(self):
+        after = (HELMRELEASE.replace("memory: 512Mi", "memory: 1Gi").replace("LOG_LEVEL: info", "LOG_LEVEL: debug")
+                 .replace("web.example.test", "app.example.test"))
+        self.assertEqual(check_change(APP + "helmrelease.yaml", HELMRELEASE, after), [])
+
+    def test_configmap_key_added(self):
+        self.assertEqual(check_change(APP + "configmap.yaml", CONFIGMAP, CONFIGMAP + '  b: "2"\n'), [])
+
+    def test_local_resource_added_to_kustomization(self):
+        after = KUSTOMIZATION + "  - ./configmap.yaml\n  - pdb.yml\n"
+        self.assertEqual(check_change(APP + "kustomization.yaml", KUSTOMIZATION, after), [])
+        images = KUSTOMIZATION + "images:\n  - name: web\n    newTag: 1.0.1\n"
+        self.assertEqual(check_change(APP + "kustomization.yaml", KUSTOMIZATION, images), [])
+
+    def test_service_port_change(self):
+        self.assertEqual(check_change(APP + "service.yaml", SERVICE, SERVICE.replace("port: 80", "port: 8080")), [])
+
+    def test_new_allowed_documents_and_markdown(self):
+        self.assertEqual(added(CONFIGMAP), [])
+        pdb = "apiVersion: policy/v1\nkind: PodDisruptionBudget\nmetadata: {name: web}\nspec: {maxUnavailable: 1}\n"
+        self.assertEqual(added(pdb, "pdb.yaml"), [])
+        self.assertEqual(check_change(APP + "README.md", "old", "new notes"), [])
+        self.assertEqual(check_change(APP + "service.json", None, '{"apiVersion": "v1", "kind": "Service", '
+                                                                  '"metadata": {"name": "web"}}'), [])
+
+    def test_unchanged_non_allowlisted_document_may_stay(self):
+        before = BINDING + "---\n" + CONFIGMAP
+        self.assertEqual(check_change(APP + "mixed.yaml", before, BINDING + "---\n" + CONFIGMAP + '  b: "2"\n'), [])
+
+    def test_constants_are_named(self):
+        self.assertIn(("apps/v1", "Deployment"), ALLOWED_KINDS)
+        self.assertNotIn(("rbac.authorization.k8s.io/v1", "ClusterRole"), ALLOWED_KINDS)
+        self.assertIn("hostNetwork", POD_FIELDS)
+        self.assertIn("postRenderers", HELMRELEASE_FIXED_FIELDS)
+
+
+if __name__ == "__main__":
+    unittest.main()
