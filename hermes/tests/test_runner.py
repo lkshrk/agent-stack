@@ -3,11 +3,22 @@ import http.client
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from agent_stack_hermes import retry, runner
+from agent_stack_hermes import retry, runner, runspec
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import Activity, GitHubError, PullHead
+from agent_stack_hermes.postrun import (
+    NULL_SHA,
+    Activity,
+    Compare,
+    Content,
+    FileChange,
+    GitHubError,
+    MergedPull,
+    PullHead,
+    WorkflowRun,
+)
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -147,9 +158,41 @@ class FakeOmnigent:
 
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
-                 agents=frozenset({AGENT})):
+                 agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
+                 compares=None, runs=None, pushes=None, trusted=frozenset({"renovate-master[bot]"}), contents=None,
+                 main_trusted=frozenset()):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
+        self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
+        self.compares, self.runs, self.pushes = dict(compares or {}), dict(runs or {}), dict(pushes or {})
+        self.trusted, self.contents = trusted, dict(contents or {})
+        self.main_trusted = main_trusted
+
+    def tag_commit(self, repo, sha):
+        self._call("tag_commit", repo, sha)
+        return self.tags.get(sha)
+
+    def tag_runs(self, repo, commit):
+        self._call("tag_runs", repo, commit)
+        return list(self.runs.get(commit, ()))
+
+    def push_changes(self, repo, base, head):
+        self._call("push_changes", repo, base, head)
+        return Compare("ahead", [FileChange(path) for path in self.compares[(base, head)]])
+
+    def file_content(self, repo, path, ref):
+        self._call("file_content", repo, path, ref)
+        found = self.contents.get((path, ref))
+        return Content("absent") if found is None else Content("present", found.encode())
+
+    def head_pushes(self, repo, head_ref, head_sha):
+        self._call("head_pushes", repo, head_ref, head_sha)
+        default = [Activity(f"refs/heads/{head_ref}", 0.0, "renovate-master[bot]", NULL_SHA, head_sha, "branch_creation")]
+        return [Activity(f"refs/heads/{head_ref}", 0.0, *p) for p in self.pushes[head_ref]] if head_ref in self.pushes else default
+
+    def merged_pulls(self, repo, sha):
+        self._call("merged_pulls", repo, sha)
+        return list(self.merges.get(sha, ()))
 
     def release_author(self, repo, tag):
         self._call("release_author", repo, tag)
@@ -166,7 +209,7 @@ class FakeGitHub:
 
     def pull(self, pr_url):
         self._call("pull", pr_url)
-        return PullHead(BRANCH, REPO, "main", REPO, "main")
+        return self.pulls.get(pr_url, PullHead(BRANCH, REPO, "main", REPO, "main", True))
 
     def changed_files(self, repo, base, head):
         self._call("changed_files", repo, base, head)
@@ -178,10 +221,10 @@ class FakeGitHub:
 
     def default_branch(self, repo):
         self._call("default_branch", repo)
-        return "trunk"
+        return self.default
 
 
-class RunnerTest(unittest.TestCase):
+class RunnerCase(unittest.TestCase):
     def setUp(self):
         self.log = []
         self.clock = Clock()
@@ -215,6 +258,8 @@ class RunnerTest(unittest.TestCase):
         self.assertTrue(block[3].startswith(reason_prefix), block[3])
         self.assertFalse(self.calls("complete"))
 
+
+class RunnerTest(RunnerCase):
     def test_first_slice_records_refs_then_session(self):
         out = self.run_slice(running(), comments=())
         names = [c[0] if c[0] != "note" else c[1].split(":")[0] for c in self.log]
@@ -608,6 +653,14 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(snapshot(), refs=(moved,), gh_fail={"release_author": GitHubError("HTTP 403", 403)})
         self.assert_blocked(out, "transient", "BLOCKED{environment}: ")
 
+    def test_polly_tag_without_release_stays_unattributed(self):
+        moved = {**AFTER, "refs/tags/2026.11.0": "d" * 40}
+        gh = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", T0, "schedule", REPO)]}}
+        out = self.run_slice(snapshot(), refs=(moved,), gh=gh)
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
+        self.assertFalse(self.calls("tag_commit") + self.calls("tag_runs"))
+
     def test_multiple_sessions_for_card_blocks_environment(self):
         sessions = [{"id": f"conv_{i}", "labels": {"agent-stack/card": "t_1"}} for i in (2, 1)]
         out = self.run_slice(running(), comments=RECORDED[:1], sessions=sessions)
@@ -767,6 +820,190 @@ class RunnerTest(unittest.TestCase):
         out = self.run_slice(running(), env={})
         self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("blocked", False, None))
         self.assertFalse(self.log)
+
+
+
+RENOVATE_PR = "https://github.com/example-org/example-repo/pull/7"
+OTHER_PRS = ("https://github.com/example-org/example-repo/pull/8", "https://github.com/example-org/example-repo/pull/9",
+             "https://github.com/example-org/example-repo/pull/10")
+MERGED = "c" * 40
+
+
+def infra_result(**over):
+    entry = {"verdict": "clean", "summary": "Bumped the chart."}
+    return {
+        "status": "DONE",
+        "merged": [{"pr": RENOVATE_PR, "version": "1.2.3", **entry}],
+        "skipped": [{"pr": OTHER_PRS[0], **entry, "verdict": "high-risk"}],
+        "closed": [{"pr": OTHER_PRS[1], **entry, "verdict": "stale"}],
+        "failed": [{"pr": OTHER_PRS[2], **entry, "verdict": "relevant", "rca": "The chart dropped a value."}],
+        "vault": {"commit": None},
+        **over,
+    }
+
+
+def landed(sha=MERGED, **over):
+    fields = {"number": 7, "merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
+              "head_ref": "renovate/chart-1.x", "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT,
+              "head_sha": "h" * 40, "base_sha": "b" * 40}
+    return MergedPull(**{**fields, **over})
+
+
+class InfraRunnerTest(RunnerCase):
+    def setUp(self):
+        super().setUp()
+        pin = patch.dict(runspec.REPOS, {"infra": REPO})
+        pin.start()
+        self.addCleanup(pin.stop)
+
+    def run_infra(self, result=None, merges=None, entries=None, pulls=None, moved=MERGED, gh_extra=None, extra_refs=None,
+                  **kw):
+        gh = {"default": "main", "merges": {MERGED: [landed()]} if merges is None else merges,
+              "activity": {"refs/heads/main": [(AGENT, "a" * 40, MERGED, "pr_merge")] if entries is None else entries},
+              "pulls": pulls or {}, **(gh_extra or {})}
+        refs = ({**AFTER, "refs/heads/main": moved, **(extra_refs or {})},)
+        return self.run_slice(snapshot(infra_result() if result is None else result), bundle="infra", refs=refs, gh=gh,
+                              **kw)
+
+    def test_agent_landed_renovate_pr_completes(self):
+        out = self.run_infra()
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("merged_pulls"), [("merged_pulls", REPO, MERGED)])
+        self.assertEqual([c[1] for c in self.calls("pull")], [RENOVATE_PR, *OTHER_PRS])
+        self.assertEqual(self.calls("default_branch"), [("default_branch", REPO)])
+        self.assertFalse(self.calls("pull_requests") + self.calls("changed_files"))
+        [complete] = self.calls("complete")
+        self.assertEqual((complete[3]["bundle"], complete[3]["pr_url"]), ("infra", None))
+
+    def test_agent_push_to_main_blocks(self):
+        out = self.run_infra(entries=[(AGENT, "a" * 40, MERGED, "push")])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertFalse(self.calls("merged_pulls"))
+
+    def test_agent_merge_of_non_renovate_pr_blocks(self):
+        out = self.run_infra(merges={MERGED: [landed(author="lkshrk")]})
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+
+    def test_any_result_pr_outside_the_repo_blocks(self):
+        pulls = {OTHER_PRS[1]: PullHead("renovate/x", "evil/fork", "main", REPO, "main")}
+        out = self.run_infra(pulls=pulls)
+        self.assert_blocked(out, "needs_input",
+                            f"BLOCKED{{permission}}: post-run check: {OTHER_PRS[1]}: PR head is not in {REPO}")
+
+    def test_result_pr_on_another_repo_blocks_without_fetching(self):
+        foreign = "https://github.com/evil-org/example-repo/pull/3"
+        result = infra_result(closed=[{"pr": foreign, "verdict": "stale", "summary": "Gone."}])
+        out = self.run_infra(result=result)
+        self.assert_blocked(out, "needs_input", f"BLOCKED{{permission}}: post-run check: {foreign}: PR is not in {REPO}")
+        self.assertNotIn(foreign, [c[1] for c in self.calls("pull")])
+
+    def test_landed_merges_and_agent_commits_go_into_the_metadata(self):
+        out = self.run_infra(gh_extra=self.agent_fix(["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]))
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("head_pushes"), [("head_pushes", REPO, "renovate/chart-1.x", "h" * 40)])
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"], {
+            "status": "ok",
+            "landed": [{"pr": RENOVATE_PR, "merge_commit_sha": MERGED,
+                        "agent_pushes": [{"before": "r" * 40, "after": "h" * 40,
+                                          "files": ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}]}],
+            "notes": [],
+        })
+
+    def agent_fix(self, files):
+        pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), (AGENT, "r" * 40, "h" * 40, "push")]
+        return {"pushes": {"renovate/chart-1.x": pushes}, "compares": {("r" * 40, "h" * 40): files}}
+
+    def test_agent_push_adding_a_cluster_role_blocks(self):
+        path = "kubernetes/apps/ai/litellm/app/extra.yaml"
+        gh_extra = self.agent_fix([path])
+        gh_extra["contents"] = {(path, "h" * 40): '{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole",'
+                                                   '"metadata":{"name":"x"},"rules":[]}'}
+        out = self.run_infra(gh_extra=gh_extra)
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertIn("ClusterRole x: adds a rbac.authorization.k8s.io/v1 ClusterRole", self.calls("block")[0][3])
+        self.assertEqual(self.calls("file_content"), [("file_content", REPO, path, "r" * 40),
+                                                      ("file_content", REPO, path, "h" * 40)])
+
+    def test_agent_push_on_protected_path_blocks(self):
+        out = self.run_infra(gh_extra=self.agent_fix(["talos/talconfig.yaml"]))
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertIn(f"{RENOVATE_PR}: agent push {'r' * 40}..{'h' * 40} changes talos/talconfig.yaml outside",
+                      self.calls("block")[0][3])
+
+    def test_result_mismatches_are_notes_not_violations(self):
+        result = infra_result(merged=[{"pr": OTHER_PRS[0], "verdict": "clean", "summary": "Bumped."}],
+                              skipped=[{"pr": RENOVATE_PR, "verdict": "high-risk", "summary": "Left."}])
+        pulls = {OTHER_PRS[0]: PullHead("renovate/y", REPO, "main", REPO, "main", False)}
+        out = self.run_infra(result=result, pulls=pulls)
+        self.assertEqual(out["state"], "completed", out)
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"]["notes"], [
+            f"{RENOVATE_PR} was merged by the agent but is not in merged[]",
+            f"{OTHER_PRS[0]} is in merged[] but GitHub shows it unmerged",
+        ])
+
+    def test_too_many_result_prs_block_without_lookups(self):
+        many = [{"pr": f"https://github.com/{REPO}/pull/{n}", "verdict": "stale", "summary": "Old."}
+                for n in range(100, 100 + runner.MAX_RESULT_PRS)]
+        out = self.run_infra(result=infra_result(closed=many))
+        self.assert_blocked(out, "needs_input", f"BLOCKED{{permission}}: post-run check: too many PRs in the result")
+        self.assertFalse(self.calls("pull"))
+
+    def test_result_pr_owner_case_differs_from_the_spec(self):
+        body = render_card_body(None, RunSpec("infra", "Example-Org/Example-Repo", "main", "upgrade"), "text")
+        out = self.run_infra(body=body)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual([c[1] for c in self.calls("pull")], [RENOVATE_PR, *OTHER_PRS])
+
+    def test_monthly_workflow_tag_completes(self):
+        tag = {"refs/tags/2026.11.0": "d" * 40}
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", AT, "schedule", REPO)]}}
+        out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("tag_runs"), [("tag_runs", REPO, "e" * 40)])
+
+    def test_tag_run_finished_before_the_run_window_is_unattributed(self):
+        tag = {"refs/tags/2026.11.0": "d" * 40}
+        old = AT - runner.ACTIVITY_SLACK_SECONDS - 1
+        gh_extra = {"tags": {"d" * 40: "e" * 40}, "runs": {"e" * 40: [WorkflowRun("e" * 40, "main", "completed", "success", old, "schedule", REPO)]}}
+        out = self.run_infra(extra_refs=tag, gh_extra=gh_extra)
+        self.assert_blocked(out, "needs_input",
+                            "BLOCKED{permission}: post-run check: ref moved (unattributed): refs/tags/2026.11.0")
+
+    def test_trusted_main_actors_reach_the_check(self):
+        entries = [(AGENT, "a" * 40, "w" * 40, "pr_merge"), ("h-cloud-workflow[bot]", "w" * 40, MERGED, "push")]
+        merges = {"w" * 40: [landed("w" * 40)]}
+        out = self.run_infra(entries=entries, merges=merges)
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by h-cloud-workflow[bot]")
+        out = self.run_infra(entries=entries, merges=merges, gh_extra={"main_trusted": frozenset({"h-cloud-workflow[bot]"})})
+        self.assertEqual(out["state"], "completed", out)
+
+    def test_failed_landed_pr_is_not_a_note(self):
+        result = infra_result(merged=[], failed=[{"pr": RENOVATE_PR, "verdict": "relevant", "summary": "Gate failed.",
+                                                  "rca": "The chart dropped a value."}])
+        out = self.run_infra(result=result)
+        self.assertEqual(out["state"], "completed", out)
+        [complete] = self.calls("complete")
+        self.assertEqual(complete[3]["post_run"]["notes"], [])
+
+    def test_trusted_actors_reach_the_check(self):
+        pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), ("lkshrk", "r" * 40, "h" * 40, "push")]
+        gh_extra = {"pushes": {"renovate/chart-1.x": pushes}, "trusted": frozenset({"renovate-master[bot]", "lkshrk"})}
+        out = self.run_infra(gh_extra=gh_extra)
+        self.assertEqual(out["state"], "completed", out)
+        self.assertFalse(self.calls("push_changes"))
+
+    def test_blocked_infra_result_still_checks_main(self):
+        result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}
+        out = self.run_infra(result=result, entries=[(AGENT, "a" * 40, MERGED, "force_push")])
+        self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
+        self.assertFalse(self.calls("pull") + self.calls("pull_requests"))
+
+    def test_blocked_infra_result_passes_class_when_clean(self):
+        result = {"status": "BLOCKED", "blocked": {"class": "decision", "question": "Upgrade Talos?"}}
+        out = self.run_infra(result=result, entries=[], moved="a" * 40)
+        self.assert_blocked(out, "needs_input", "BLOCKED{decision}: Upgrade Talos?")
 
 
 if __name__ == "__main__":

@@ -33,11 +33,15 @@ POLICY_REGISTRY: list[dict] = [
         "handler": "agent_stack_policies.paths.path_guard",
         "kind": "factory",
         "name": "path_guard",
-        "description": "Deny writes, apply_patch changes and shell access to forbidden paths.",
+        "description": (
+            "Deny writes, apply_patch changes and shell access to forbidden paths, and writes alone to "
+            "write_deny paths."
+        ),
         "params_schema": {
             "type": "object",
             "properties": {
                 "deny": {"type": "array", "items": {"type": "string"}},
+                "write_deny": {"type": "array", "items": {"type": "string"}},
                 "allow_only": {"type": "array", "items": {"type": "string"}},
                 "exempt": {"type": "array", "items": {"type": "string"}},
                 "startup_files": {"type": "array", "items": {"type": "string"}},
@@ -143,6 +147,30 @@ POLICY_REGISTRY: list[dict] = [
         },
     },
     {
+        "handler": "agent_stack_policies.infra_cluster.infra_cluster",
+        "kind": "factory",
+        "name": "infra_cluster",
+        "description": (
+            "Keep kubectl, flux and helm to read verbs; flux reconcile (without --force or --reset) is the only "
+            "cluster request allowed."
+        ),
+        "params_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "handler": "agent_stack_policies.infra_vcs.infra_vcs",
+        "kind": "factory",
+        "name": "infra_vcs",
+        "description": (
+            "Limit git pushes to `git push origin HEAD:<branch_prefix><branch>`, deny git remote changes, and allow "
+            "only gh reads plus PR comments and closes; merging goes through the land_renovate_pr tool."
+        ),
+        "params_schema": {
+            "type": "object",
+            "properties": {"branch_prefix": {"type": "string", "minLength": 1}},
+            "additionalProperties": False,
+        },
+    },
+    {
         "handler": "agent_stack_policies.readonly.read_only_shell",
         "kind": "factory",
         "name": "read_only_shell",
@@ -206,7 +234,7 @@ POLICY_REGISTRY: list[dict] = [
         "params_schema": {
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["planner", "security", "documenter", "polly"]},
+                "kind": {"type": "string", "enum": ["planner", "security", "documenter", "polly", "infra"]},
                 "await_dispatches": {"type": "boolean"},
             },
             "required": ["kind"],

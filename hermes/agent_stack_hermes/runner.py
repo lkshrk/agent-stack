@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
-from agent_stack_hermes.postrun import GitHubReader, agent_actors, violations
+from agent_stack_hermes.postrun import DEFAULT_TRUSTED, PR_URL, GitHubReader, InfraReads, agent_actors, token_files, violations
 from agent_stack_hermes.retry import OutageClock, unreachable
 from agent_stack_hermes.runspec import (
     INVALID_RESULT,
@@ -40,7 +40,8 @@ DENIED_TOOLS = frozenset(
         "kanban_link",
     }
 )
-REQUIRED_ENV = ("OMNIGENT_URL", "OMNIGENT_TOKEN_URL", "OMNIGENT_CLIENT_ID", "OMNIGENT_CLIENT_SECRET", "GITHUB_RO_TOKEN_FILE")
+REQUIRED_ENV = ("OMNIGENT_URL", "OMNIGENT_TOKEN_URL", "OMNIGENT_CLIENT_ID", "OMNIGENT_CLIENT_SECRET")
+TOKEN_ENV = ("GITHUB_RO_TOKEN_FILE", "GITHUB_RO_TOKEN_FILES")
 TOOL_SCHEMA = {
     "name": "omnigent_run",
     "description": (
@@ -51,6 +52,7 @@ TOOL_SCHEMA = {
 }
 MAX_REASON_CHARS = 300
 ACTIVITY_SLACK_SECONDS = 60
+MAX_RESULT_PRS = 100
 
 
 @dataclass(frozen=True)
@@ -252,24 +254,82 @@ def _pr_url(result: dict, omni, session_id: str) -> str | None:
     return url
 
 
+def _infra_prs(result: dict) -> list[str]:
+    from agent_stack_policies.result import INFRA_LISTS
+
+    urls: list[str] = []
+    for key in INFRA_LISTS:
+        entries = result.get(key)
+        for entry in entries if isinstance(entries, list) else ():
+            url = entry.get("pr") if isinstance(entry, dict) else None
+            if isinstance(url, str) and url and url not in urls:
+                urls.append(url)
+    return urls
+
+
+def _on_repo(url: str, repo: str) -> bool:
+    match = PR_URL.match(url)
+    return bool(match) and f"{match.group(1)}/{match.group(2)}".lower() == repo.lower()
+
+
+def _infra_reads(gh, repo: str, since: float) -> InfraReads:
+    return InfraReads(
+        lambda sha: gh.merged_pulls(repo, sha),
+        lambda head_ref, head_sha: gh.head_pushes(repo, head_ref, head_sha),
+        lambda base, head: gh.push_changes(repo, base, head),
+        lambda path, ref: gh.file_content(repo, path, ref),
+        lambda sha: gh.tag_commit(repo, sha),
+        lambda commit: gh.tag_runs(repo, commit),
+        gh.trusted,
+        since,
+        gh.main_trusted,
+    )
+
+
+def _infra_notes(result: dict, pulls: dict, landed: list[dict]) -> list[str]:
+    listed = result.get("merged")
+    entries: list = listed if isinstance(listed, list) else []
+    merged = [e["pr"] for e in entries if isinstance(e, dict) and isinstance(e.get("pr"), str)]
+    failed = result.get("failed")
+    failed_urls = [e["pr"] for e in failed if isinstance(e, dict) and isinstance(e.get("pr"), str)] if isinstance(failed, list) else []
+    known = {url.lower() for url in [*merged, *failed_urls]}
+    notes = [f"{r['pr']} was merged by the agent but is not in merged[]" for r in landed if r["pr"].lower() not in known]
+    notes += [f"{url} is in merged[] but GitHub shows it unmerged" for url in merged if url in pulls and not pulls[url].merged]
+    return notes
+
+
 def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str, ...], omni, gh) -> _Verdict:
     result = outcome.result if isinstance(outcome.result, dict) else {}
-    pr_url = _pr_url(result, omni, session_id)
+    infra = spec.bundle == "infra"
+    pr_url = None if infra else _pr_url(result, omni, session_id)
     at, before = _refs_before(comments)
+    urls = _infra_prs(result) if infra else []
+    if len(urls) > MAX_RESULT_PRS:
+        return _blocked("permission", f"post-run check: too many PRs in the result ({len(urls)} > {MAX_RESULT_PRS})")
     pull = gh.pull(pr_url) if pr_url else None
+    foreign = [f"{url}: PR is not in {spec.repo}" for url in urls if not _on_repo(url, spec.repo)]
+    pulls = {url: gh.pull(url) for url in urls if _on_repo(url, spec.repo)}
     files = gh.changed_files(spec.repo, pull.base_ref, pull.head_ref) if pull and spec.bundle == "documenter" else []
+    default = None
     if pull:
         branches = () if spec.ref == pull.head_ref else (spec.ref,)
     else:
-        branches = (spec.ref, gh.default_branch(spec.repo))
+        default = gh.default_branch(spec.repo)
+        branches = (spec.ref, default)
     since = at - ACTIVITY_SLACK_SECONDS
-    found = violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
-                       lambda ref: gh.activity(spec.repo, ref, since), lambda tag: gh.release_author(spec.repo, tag),
-                       gh.agents, branches)
+    landed: list[dict] = []
+    found = foreign + violations(spec.bundle, spec.repo, before, gh.refs(spec.repo), pull, files,
+                                 lambda ref: gh.activity(spec.repo, ref, since),
+                                 lambda tag: gh.release_author(spec.repo, tag), gh.agents, branches,
+                                 infra=_infra_reads(gh, spec.repo, since) if infra and default else None,
+                                 default=default, pulls=pulls, observed=landed)
     if found:
         return _blocked("permission", "post-run check: " + "; ".join(found))
     if not outcome.done:
         return _blocked(outcome.block_class or "environment", outcome.reason)
+    post_run: str | dict = "ok"
+    if infra:
+        post_run = {"status": "ok", "landed": landed, "notes": _infra_notes(result, pulls, landed)}
     metadata = {
         "omnigent_session_id": session_id,
         "bundle": spec.bundle,
@@ -277,7 +337,7 @@ def _judge(spec: RunSpec, session_id: str, outcome: Outcome, comments: tuple[str
         "result": outcome.result,
         "gaps": result.get("gaps") or [],
         "doc_gaps": result.get("doc_gaps") or [],
-        "post_run": "ok",
+        "post_run": post_run,
     }
     summary = f"{spec.bundle} {outcome.reason}" + (f": {pr_url}" if pr_url else "")
     return _Verdict("completed", summary, metadata=metadata)
@@ -413,6 +473,13 @@ def handle(args: dict | None = None, **kw) -> str:
     env = os.environ
     try:
         missing = [name for name in REQUIRED_ENV if not env.get(name)]
+        if not any(env.get(name) for name in TOKEN_ENV):
+            missing.append(" or ".join(TOKEN_ENV))
+        try:
+            owners = token_files(env.get("GITHUB_RO_TOKEN_FILES"))
+        except ValueError as exc:
+            missing.append(f"a valid GITHUB_RO_TOKEN_FILES ({exc})")
+            owners = {}
         if missing:
             ids = _kanban_ids(env)
             if ids:
@@ -422,7 +489,9 @@ def handle(args: dict | None = None, **kw) -> str:
             return json.dumps(_result("blocked", None, "runner not configured: missing " + ", ".join(missing)))
         creds = MachineCredentials(env["OMNIGENT_TOKEN_URL"], env["OMNIGENT_CLIENT_ID"], env["OMNIGENT_CLIENT_SECRET"])
         omni = OmnigentClient(env["OMNIGENT_URL"], TokenSource(creds))
-        gh = GitHubReader(env["GITHUB_RO_TOKEN_FILE"], agents=agent_actors(env.get("GITHUB_AGENT_ACTORS")))
+        gh = GitHubReader(env.get("GITHUB_RO_TOKEN_FILE") or None, agents=agent_actors(env.get("GITHUB_AGENT_ACTORS")),
+                          token_files=owners, trusted=agent_actors(env.get("GITHUB_TRUSTED_ACTORS")) or DEFAULT_TRUSTED,
+                          main_trusted=agent_actors(env.get("GITHUB_TRUSTED_MAIN_ACTORS")))
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
         return json.dumps(run_slice(env, kanban, omni, gh))
     except Exception as exc:

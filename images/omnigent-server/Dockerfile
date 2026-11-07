@@ -4,7 +4,7 @@ FROM ${OMNIGENT_SERVER_IMAGE} AS image
 
 COPY bundles/ /agents/
 # Extra built-ins seed last, so they win over any packaged agent of the same name.
-ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter \
+ENV OMNIGENT_BUILTIN_AGENT_DIRS=/agents/polly:/agents/planner:/agents/security-review:/agents/documenter:/agents/infra \
     OMNIGENT_SEEDED_AGENTS=claude-native-ui,codex-native-ui
 COPY config/omnigent/config.yaml /etc/omnigent/config.yaml
 COPY policies/omnigent/agent_stack_policies/ /opt/agent-stack/policies/agent_stack_policies/

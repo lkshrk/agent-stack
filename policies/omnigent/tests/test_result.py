@@ -622,6 +622,125 @@ class DepthTest(unittest.TestCase):
         self.assertEqual(decision["result"], "DENY")
 
 
+HCLOUD = "https://github.com/lkshrk/h-cloud/pull/"
+
+
+def infra_valid():
+    return {
+        "status": "DONE",
+        "merged": [{"pr": HCLOUD + "1519", "version": "1.9.0", "verdict": "clean", "summary": "Bumped omnigent-host."}],
+        "skipped": [{"pr": HCLOUD + "1520", "verdict": "high-risk", "summary": "Talos major; left for the owner."}],
+        "closed": [{"pr": HCLOUD + "1521", "version": None, "verdict": "stale", "summary": "Superseded by 1519."}],
+        "failed": [{"pr": HCLOUD + "1522", "version": "2.0.0", "verdict": "relevant", "summary": "HelmRelease failed.",
+                    "rca": "The chart dropped a value the release sets."}],
+        "vault": {"commit": "0123456789abcdef0123456789abcdef01234567"},
+    }
+
+
+class InfraResultTest(unittest.TestCase):
+    def errors(self, **over):
+        return result.validate_result("infra", {**infra_valid(), **over})
+
+    def test_infra_valid(self):
+        self.assertEqual(result.validate_result("infra", infra_valid()), [])
+        empty = {"status": "DONE", "merged": [], "skipped": [], "closed": [], "failed": [], "vault": {"commit": None}}
+        self.assertEqual(result.validate_result("infra", empty), [])
+
+    def test_infra_is_a_kind_everywhere(self):
+        from agent_stack_policies import POLICY_REGISTRY
+        from agent_stack_policies.mcp import TOOL
+
+        self.assertIn("infra", result.KINDS)
+        [contract] = [e for e in POLICY_REGISTRY if e["name"] == "result_contract"]
+        self.assertEqual(contract["params_schema"]["properties"]["kind"]["enum"], list(result.KINDS))
+        self.assertEqual(TOOL["inputSchema"]["properties"]["kind"]["enum"], list(result.KINDS))
+        result.result_contract(kind="infra")
+
+    def test_infra_lists_required(self):
+        for key in ("merged", "skipped", "closed", "failed"):
+            for bad in (None, {}, "x", 3):
+                data = {**infra_valid(), key: bad}
+                if bad is None:
+                    del data[key]
+                self.assertIn(f"{key} must be a list", result.validate_result("infra", data), (key, bad))
+
+    def test_infra_pr_must_be_pull_url(self):
+        for bad in ("https://github.com/a/b/pull/0", "https://github.com/a/b/pull/1/files", "http://github.com/a/b/pull/1",
+                    "https://github.com/a/b/issues/1", "", 7, None):
+            for key in ("merged", "skipped", "closed", "failed"):
+                entry = {**infra_valid()[key][0], "pr": bad}
+                errors = self.errors(**{key: [entry]})
+                self.assertTrue(any(e.startswith(f"{key}[0].pr ") for e in errors), (key, bad, errors))
+
+    def test_infra_verdict_and_summary(self):
+        for bad in ("ok", "", None, "Clean"):
+            entry = {**infra_valid()["merged"][0], "verdict": bad}
+            self.assertIn("merged[0].verdict must be one of clean|relevant|high-risk|stale", self.errors(merged=[entry]))
+        for bad in ("", " ", None, 3):
+            entry = {**infra_valid()["skipped"][0], "summary": bad}
+            self.assertIn("skipped[0].summary must be a non-empty string", self.errors(skipped=[entry]))
+
+    def test_infra_version_is_optional_text(self):
+        entry = dict(infra_valid()["merged"][0])
+        del entry["version"]
+        self.assertEqual(self.errors(merged=[entry]), [])
+        for bad in ("", 3, ["1"]):
+            errors = self.errors(merged=[{**entry, "version": bad}])
+            self.assertIn("merged[0].version must be a non-empty string when given", errors)
+
+    def test_infra_failed_needs_rca(self):
+        entry = dict(infra_valid()["failed"][0])
+        for bad in (None, "", " "):
+            self.assertIn("failed[0].rca must be a non-empty string", self.errors(failed=[{**entry, "rca": bad}]))
+        del entry["rca"]
+        self.assertIn("failed[0].rca must be a non-empty string", self.errors(failed=[entry]))
+
+    def test_infra_entry_must_be_object(self):
+        for bad in (None, "x", [], 3):
+            self.assertIn("closed[0] must be an object", self.errors(closed=[bad]))
+
+    def test_infra_pr_listed_once(self):
+        dup = {**infra_valid()["closed"][0], "pr": HCLOUD + "1519"}
+        self.assertIn(f"{HCLOUD}1519 is listed more than once", self.errors(closed=[dup]))
+
+    def test_infra_vault_commit(self):
+        for good in ("0123456789abcdef0123456789abcdef01234567", "0123abc", None):
+            self.assertEqual(self.errors(vault={"commit": good}), [], good)
+        for bad in ({}, {"commit": "xyz1234"}, {"commit": "0123AB"}, {"commit": ""}, {"commit": 5}, None, "abc1234"):
+            errors = self.errors(vault=bad)
+            self.assertTrue(any(e.startswith("vault") for e in errors), (bad, errors))
+
+    def test_infra_blocked_needs_no_lists(self):
+        self.assertEqual(result.validate_result("infra", {"status": "BLOCKED", "blocked": BLOCKED_DECISION}), [])
+
+    def test_infra_blocked_lists_are_checked_when_present(self):
+        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION}
+        good = infra_valid()
+        self.assertEqual(result.validate_result("infra", {**blocked, "merged": good["merged"], "vault": good["vault"]}), [])
+        self.assertTrue(result.validate_result("infra", {**blocked, "merged": "x"}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "failed": [{**good["failed"][0], "rca": ""}]}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "closed": [{"pr": "nope", "verdict": "stale", "summary": "x"}]}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "vault": {"commit": "zz"}}))
+
+    def test_infra_never_stubs(self):
+        data = {**infra_valid(), "status": "DONE_WITH_CONCERNS"}
+        for gap_class in result.STUB_CLASSES:
+            errors = result.validate_result("infra", {**data, "gaps": [stub_gap(gap_class=gap_class)]})
+            self.assertTrue(any("in an infra result waits" in e for e in errors), errors)
+
+    def test_infra_wrong_shapes_never_raise(self):
+        junk = [None, 0, "s", [], {}, [1], ["a"], {"a": 1}, [{}], [[]], True]
+        good = infra_valid()
+        for key in [*good, "gaps", "assumptions"]:
+            for value in junk:
+                self.assertIsInstance(result.validate_result("infra", {**good, key: value}), list, (key, value))
+        for key in ("merged", "failed"):
+            for field in ("pr", "version", "verdict", "summary", "rca"):
+                for value in junk:
+                    entry = {**good[key][0], field: value}
+                    self.assertIsInstance(result.validate_result("infra", {**good, key: [entry]}), list)
+
+
 class PollyResultTest(unittest.TestCase):
     def test_polly_valid_fixture(self):
         self.assertEqual(result.validate_result("polly", load("polly-valid.json")), [])

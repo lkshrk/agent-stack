@@ -57,7 +57,8 @@ ENV MISE_DATA_DIR=/opt/mise \
     MISE_CACHE_DIR=/opt/mise/cache \
     MISE_GLOBAL_CONFIG_FILE=/etc/mise/config.toml \
     MISE_YES=1
-ENV PATH="/opt/mise/shims:/opt/agent/bin:${PATH}"
+# A project .mise.toml (h-cloud pins flate) must not swap the cluster tools the infra agent relies on.
+ENV PATH="/opt/agent/pinned:/opt/mise/shims:/opt/agent/bin:${PATH}"
 # codebase-memory-mcp refuses a store under the world-writable HOME emptyDir that Omnigent mounts.
 ENV CBM_CACHE_DIR=/tmp/codebase-memory-mcp
 
@@ -67,6 +68,9 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mi
 COPY images/omnigent-host/mise.toml /etc/mise/config.toml
 RUN mise install \
  && mise reshim \
+ && install -d -m 0755 /opt/agent/pinned \
+ && cd / && for bin in kubectl flux helm flate crane; do ln -s "$(mise which "$bin")" "/opt/agent/pinned/$bin"; done \
+ && for bin in kubectl flux helm flate crane; do test -x "/opt/agent/pinned/$bin"; done \
  && rm -rf /opt/mise/cache /root/.cache /root/go /root/.npm \
  && chmod -R a+rX /opt/mise
 

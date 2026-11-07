@@ -20,7 +20,7 @@ Deployment manifests, secrets, databases and routes live in the h-cloud reposito
 | Path | Contents |
 | --- | --- |
 | [`images/`](images/README.md) | Dockerfiles and image assets |
-| [`bundles/`](bundles/README.md) | Omnigent agent bundles (`polly`) |
+| [`bundles/`](bundles/README.md) | Omnigent agent bundles (`polly`, `planner`, `security-review`, `documenter`, `infra`) |
 | [`plugins/`](plugins/README.md) | Plugins `runner`, `linear`, `personal` |
 | [`cmd/`](cmd/README.md) | Go programs: `signal-shim`, `token-minter`, `linear-bridge` |
 | [`config/`](config/README.md) | Omnigent server and Hermes configuration baked into images |

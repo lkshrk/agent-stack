@@ -4,6 +4,7 @@ ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v0.22.5@sha256:9c5561579f3f
 FROM ${HERMES_IMAGE} AS image
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.4
+ARG PYYAML_VERSION=6.0.3
 ARG KUBECTL_VERSION=v1.37.2
 # Same commit the Hermes plugin catalog pins for openviking.
 ARG OPENVIKING_PLUGIN_SHA=9f150ece247ad683494ab172d738023bd6dc6170
@@ -20,7 +21,9 @@ RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kub
 
 RUN "${HERMES_PYTHON:-python3}" -m venv /opt/obsidian-wiki \
  && /opt/obsidian-wiki/bin/pip install --no-cache-dir "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
- && ln -s /opt/obsidian-wiki/bin/obsidian-wiki /usr/local/bin/obsidian-wiki
+ && ln -s /opt/obsidian-wiki/bin/obsidian-wiki /usr/local/bin/obsidian-wiki \
+ && /opt/obsidian-wiki/bin/pip install --no-cache-dir --no-deps --only-binary=:all: --target /opt/agent-stack \
+      "PyYAML==${PYYAML_VERSION}"
 
 RUN git clone --quiet --filter=blob:none --no-checkout https://github.com/volcengine/OpenViking.git /tmp/ov \
  && git -C /tmp/ov sparse-checkout set examples/hermes-plugin \
@@ -46,7 +49,8 @@ COPY config/hermes/profiles/ /opt/agent-stack/hermes-profiles/
 COPY hermes/plugins/omnigent_runner/ /opt/agent-stack/hermes-profiles/omnigent-runner/plugins/omnigent_runner/
 RUN mkdir /opt/agent-stack/hermes-profiles/delivery/skills /opt/agent-stack/hermes-profiles/omnigent-runner/skills \
  && chmod -R u=rwX,go=rX /opt/agent-stack \
- && echo /opt/agent-stack > "$(/opt/hermes/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/agent-stack.pth"
+ && echo /opt/agent-stack > "$(/opt/hermes/.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/agent-stack.pth" \
+ && /opt/hermes/.venv/bin/python -c "import yaml, agent_stack_policies.manifests"
 
 ENV PATH="/opt/agent/bin:${PATH}" \
     HERMES_MANAGED_DIR=/etc/hermes
@@ -57,6 +61,7 @@ COPY policies/omnigent/ /src/policies/omnigent/
 COPY config/hermes/ /src/config/hermes/
 COPY bundles/ /src/bundles/
 COPY config/omnigent/ /src/config/omnigent/
+COPY config/public-contributions.yaml /src/config/public-contributions.yaml
 COPY images/omnigent-host/codex/ /src/images/omnigent-host/codex/
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/hermes/.venv/bin/python -B -m unittest discover -s hermes/tests -t hermes -v
