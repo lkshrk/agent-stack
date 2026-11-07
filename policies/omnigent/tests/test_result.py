@@ -666,11 +666,18 @@ class InfraResultTest(unittest.TestCase):
 
     def test_infra_pr_must_be_pull_url(self):
         for bad in ("https://github.com/a/b/pull/0", "https://github.com/a/b/pull/1/files", "http://github.com/a/b/pull/1",
-                    "https://github.com/a/b/issues/1", "", 7, None):
+                    "https://github.com/a/b/issues/1", "", 7, None, "https://github.com/a b/c/pull/1",
+                    "https://github.com/a/b\n/pull/1", "https://github.com/a/b/pull/1\n", "https://github.com/a_b/c/pull/1",
+                    "https://github.com/a/b?x=1/pull/1", "https://github.com/a/b#x/pull/1", "https://github.com/a/b/pull/1 "):
             for key in ("merged", "skipped", "closed", "failed"):
                 entry = {**infra_valid()[key][0], "pr": bad}
                 errors = self.errors(**{key: [entry]})
                 self.assertTrue(any(e.startswith(f"{key}[0].pr ") for e in errors), (key, bad, errors))
+
+    def test_infra_pr_url_accepts_github_names(self):
+        for good in ("https://github.com/lkshrk/h-cloud/pull/1519", "https://github.com/A-1/x.y_z-2/pull/7"):
+            entry = {**infra_valid()["merged"][0], "pr": good}
+            self.assertEqual(self.errors(merged=[entry]), [], good)
 
     def test_infra_verdict_and_summary(self):
         for bad in ("ok", "", None, "Clean"):
@@ -753,7 +760,8 @@ class PollyResultTest(unittest.TestCase):
         errors = result.validate_result("polly", load("polly-invalid-gitlab-pr.json"))
         self.assertTrue(any(e.startswith("pr ") for e in errors), errors)
         data = load("polly-valid.json")
-        for bad in ("https://github.com/a/b/pull/0", "https://github.com/a/b/pull/1/files", "http://github.com/a/b/pull/1", 7, None):
+        for bad in ("https://github.com/a/b/pull/0", "https://github.com/a/b/pull/1/files", "http://github.com/a/b/pull/1", 7, None,
+                    "https://github.com/a/b\u2028/pull/1", "https://github.com/a%20b/c/pull/1"):
             errors = result.validate_result("polly", {**data, "pr": bad})
             self.assertTrue(any(e.startswith("pr ") for e in errors), (bad, errors))
 
