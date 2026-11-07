@@ -290,9 +290,11 @@ def _check_polly(result: dict, errors: list[str]) -> None:
         errors.append("branch must be a non-empty string")
 
 
-def _check_infra(result: dict, errors: list[str]) -> None:
+def _check_infra(result: dict, errors: list[str], partial: bool = False) -> None:
     seen: set[str] = set()
     for key in INFRA_LISTS:
+        if partial and key not in result:
+            continue
         entries = result.get(key)
         if not isinstance(entries, list):
             errors.append(f"{key} must be a list")
@@ -318,6 +320,8 @@ def _check_infra(result: dict, errors: list[str]) -> None:
                 errors.append(f"{where}.summary must be a non-empty string")
             if key == "failed" and not _text(entry.get("rca")):
                 errors.append(f"{where}.rca must be a non-empty string")
+    if partial and "vault" not in result:
+        return
     vault = result.get("vault")
     if not isinstance(vault, dict) or "commit" not in vault:
         errors.append("vault must be an object with commit")
@@ -431,6 +435,8 @@ def validate_result(kind: str, result: dict) -> list[str]:
             errors.append("blocked.question must be a non-empty string")
         if kind == "security" and result.get("verdict") not in (None, "fail"):
             errors.append("a BLOCKED security result carries no verdict, or fail")
+        if kind == "infra":
+            _check_infra(result, errors, partial=True)
     else:
         _CHECKS[kind](result, errors)
     return errors

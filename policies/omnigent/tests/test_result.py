@@ -713,6 +713,15 @@ class InfraResultTest(unittest.TestCase):
     def test_infra_blocked_needs_no_lists(self):
         self.assertEqual(result.validate_result("infra", {"status": "BLOCKED", "blocked": BLOCKED_DECISION}), [])
 
+    def test_infra_blocked_lists_are_checked_when_present(self):
+        blocked = {"status": "BLOCKED", "blocked": BLOCKED_DECISION}
+        good = infra_valid()
+        self.assertEqual(result.validate_result("infra", {**blocked, "merged": good["merged"], "vault": good["vault"]}), [])
+        self.assertTrue(result.validate_result("infra", {**blocked, "merged": "x"}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "failed": [{**good["failed"][0], "rca": ""}]}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "closed": [{"pr": "nope", "verdict": "stale", "summary": "x"}]}))
+        self.assertTrue(result.validate_result("infra", {**blocked, "vault": {"commit": "zz"}}))
+
     def test_infra_never_stubs(self):
         data = {**infra_valid(), "status": "DONE_WITH_CONCERNS"}
         for gap_class in result.STUB_CLASSES:
