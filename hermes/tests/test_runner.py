@@ -7,7 +7,7 @@ from pathlib import Path
 from agent_stack_hermes import retry, runner
 from agent_stack_hermes.kanban_port import CardView
 from agent_stack_hermes.omnigent import OmnigentError, StreamEvent, _bad_body
-from agent_stack_hermes.postrun import Activity, GitHubError, MergedPull, PullCommit, PullHead, TagObject
+from agent_stack_hermes.postrun import NULL_SHA, Activity, GitHubError, MergedPull, PullHead, TagObject
 from agent_stack_hermes.runspec import LinearLink, RunSpec, builtin_agent_id, render_card_body
 
 DATA = Path(__file__).parent / "testdata" / "omnigent"
@@ -148,11 +148,11 @@ class FakeOmnigent:
 class FakeGitHub:
     def __init__(self, log, refs=(BEFORE, AFTER), files=(), fail=None, activity=None, releases=None,
                  agents=frozenset({AGENT}), tags=None, merges=None, pulls=None, default="trunk", commits=None,
-                 commit_files=None, reachable=()):
+                 compares=None, reachable=(), pushes=None):
         self.log, self.refs_seq, self.files, self.fail = log, list(refs), list(files), fail or {}
         self.entries, self.releases, self.agents = dict(activity or {}), dict(releases or {}), agents
         self.tags, self.merges, self.pulls, self.default = dict(tags or {}), dict(merges or {}), dict(pulls or {}), default
-        self.commits, self.commit_file_map, self.reachable_commits = dict(commits or {}), dict(commit_files or {}), set(reachable)
+        self.compares, self.reachable_commits, self.pushes = dict(compares or {}), set(reachable), dict(pushes or {})
 
     def tag(self, repo, sha):
         self._call("tag", repo, sha)
@@ -162,13 +162,10 @@ class FakeGitHub:
         self._call("reachable", repo, commit, branch)
         return commit in self.reachable_commits
 
-    def pull_commits(self, repo, number):
-        self._call("pull_commits", repo, number)
-        return list(self.commits.get(number, ()))
-
-    def commit_files(self, repo, sha):
-        self._call("commit_files", repo, sha)
-        return list(self.commit_file_map.get(sha, ()))
+    def head_pushes(self, repo, head_ref, head_sha):
+        self._call("head_pushes", repo, head_ref, head_sha)
+        default = [Activity(f"refs/heads/{head_ref}", 0.0, "renovate-master[bot]", NULL_SHA, head_sha, "branch_creation")]
+        return [Activity(f"refs/heads/{head_ref}", 0.0, *p) for p in self.pushes[head_ref]] if head_ref in self.pushes else default
 
     def merged_pulls(self, repo, sha):
         self._call("merged_pulls", repo, sha)
@@ -193,7 +190,7 @@ class FakeGitHub:
 
     def changed_files(self, repo, base, head):
         self._call("changed_files", repo, base, head)
-        return self.files
+        return list(self.compares.get((base, head), self.files))
 
     def activity(self, repo, ref, since):
         self._call("activity", repo, ref, since)
@@ -824,7 +821,8 @@ def infra_result(**over):
 
 def landed(sha=MERGED, **over):
     fields = {"number": 7, "merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
-              "head_ref": "renovate/chart-1.x", "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT}
+              "head_ref": "renovate/chart-1.x", "head_repo": REPO, "author": "renovate-master[bot]", "merged_by": AGENT,
+              "head_sha": "h" * 40, "base_sha": "b" * 40}
     return MergedPull(**{**fields, **over})
 
 
@@ -871,22 +869,26 @@ class InfraRunnerTest(RunnerCase):
         self.assertNotIn(foreign, [c[1] for c in self.calls("pull")])
 
     def test_landed_merges_and_agent_commits_go_into_the_metadata(self):
-        out = self.run_infra(gh_extra={"commits": {7: [PullCommit("f" * 40, AGENT, "web-flow")]},
-                                       "commit_files": {"f" * 40: ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}})
+        out = self.run_infra(gh_extra=self.agent_fix(["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]))
         self.assertEqual(out["state"], "completed", out)
+        self.assertEqual(self.calls("head_pushes"), [("head_pushes", REPO, "renovate/chart-1.x", "h" * 40)])
         [complete] = self.calls("complete")
         self.assertEqual(complete[3]["post_run"], {
             "status": "ok",
             "landed": [{"pr": RENOVATE_PR, "merge_commit_sha": MERGED,
-                        "agent_commits": [{"sha": "f" * 40, "files": ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}]}],
+                        "agent_pushes": [{"before": "r" * 40, "after": "h" * 40,
+                                          "files": ["kubernetes/apps/ai/litellm/app/helmrelease.yaml"]}]}],
             "notes": [],
         })
 
-    def test_agent_commit_on_protected_path_blocks(self):
-        out = self.run_infra(gh_extra={"commits": {7: [PullCommit("f" * 40, AGENT, "web-flow")]},
-                                       "commit_files": {"f" * 40: ["talos/talconfig.yaml"]}})
+    def agent_fix(self, files):
+        pushes = [("renovate-master[bot]", NULL_SHA, "r" * 40, "branch_creation"), (AGENT, "r" * 40, "h" * 40, "push")]
+        return {"pushes": {"renovate/chart-1.x": pushes}, "compares": {("r" * 40, "h" * 40): files}}
+
+    def test_agent_push_on_protected_path_blocks(self):
+        out = self.run_infra(gh_extra=self.agent_fix(["talos/talconfig.yaml"]))
         self.assert_blocked(out, "needs_input", "BLOCKED{permission}: post-run check: ref moved by agent: refs/heads/main (")
-        self.assertIn(f"{RENOVATE_PR}: agent commit {'f' * 40} touches protected path talos/talconfig.yaml",
+        self.assertIn(f"{RENOVATE_PR}: agent push {'r' * 40}..{'h' * 40} touches protected path talos/talconfig.yaml",
                       self.calls("block")[0][3])
 
     def test_result_mismatches_are_notes_not_violations(self):

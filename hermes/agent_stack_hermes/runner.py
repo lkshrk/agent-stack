@@ -275,8 +275,8 @@ def _on_repo(url: str, repo: str) -> bool:
 def _infra_reads(gh, repo: str, default: str) -> InfraReads:
     return InfraReads(
         lambda sha: gh.merged_pulls(repo, sha),
-        lambda number: gh.pull_commits(repo, number),
-        lambda sha: gh.commit_files(repo, sha),
+        lambda head_ref, head_sha: gh.head_pushes(repo, head_ref, head_sha),
+        lambda base, head: gh.changed_files(repo, base, head),
         lambda sha: gh.tag(repo, sha),
         lambda commit: gh.reachable(repo, commit, default),
     )

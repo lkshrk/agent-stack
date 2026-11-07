@@ -17,7 +17,6 @@ from agent_stack_hermes.postrun import (
     PULLS_RETRY_SECONDS,
     InfraReads,
     MergedPull,
-    PullCommit,
     PullHead,
     TagObject,
     agent_actors,
@@ -106,7 +105,8 @@ RENOVATE = "renovate-master[bot]"
 
 def renovate_pull(sha="m", **over):
     fields = {"number": 7, "merged": True, "merge_commit_sha": sha, "base_ref": "main", "base_repo": REPO,
-              "head_ref": "renovate/x-1.x", "head_repo": REPO, "author": RENOVATE, "merged_by": AGENT}
+              "head_ref": "renovate/x-1.x", "head_repo": REPO, "author": RENOVATE, "merged_by": AGENT,
+              "head_sha": "h", "base_sha": "b"}
     return MergedPull(**{**fields, **over})
 
 
@@ -124,26 +124,37 @@ class Releases:
         return self.authors.get(tag)
 
 
+HEAD_REF = "refs/heads/renovate/x-1.x"
+
+
+def push(before, after, actor=AGENT, kind="push"):
+    return Activity(HEAD_REF, 1000.0, actor, before, after, kind)
+
+
+RENOVATE_ONLY = [push(NULL_SHA, "h", RENOVATE, "branch_creation")]
+
+
 class FakeInfra:
-    def __init__(self, pulls=None, commits=None, files=None, tags=None, reachable=()):
-        self.pulls, self.commits, self.files = pulls or {}, commits or {}, files or {}
+    def __init__(self, pulls=None, pushes=None, files=None, tags=None, reachable=()):
+        self.pulls, self.files = pulls or {}, files or {}
+        self.pushes = RENOVATE_ONLY if pushes is None else pushes
         self.tags, self.reachable_commits = tags or {}, set(reachable)
         self.asked = []
 
     def reads(self):
-        return InfraReads(self.merged, self.pull_commits, self.commit_files, self.tag, self.reachable)
+        return InfraReads(self.merged, self.head_pushes, self.compare_files, self.tag, self.reachable)
 
     def merged(self, sha):
         self.asked.append(("merged", sha))
         return list(self.pulls.get(sha, ()))
 
-    def pull_commits(self, number):
-        self.asked.append(("commits", number))
-        return list(self.commits.get(number, [PullCommit("r1", RENOVATE, "web-flow")]))
+    def head_pushes(self, ref, head_sha):
+        self.asked.append(("pushes", ref, head_sha))
+        return None if self.pushes == "untraceable" else list(self.pushes)
 
-    def commit_files(self, sha):
-        self.asked.append(("files", sha))
-        return list(self.files.get(sha, ()))
+    def compare_files(self, base, head):
+        self.asked.append(("compare", base, head))
+        return list(self.files.get((base, head), ()))
 
     def tag(self, sha):
         self.asked.append(("tag", sha))
@@ -384,15 +395,16 @@ class InfraViolationsTest(unittest.TestCase):
         self.assertTrue(out[0].startswith("ref moved by agent: refs/heads/main ("), out)
         self.assertIn(contains, out[0])
 
-    def agent_commit(self, files, author=AGENT, committer="web-flow"):
-        return FakeInfra(pulls={"m": [renovate_pull()]}, commits={7: [PullCommit("f1", author, committer)]},
-                         files={"f1": files})
+    def agent_push(self, files, actor=AGENT, kind="push"):
+        pushes = [push(NULL_SHA, "r1", RENOVATE, "branch_creation"), push("r1", "h", actor, kind)]
+        base = "b" if kind == "force_push" else "r1"
+        return FakeInfra(pulls={"m": [renovate_pull()]}, pushes=pushes, files={(base, "h"): files})
 
     def test_agent_landed_renovate_pr_allowed_and_observed(self):
         out = self.check({MAIN: "m"}, [merge("a", "m")], self.landed_ok())
         self.assertEqual(out, [])
-        self.assertEqual(self.fake.asked, [("merged", "m"), ("commits", 7)])
-        self.assertEqual(self.observed, [{"pr": self.PR7, "merge_commit_sha": "m", "agent_commits": []}])
+        self.assertEqual(self.fake.asked, [("merged", "m"), ("pushes", "renovate/x-1.x", "h")])
+        self.assertEqual(self.observed, [{"pr": self.PR7, "merge_commit_sha": "m", "agent_pushes": []}])
 
     def test_chain_of_agent_merges_and_owner_push_allowed(self):
         entries = [merge("a", "m1"), entry(MAIN, "lkshrk", "m1", "o"), merge("o", "m2")]
@@ -439,15 +451,14 @@ class InfraViolationsTest(unittest.TestCase):
         fake = FakeInfra(pulls={"m1": [renovate_pull("m1")], "m2": [renovate_pull("m2", author="lkshrk")]})
         self.assert_agent_violation(self.check({MAIN: "m2"}, entries, fake), "author")
 
-    def test_agent_fix_commit_on_allowed_path_passes_and_is_reported(self):
-        commits = {7: [PullCommit("r1", RENOVATE, "web-flow"), PullCommit("f1", AGENT, "web-flow")]}
+    def test_agent_push_on_allowed_path_passes_and_is_reported(self):
         path = "kubernetes/apps/ai/litellm/app/helmrelease.yaml"
-        fake = FakeInfra(pulls={"m": [renovate_pull()]}, commits=commits, files={"f1": [path]})
+        fake = self.agent_push([path])
         self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], fake), [])
-        self.assertEqual(fake.asked, [("merged", "m"), ("commits", 7), ("files", "f1")])
-        self.assertEqual(self.observed[0]["agent_commits"], [{"sha": "f1", "files": [path]}])
+        self.assertEqual(fake.asked, [("merged", "m"), ("pushes", "renovate/x-1.x", "h"), ("compare", "r1", "h")])
+        self.assertEqual(self.observed[0]["agent_pushes"], [{"before": "r1", "after": "h", "files": [path]}])
 
-    def test_agent_commit_on_protected_path_is_violation(self):
+    def test_agent_push_on_protected_path_is_violation_whatever_its_commits_claim(self):
         paths = (
             "kubernetes/apps/security/kyverno/policies/agent-github-tokens/mutatingpolicy.yaml",
             "kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml",
@@ -462,31 +473,47 @@ class InfraViolationsTest(unittest.TestCase):
         self.assertEqual(len(PROTECTED_PATHS), 8)
         for path in paths:
             with self.subTest(path):
-                out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit(["README.md", path]))
-                self.assert_agent_violation(out, self.PR7)
-                self.assertIn(path, out[0])
+                out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_push(["README.md", path]))
+                self.assert_agent_violation(out, f"{self.PR7}: agent push r1..h touches protected path {path}")
                 self.assertEqual(self.observed, [])
 
     def test_similar_but_unprotected_paths_pass(self):
         for path in ("kubernetes/apps/securityx/a.yaml", "kubernetes/apps/ai/hermes-webui/a.yaml", "docs/.github.md",
                      "talosx/a.yaml", "a.sops.yml"):
-            self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit([path])), [], path)
+            self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], self.agent_push([path])), [], path)
 
     def test_rename_into_or_out_of_protected_path_is_violation(self):
         for listed in (["talos/x.yaml", "docs/x.yaml"], ["docs/x.yaml", ".github/x.yaml"]):
-            out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit(listed))
+            out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_push(listed))
             self.assert_agent_violation(out, "protected path")
 
-    def test_missing_login_is_treated_as_agent(self):
-        for author, committer in (("", "web-flow"), (RENOVATE, ""), ("", "")):
-            out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_commit([".github/x.yaml"], author, committer))
-            self.assert_agent_violation(out, "protected path")
+    def test_null_actor_push_is_treated_as_agent(self):
+        out = self.check({MAIN: "m"}, [merge("a", "m")], self.agent_push([".github/x.yaml"], actor=""))
+        self.assert_agent_violation(out, "push r1..h touches protected path .github/x.yaml")
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], self.agent_push(["docs/x.md"], actor="")), [])
+        self.assertEqual(self.observed[0]["agent_pushes"], [{"before": "r1", "after": "h", "files": ["docs/x.md"]}])
 
-    def test_renovate_only_commits_pass_even_on_protected_paths(self):
-        commits = {7: [PullCommit("r1", RENOVATE, "web-flow"), PullCommit("r2", "Renovate-Master[bot]", RENOVATE)]}
-        fake = FakeInfra(pulls={"m": [renovate_pull()]}, commits=commits, files={"r1": [".github/x.yaml"]})
+    def test_agent_force_push_compares_from_the_base(self):
+        fake = self.agent_push(["talos/x.yaml"], kind="force_push")
+        self.assert_agent_violation(self.check({MAIN: "m"}, [merge("a", "m")], fake), "push r1..h")
+        self.assertIn(("compare", "b", "h"), fake.asked)
+
+    def test_agent_branch_creation_compares_from_the_base(self):
+        pushes = [push(NULL_SHA, "h", AGENT, "branch_creation")]
+        fake = FakeInfra(pulls={"m": [renovate_pull()]}, pushes=pushes, files={("b", "h"): ["docs/x.md"]})
         self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], fake), [])
-        self.assertNotIn(("files", "r1"), fake.asked)
+        self.assertEqual(self.observed[0]["agent_pushes"], [{"before": NULL_SHA, "after": "h", "files": ["docs/x.md"]}])
+
+    def test_renovate_and_owner_pushes_are_trusted(self):
+        pushes = [push(NULL_SHA, "r1", RENOVATE, "branch_creation"), push("r1", "r2", "Renovate-Master[bot]", "force_push"),
+                  push("r2", "h", "lkshrk")]
+        fake = FakeInfra(pulls={"m": [renovate_pull()]}, pushes=pushes)
+        self.assertEqual(self.check({MAIN: "m"}, [merge("a", "m")], fake), [])
+        self.assertFalse([a for a in fake.asked if a[0] == "compare"])
+
+    def test_untraceable_head_history_is_violation(self):
+        fake = FakeInfra(pulls={"m": [renovate_pull()]}, pushes="untraceable")
+        self.assert_agent_violation(self.check({MAIN: "m"}, [merge("a", "m")], fake), "head branch history")
 
     def test_broken_chain_after_landed_merge_is_unattributed(self):
         out = self.check({MAIN: "z"}, [merge("a", "m")], self.landed_ok())
@@ -941,7 +968,9 @@ class MergedPullsTest(ReaderCase):
         got = r.merged_pulls("lkshrk/h-cloud", self.SHA)
         self.assertEqual(got, [MergedPull(True, self.SHA, "main", "lkshrk/h-cloud",
                                           "renovate/ghcr.io-lkshrk-agent-stack-omnigent-host-1.x", "lkshrk/h-cloud",
-                                          "renovate-master[bot]", "renovate-master[bot]", 1519)])
+                                          "renovate-master[bot]", "renovate-master[bot]", 1519,
+                                          "c9018854bca2115d2b5373058095ce1056ecd3d3",
+                                          "999bff9014dec1f2485a9395977fe1bfdd573686")])
         urls = [q.full_url for q in self.opener.requests]
         self.assertIn(f"/repos/lkshrk/h-cloud/commits/{self.SHA}/pulls", urls[0])
         self.assertTrue(urls[1].endswith("/repos/lkshrk/h-cloud/pulls/1519"))
@@ -986,45 +1015,47 @@ class MergedPullsTest(ReaderCase):
             self.reader([err]).merged_pulls("lkshrk/h-cloud", self.SHA)
 
 
-class PullCommitsTest(ReaderCase):
-    def test_recorded_commits(self):
-        r = self.reader([jr(recorded("pull_commits_h-cloud_1519.json"))])
-        got = r.pull_commits("lkshrk/h-cloud", 1519)
-        self.assertEqual(got, [PullCommit("c9018854bca2115d2b5373058095ce1056ecd3d3", "renovate-master[bot]", "web-flow")])
-        self.assertIn("/repos/lkshrk/h-cloud/pulls/1519/commits?per_page=100", self.opener.requests[0].full_url)
+class HeadPushesTest(ReaderCase):
+    REF = "refs/heads/renovate/ghcr.io-lkshrk-agent-stack-omnigent-host-1.x"
+    HEAD = "c9018854bca2115d2b5373058095ce1056ecd3d3"
 
-    def test_paginates_and_unlinked_users_are_empty(self):
-        nxt = f'<{API}/repositories/1/pulls/7/commits?page=2>; rel="next"'
-        r = self.reader([jr([{"sha": "a", "author": None, "committer": None}], {"Link": nxt}),
-                         jr([{"sha": "b", "author": {"login": "x[bot]"}, "committer": {"login": "web-flow"}}])])
-        self.assertEqual(r.pull_commits(REPO, 7), [PullCommit("a", "", ""), PullCommit("b", "x[bot]", "web-flow")])
+    def item(self, before, after, login=AGENT, kind="push", ts="2026-11-07T13:00:00Z"):
+        return {"ref": self.REF, "before": before, "after": after, "timestamp": ts, "activity_type": kind,
+                "actor": None if login is None else {"login": login}}
 
-    def test_wrong_shape_raises(self):
-        for body in ({}, ["x"], [{"sha": ""}], [{"sha": "a", "author": "x"}]):
-            with self.subTest(body=body), self.assertRaises(GitHubError):
-                self.reader([jr(body)]).pull_commits(REPO, 7)
+    def test_recorded_history_stops_at_the_pr_branch_creation(self):
+        r = self.reader([jr(recorded("activity_head_h-cloud_1519.json"))])
+        got = r.head_pushes("lkshrk/h-cloud", self.REF.removeprefix("refs/heads/"), self.HEAD)
+        self.assertEqual([(a.activity_type, a.actor, a.before, a.after) for a in got],
+                         [("branch_creation", "renovate-master[bot]", NULL_SHA, self.HEAD)])
+        url = self.opener.requests[0].full_url
+        self.assertIn("ref=refs%2Fheads%2Frenovate%2Fghcr.io-lkshrk-agent-stack-omnigent-host-1.x", url)
+        self.assertIn("direction=desc", url)
 
+    def test_pushes_between_creation_and_head_oldest_first_across_pages(self):
+        nxt = f'<{API}/repositories/1/activity?after=c1>; rel="next"'
+        r = self.reader([
+            jr([self.item(self.HEAD, NULL_SHA, RENOVATE, "branch_deletion"), self.item("p2", self.HEAD, None)],
+               {"Link": nxt}),
+            jr([self.item("p1", "p2", AGENT, "force_push"), self.item(NULL_SHA, "p1", RENOVATE, "branch_creation"),
+                self.item("old", NULL_SHA, RENOVATE, "branch_deletion")]),
+        ])
+        got = r.head_pushes(REPO, self.REF.removeprefix("refs/heads/"), self.HEAD)
+        self.assertEqual([(a.actor, a.before, a.after) for a in got],
+                         [(RENOVATE, NULL_SHA, "p1"), (AGENT, "p1", "p2"), ("", "p2", self.HEAD)])
+        self.assertEqual(len(self.opener.requests), 2)
 
-class CommitFilesTest(ReaderCase):
-    SHA = "c9018854bca2115d2b5373058095ce1056ecd3d3"
+    def test_head_never_seen_or_no_creation_is_untraceable(self):
+        r = self.reader([jr([self.item(NULL_SHA, "other", RENOVATE, "branch_creation")])])
+        self.assertIsNone(r.head_pushes(REPO, self.REF.removeprefix("refs/heads/"), self.HEAD))
+        r = self.reader([jr([self.item("p1", self.HEAD)])])
+        self.assertIsNone(r.head_pushes(REPO, self.REF.removeprefix("refs/heads/"), self.HEAD))
 
-    def test_recorded_commit(self):
-        r = self.reader([jr(recorded("commit_h-cloud_c901885.json"))])
-        self.assertEqual(r.commit_files("lkshrk/h-cloud", self.SHA),
-                         ["kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml"])
-        self.assertIn(f"/repos/lkshrk/h-cloud/commits/{self.SHA}", self.opener.requests[0].full_url)
-
-    def test_paginates_and_includes_rename_sources(self):
-        nxt = f'<{API}/repositories/1/commits/{self.SHA}?page=2>; rel="next"'
-        r = self.reader([jr({"files": [{"filename": "a.yaml"}]}, {"Link": nxt}),
-                         jr({"files": [{"filename": "docs/b.yaml", "previous_filename": "talos/b.yaml"}]})])
-        self.assertEqual(r.commit_files(REPO, self.SHA), ["a.yaml", "docs/b.yaml", "talos/b.yaml"])
-        self.assertIn("page=2", self.opener.requests[1].full_url)
-
-    def test_wrong_shape_raises(self):
-        for body in ([], {}, {"files": {}}, {"files": ["x"]}, {"files": [{"filename": ""}]}):
-            with self.subTest(body=body), self.assertRaises(GitHubError):
-                self.reader([jr(body)]).commit_files(REPO, self.SHA)
+    def test_page_cap_is_untraceable(self):
+        link = {"Link": f'<{API}/repositories/1/activity?after=c>; rel="next"'}
+        pages = [jr([self.item("p0", "p1")], link) for _ in range(MAX_PAGES)]
+        self.assertIsNone(self.reader(pages).head_pushes(REPO, self.REF.removeprefix("refs/heads/"), self.HEAD))
+        self.assertEqual(len(self.opener.requests), MAX_PAGES)
 
 
 class TagObjectTest(ReaderCase):

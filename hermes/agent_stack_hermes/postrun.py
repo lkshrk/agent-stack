@@ -23,7 +23,6 @@ NULL_SHA = "0" * 40
 NO_TOKEN_STATUS = 401
 RENOVATE = "renovate-master[bot]"
 RENOVATE_PREFIX = "renovate/"
-RENOVATE_COMMITTERS = frozenset({RENOVATE, "web-flow"})
 PROTECTED_PATHS = (
     "kubernetes/apps/security/**",
     "kubernetes/apps/omnigent-sandboxes/**",
@@ -80,13 +79,8 @@ class MergedPull:
     author: str
     merged_by: str
     number: int = 0
-
-
-@dataclass(frozen=True)
-class PullCommit:
-    sha: str
-    author: str
-    committer: str
+    head_sha: str = ""
+    base_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -98,8 +92,8 @@ class TagObject:
 @dataclass(frozen=True)
 class InfraReads:
     merged_pulls: Callable[[str], list[MergedPull]]
-    pull_commits: Callable[[int], list[PullCommit]]
-    commit_files: Callable[[str], list[str]]
+    head_pushes: Callable[[str, str], list[Activity] | None]
+    compare_files: Callable[[str, str], list[str]]
     tag: Callable[[str], TagObject | None]
     reachable: Callable[[str], bool]
 
@@ -334,29 +328,29 @@ class GitHubReader:
         detail, _ = self._get(f"{self._api}/repos/{repo}/pulls/{listed[0]['number']}", _owner(repo))
         return [_merged_pull(detail)]
 
-    def pull_commits(self, repo: str, number: int) -> list[PullCommit]:
-        out: list[PullCommit] = []
-        for body in self._pages(f"{self._api}/repos/{repo}/pulls/{number}/commits?per_page=100", "pull commits",
-                                _owner(repo)):
+    def head_pushes(self, repo: str, head_ref: str, head_sha: str) -> list[Activity] | None:
+        ref = f"refs/heads/{head_ref}"
+        query = urllib.parse.urlencode({"ref": ref, "direction": "desc", "per_page": 100})
+        url = f"{self._api}/repos/{repo}/activity?{query}"
+        out: list[Activity] = []
+        for _ in range(MAX_PAGES):
+            body, link = self._get(url, _owner(repo))
+            if not isinstance(body, list):
+                raise GitHubError("activity response is not a list")
             for item in body:
-                if not isinstance(item, dict):
-                    raise GitHubError("pull commit entry has the wrong shape")
-                out.append(PullCommit(_str(item.get("sha"), "commit sha"), _login(item.get("author"), "commit author"),
-                                      _login(item.get("committer"), "commit committer")))
-        return out
-
-    def commit_files(self, repo: str, sha: str) -> list[str]:
-        out: list[str] = []
-        url = f"{self._api}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}?per_page=100"
-        for files in self._pages(url, "commit files", _owner(repo), key="files"):
-            for entry in files:
-                if not isinstance(entry, dict):
-                    raise GitHubError("commit file entry has the wrong shape")
-                out.append(_str(entry.get("filename"), "filename"))
-                previous = entry.get("previous_filename")
-                if previous is not None:
-                    out.append(_str(previous, "previous filename"))
-        return out
+                entry = _activity(item)
+                if entry.ref != ref or (not out and entry.after != head_sha):
+                    continue
+                out.append(entry)
+                if entry.before == NULL_SHA:
+                    return out[::-1]
+            match = NEXT_LINK.search(link)
+            if not match:
+                return None
+            url = match.group(1)
+            if not url.startswith(self._api + "/"):
+                raise GitHubError("pagination link leaves the API host")
+        return None
 
     def tag(self, repo: str, sha: str) -> TagObject | None:
         try:
@@ -424,6 +418,8 @@ def _merged_pull(body) -> MergedPull:
         _login(body["user"], "pull author"),
         _login(body.get("merged_by"), "merged_by"),
         body["number"],
+        _str(head.get("sha"), "head sha"),
+        _str(base.get("sha"), "base sha"),
     )
 
 
@@ -498,10 +494,6 @@ def _branch(
     return reason
 
 
-def _renovate_commit(commit: PullCommit) -> bool:
-    return commit.author.lower() == RENOVATE and commit.committer.lower() in RENOVATE_COMMITTERS
-
-
 def _renovate_merge(
     entry: Activity, reads: InfraReads, repo: str, default: str, agents: frozenset[str]
 ) -> tuple[str | None, dict | None]:
@@ -524,16 +516,20 @@ def _renovate_merge(
     if why:
         return why, None
     url = f"https://github.com/{repo}/pull/{pull.number}"
-    agent_commits = []
-    for commit in reads.pull_commits(pull.number):
-        if _renovate_commit(commit):
+    pushes = reads.head_pushes(pull.head_ref, pull.head_sha)
+    if pushes is None:
+        return f"{url}: head branch history of {pull.head_ref} not traceable to its creation", None
+    agent_pushes = []
+    for change in pushes:
+        if change.actor and change.actor.lower() not in agents:
             continue
-        files = reads.commit_files(commit.sha)
+        rewritten = change.before == NULL_SHA or change.activity_type == "force_push"
+        files = reads.compare_files(pull.base_sha if rewritten else change.before, change.after)
         bad = next((path for path in files if protected_path(path)), None)
         if bad:
-            return f"{url}: agent commit {commit.sha} touches protected path {bad}", None
-        agent_commits.append({"sha": commit.sha, "files": files})
-    return None, {"pr": url, "merge_commit_sha": entry.after, "agent_commits": agent_commits}
+            return f"{url}: agent push {change.before}..{change.after} touches protected path {bad}", None
+        agent_pushes.append({"before": change.before, "after": change.after, "files": files})
+    return None, {"pr": url, "merge_commit_sha": entry.after, "agent_pushes": agent_pushes}
 
 
 def _monthly_tag(

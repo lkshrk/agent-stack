@@ -1,1 +1,0 @@
-{"author":{"login":"renovate-master[bot]"},"committer":{"login":"web-flow"},"files":[{"additions":1,"changes":2,"deletions":1,"filename":"kubernetes/apps/omnigent-sandboxes/runners/app/runner-prepull.yaml","status":"modified"}],"sha":"c9018854bca2115d2b5373058095ce1056ecd3d3"}
