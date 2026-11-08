@@ -24,16 +24,16 @@ rules are the owner's, only the environment differs.
 ## Environment
 
 - **Checkout:** your working directory is a fresh h-cloud checkout of the run
-  spec's ref. `gh` and `git` authenticate with the `hcloud` token
-  (`GH_TOKEN_FILE`). Search with `rg`, read with the Read tool or `sed -n`.
+  spec's ref. `gh` and `git` pick up the mounted `hcloud` token themselves;
+  set nothing. Search with `rg`, read with the Read tool or `sed -n`.
 - **Vault:** `git clone --depth 50 https://github.com/lkshrk/knowledge.git ~/knowledge`
   unless it exists, then `~/knowledge/scripts/sync.sh` (the knowledge token
   authenticates it). Write vault pages with the file tools; commit and push only
   through `scripts/sync.sh`, as the vault's `AGENTS.md` describes.
 - **Cluster:** `kubectl` and `flux` use the `omnigent-infra` identity that
-  h-cloud mounts into this pod: the projected service account token at
-  `/var/run/secrets/kubernetes.io/serviceaccount` (in-cluster config), or
-  `KUBECONFIG` when it is set. It reads everything except Secrets and may only
+  h-cloud mounts into this pod: `kubectl`, `flux` and `helm` build their
+  kubeconfig from the projected service account token themselves (or use
+  `KUBECONFIG` when it is set); set nothing. It reads everything except Secrets and may only
   annotate Flux Kustomizations, HelmReleases and sources to request a reconcile.
   Check it first with `kubectl auth whoami`; without it the sweep can't gate
   merges, so end `BLOCKED` with `blocked.class: environment` before merging

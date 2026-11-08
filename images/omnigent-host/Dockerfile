@@ -68,9 +68,11 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mi
 COPY images/omnigent-host/mise.toml /etc/mise/config.toml
 RUN mise install \
  && mise reshim \
- && install -d -m 0755 /opt/agent/pinned \
- && cd / && for bin in kubectl flux helm flate crane; do ln -s "$(mise which "$bin")" "/opt/agent/pinned/$bin"; done \
- && for bin in kubectl flux helm flate crane; do test -x "/opt/agent/pinned/$bin"; done \
+ && install -d -m 0755 /opt/agent/pinned /opt/agent/cluster-tools \
+ && cd / && for bin in flate crane; do ln -s "$(mise which "$bin")" "/opt/agent/pinned/$bin"; done \
+ && for bin in kubectl flux helm; do ln -s "$(mise which "$bin")" "/opt/agent/cluster-tools/$bin" && ln -s /opt/agent/bin/cluster-tool "/opt/agent/pinned/$bin"; done \
+ && for bin in flate crane; do test -x "/opt/agent/pinned/$bin"; done \
+ && for bin in kubectl flux helm; do test -x "/opt/agent/cluster-tools/$bin"; done \
  && rm -rf /opt/mise/cache /root/.cache /root/go /root/.npm \
  && chmod -R a+rX /opt/mise
 
@@ -119,6 +121,7 @@ COPY plugins/ /opt/agent/marketplace/plugins/
 COPY images/omnigent-host/profile.d/agent-home.sh /etc/profile.d/zz-agent-home.sh
 COPY images/omnigent-host/gitconfig /etc/gitconfig.d/agent
 RUN chmod 0755 /opt/agent/bin/* \
+ && for bin in kubectl flux helm; do test -x "/opt/agent/pinned/$bin"; done \
  && git config --system include.path /etc/gitconfig.d/agent
 
 RUN HOME=/opt/agent/claude-home /opt/agent/bin/install-claude-plugins \
@@ -148,7 +151,7 @@ COPY --from=upstream-env /upstream.env /src/upstream.env
 WORKDIR /src
 RUN AGENT_STACK_IN_IMAGE=1 /opt/venv/bin/python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
 RUN install -d -m 0777 /home/omnigent
-RUN fail=0; for t in removed-clis mise-cache credentials; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
+RUN fail=0; for t in removed-clis mise-cache credentials cluster-access; do echo "== $t"; bash "images/omnigent-host/test/$t.sh" || fail=1; done; exit "$fail"
 USER 1000660000
 RUN \
     --mount=type=bind,source=images/omnigent-host/test/fixtures/startup-file,target=/home/omnigent/.bashrc \
