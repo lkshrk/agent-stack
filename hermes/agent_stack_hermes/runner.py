@@ -22,6 +22,10 @@ from agent_stack_hermes.runspec import (
 
 SLICE_SECONDS = 300
 CALL_SECONDS = 2700
+POST_RUN_RESERVE_SECONDS = 600
+POST_RUN_SECONDS = 480
+SLICE_FLOOR_SECONDS = 120
+MAX_SLICE_ERRORS = 3
 HEARTBEAT_SECONDS = 900
 STALL_SECONDS = 2700
 POLL_SECONDS = 15
@@ -46,7 +50,7 @@ TOKEN_ENV = ("GITHUB_RO_TOKEN_FILE", "GITHUB_RO_TOKEN_FILES")
 TOOL_SCHEMA = {
     "name": "omnigent_run",
     "description": (
-        "Run or resume this card's Omnigent session for up to 45 minutes. Takes no arguments: "
+        "Run or resume this card's Omnigent session for up to 35 minutes. Takes no arguments: "
         "the run spec comes from the card. If the result has call_again: true, call omnigent_run again."
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -66,6 +70,28 @@ class _Verdict:
 
 _RUNNING = _Verdict("running", "session still running")
 _STALE = _Verdict("stale", "stale run: the card is no longer held by this run")
+_DEFERRED = _Verdict("running", "session ended; post-run check deferred to the next call")
+
+
+class _PostRunTimeout(Exception):
+    pass
+
+
+class _BoundedGitHub:
+    def __init__(self, gh, clock, until: float):
+        self._gh, self._clock, self._until = gh, clock, until
+
+    def __getattr__(self, name):
+        value = getattr(self._gh, name)
+        if not callable(value):
+            return value
+
+        def bounded(*args, **kw):
+            if self._clock() >= self._until:
+                raise _PostRunTimeout()
+            return value(*args, **kw)
+
+        return bounded
 
 
 def _result(state: str, session_id: str | None, reason: str, call_again: bool = False) -> dict:
@@ -351,14 +377,14 @@ def _sandbox_failure(snap: dict) -> str | None:
     return None
 
 
-def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verdict:
+def _reconcile(spec: RunSpec, session_id: str, omni, judge, now) -> _Verdict:
     snap = omni.snapshot(session_id)
     sandbox_error = _sandbox_failure(snap)
     t = now()
     if sandbox_error is not None:
         reason = f"sandbox failed: {sandbox_error}"
     elif snap.get("status") == "failed":
-        return _judge(spec, session_id, evaluate(spec.bundle, snap), comments, omni, gh)
+        return judge(evaluate(spec.bundle, snap))
     else:
         children, missing = None, False
         if _quiet(snap):
@@ -369,7 +395,7 @@ def _reconcile(spec: RunSpec, session_id: str, comments, omni, gh, now) -> _Verd
             # A planner between critic rounds idles with only a status line.
             missing = settled and outcome.result is None and outcome.reason == NO_RESULT_BLOCK
             if valid or (settled and not missing):
-                return _judge(spec, session_id, outcome, comments, omni, gh)
+                return judge(outcome)
         created = _epoch(snap, "created_at")
         updated = created if snap.get("updated_at") is None else _epoch(snap, "updated_at")
         if t - updated > STALL_SECONDS:
@@ -416,8 +442,10 @@ def run_slice(
     omni: OmnigentClient,
     gh: GitHubReader,
     now=time.time,
-    slice_seconds: int = SLICE_SECONDS,
+    slice_seconds: float = SLICE_SECONDS,
     sleep=time.sleep,
+    clock=time.monotonic,
+    judge_by: float | None = None,
 ) -> dict:
     ids = _kanban_ids(env)
     if ids is None:
@@ -432,18 +460,27 @@ def run_slice(
         return _close(kanban, task_id, run_id, None, _blocked("decision", "card has no valid run spec"))
     comments = card.comments
     session_id = _last_note(comments, SESSION_NOTE)
-    deadline = now() + slice_seconds
+    deadline = clock() + slice_seconds
     try:
         if session_id is None:
             session_id, notes = _start(env, kanban, omni, gh, task_id, spec, link, comments, now)
             comments = comments + notes
-        heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, now)
-        if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, now, deadline):
+
+        def judge(outcome: Outcome) -> _Verdict:
+            if judge_by is not None and clock() > judge_by:
+                return _DEFERRED
+            try:
+                return _judge(spec, session_id, outcome, comments, omni, _BoundedGitHub(gh, clock, clock() + POST_RUN_SECONDS))
+            except _PostRunTimeout:
+                return _blocked("environment", f"post-run check took longer than {POST_RUN_SECONDS} s; retry the card")
+
+        heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, clock)
+        if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, clock, deadline):
             return _close(kanban, task_id, run_id, session_id, _STALE)
         outage = OutageClock(comments, run_id, lambda body: kanban.note(task_id, body), now)
         while True:
             try:
-                verdict = _reconcile(spec, session_id, comments, omni, gh, now)
+                verdict = _reconcile(spec, session_id, omni, judge, now)
             except Exception as exc:
                 source = unreachable(exc)
                 if source is None:
@@ -451,9 +488,9 @@ def run_slice(
                 verdict = _outage(source, outage.elapsed(), exc)
             else:
                 outage.ok()
-            if verdict.state != "running" or now() >= deadline:
+            if verdict.state != "running" or verdict is _DEFERRED or clock() >= deadline:
                 break
-            sleep(max(0.0, min(POLL_SECONDS, deadline - now())))
+            sleep(max(0.0, min(POLL_SECONDS, deadline - clock())))
             if not heartbeat.beat():
                 return _close(kanban, task_id, run_id, session_id, _STALE)
     except Exception as exc:
@@ -468,22 +505,29 @@ def run_call(
     gh: GitHubReader,
     now=time.time,
     sleep=time.sleep,
-    budget_seconds: int = CALL_SECONDS,
-    slice_seconds: int = SLICE_SECONDS,
+    budget_seconds: float = CALL_SECONDS,
+    slice_seconds: float = SLICE_SECONDS,
+    clock=time.monotonic,
 ) -> dict:
-    deadline = now() + budget_seconds
-    last = None
+    follow_until = clock() + budget_seconds - POST_RUN_RESERVE_SECONDS
+    out, errors, session_id = None, 0, None
     while True:
-        remaining = max(0.0, deadline - now())
-        try:
-            out = run_slice(env, kanban, omni, gh, now=now, slice_seconds=min(slice_seconds, remaining), sleep=sleep)
-        except Exception as exc:
-            if last is None:
-                raise
-            return _result("running", last["session_id"], "runner error: " + _short(exc), call_again=True)
-        if not out.get("call_again") or now() >= deadline:
+        remaining = follow_until - clock()
+        if out is not None and remaining < SLICE_FLOOR_SECONDS:
             return out
-        last = out
+        try:
+            out = run_slice(env, kanban, omni, gh, now=now, slice_seconds=max(0.0, min(slice_seconds, remaining)),
+                            sleep=sleep, clock=clock, judge_by=follow_until)
+        except Exception as exc:
+            errors += 1
+            if errors >= MAX_SLICE_ERRORS:
+                raise
+            out = _result("running", session_id, "runner error: " + _short(exc), call_again=True)
+            sleep(max(0.0, min(POLL_SECONDS, follow_until - clock())))
+            continue
+        errors, session_id = 0, out.get("session_id")
+        if not out.get("call_again"):
+            return out
 
 
 def deny_kanban_terminal(tool_name: str = "", args: dict | None = None, **kw) -> dict | None:

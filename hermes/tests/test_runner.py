@@ -1,6 +1,7 @@
 import copy
 import http.client
 import json
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -236,7 +237,8 @@ class RunnerCase(unittest.TestCase):
         if refs is None:
             refs = (AFTER,) if comments else (BEFORE, AFTER)
         self.gh = FakeGitHub(self.log, refs, files, gh_fail, **(gh or {}))
-        return runner.run_slice(env, self.kanban, self.omni, self.gh, now=self.clock, slice_seconds=slice_seconds,
+        return runner.run_slice(env, self.kanban, self.omni, self.gh, now=self.clock, clock=self.clock,
+                                slice_seconds=slice_seconds,
                                 sleep=self.sleep)
 
     def sleep(self, seconds):
@@ -860,33 +862,97 @@ class LosesClaimKanban(FakeKanban):
         return self.beats_left >= 0
 
 
+class OneCardKanban(FakeKanban):
+    def __init__(self, *args, writers, **kw):
+        super().__init__(*args, **kw)
+        self.lock, self.status, self.barrier = threading.Lock(), "running", threading.Barrier(writers)
+
+    def heartbeat(self, task_id, run_id, note):
+        super().heartbeat(task_id, run_id, note)
+        return self.status == "running"
+
+    def _write(self, entry, status):
+        self.barrier.wait(timeout=5)
+        with self.lock:
+            won = self.status == "running"
+            if won:
+                self.status = status
+            self.log.append((*entry, won))
+            return won
+
+    def complete(self, task_id, run_id, summary, metadata):
+        return self._write(("complete", run_id, summary, metadata), "done")
+
+    def block(self, task_id, run_id, kind, reason):
+        return self._write(("block", run_id, kind, reason), "blocked")
+
+
+class SlowGitHub(FakeGitHub):
+    def __init__(self, log, clock, step, *args, **kw):
+        super().__init__(log, *args, **kw)
+        self.clock, self.step = clock, step
+
+    def _call(self, name, *args):
+        super()._call(name, *args)
+        self.clock.t += self.step
+
+
+class SliceStreams(FakeOmnigent):
+    def __init__(self, *args, per_stream, **kw):
+        super().__init__(*args, **kw)
+        self.per_stream = list(per_stream)
+
+    def stream(self, session_id, read_timeout):
+        self._call("stream", session_id)
+        step, events = self.per_stream.pop(0) if self.per_stream else (0, (DONE_EVENT,))
+        for event in events:
+            self.clock.t += step
+            yield event
+
+
+FOLLOW = runner.CALL_SECONDS - runner.POST_RUN_RESERVE_SECONDS
+KEEPALIVE = StreamEvent("keepalive", {})
+
+
 class RunCallTest(RunnerCase):
-    def run_call(self, snap, comments=RECORDED, bundle="polly", budget=runner.CALL_SECONDS, kanban=None, **omni):
+    def run_call(self, snap, comments=RECORDED, bundle="polly", budget=runner.CALL_SECONDS, kanban=None, gh=None,
+                 omni=None, **kw):
         self.kanban = kanban or FakeKanban(self.log, card_body(bundle), comments)
-        self.omni = FakeOmnigent(self.log, self.clock, snap, **omni)
-        self.gh = FakeGitHub(self.log, (AFTER,))
-        return runner.run_call(ENV, self.kanban, self.omni, self.gh, now=self.clock, sleep=self.sleep,
-                               budget_seconds=budget)
+        self.omni = omni or FakeOmnigent(self.log, self.clock, snap, **kw)
+        self.gh = gh or FakeGitHub(self.log, (AFTER,))
+        return runner.run_call(ENV, self.kanban, self.omni, self.gh, now=self.clock, clock=self.clock,
+                               sleep=self.sleep, budget_seconds=budget)
 
-    def test_call_budget_is_far_longer_than_a_slice(self):
-        self.assertGreaterEqual(runner.CALL_SECONDS, 1800)
-        self.assertEqual(runner.CALL_SECONDS % runner.SLICE_SECONDS, 0)
+    def test_call_budget_fits_the_post_run_reserve_and_slices(self):
+        self.assertGreaterEqual(FOLLOW, 1800)
+        self.assertEqual(FOLLOW % runner.SLICE_SECONDS, 0)
+        self.assertLess(runner.POST_RUN_SECONDS, runner.POST_RUN_RESERVE_SECONDS)
 
-    def test_running_session_runs_until_the_budget(self):
+    def test_running_session_follows_until_the_post_run_reserve(self):
         out = self.run_call(lambda t: running(updated_at=t))
         self.assertEqual((out["state"], out["call_again"]), ("running", True))
-        self.assertEqual(self.clock.t, T0 + runner.CALL_SECONDS)
-        slices = runner.CALL_SECONDS // runner.SLICE_SECONDS
-        self.assertEqual(len(self.calls("stream")), slices)
+        self.assertEqual(self.clock.t, T0 + FOLLOW)
+        self.assertEqual(len(self.calls("stream")), FOLLOW // runner.SLICE_SECONDS)
         self.assertFalse(self.terminal_writes())
 
     def test_every_slice_heartbeats(self):
         self.run_call(lambda t: running(updated_at=t))
-        slices = runner.CALL_SECONDS // runner.SLICE_SECONDS
         beats = [i for i, c in enumerate(self.log) if c[0] == "heartbeat"]
         streams = [i for i, c in enumerate(self.log) if c[0] == "stream"]
-        self.assertEqual(len(beats), slices)
+        self.assertEqual(len(beats), FOLLOW // runner.SLICE_SECONDS)
         self.assertTrue(all(beat < stream for beat, stream in zip(beats, streams)))
+
+    def test_keepalive_only_stream_ends_the_slice_on_time(self):
+        out = self.run_slice(lambda t: running(updated_at=t), events=[KEEPALIVE] * 100, step=60)
+        self.assertTrue(out["call_again"])
+        self.assertLessEqual(self.clock.t, T0 + runner.SLICE_SECONDS + 60)
+        self.assertGreaterEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
+
+    def test_keepalive_only_stream_keeps_heartbeating(self):
+        out = self.run_slice(lambda t: running(updated_at=t), events=[KEEPALIVE] * 100, step=60, slice_seconds=2400)
+        self.assertTrue(out["call_again"])
+        self.assertEqual(len(self.calls("heartbeat")), 3)
+        self.assertLessEqual(self.clock.t, T0 + 2400 + 60)
 
     def test_done_after_some_slices_completes_in_the_same_call(self):
         done_at = T0 + 2 * runner.SLICE_SECONDS + 30
@@ -894,7 +960,6 @@ class RunCallTest(RunnerCase):
         self.assertEqual((out["state"], out["call_again"]), ("completed", False))
         self.assertEqual(len(self.calls("complete")), 1)
         self.assertEqual(len(self.calls("stream")), 3)
-        self.assertLess(self.clock.t, T0 + 3 * runner.SLICE_SECONDS)
 
     def test_blocked_after_some_slices_blocks_in_the_same_call(self):
         failed_at = T0 + runner.SLICE_SECONDS + 30
@@ -904,7 +969,8 @@ class RunCallTest(RunnerCase):
         self.assertEqual(len(self.calls("stream")), 2)
 
     def test_stall_still_blocks_inside_one_call(self):
-        out = self.run_call(running(updated_at=T0), budget=runner.STALL_SECONDS + 2 * runner.SLICE_SECONDS)
+        budget = runner.STALL_SECONDS + 2 * runner.SLICE_SECONDS + runner.POST_RUN_RESERVE_SECONDS
+        out = self.run_call(running(updated_at=T0), budget=budget)
         self.assert_blocked(out, "transient", "BLOCKED{environment}: stalled")
         self.assertGreater(self.clock.t, T0 + runner.STALL_SECONDS)
         self.assertLessEqual(self.clock.t, T0 + runner.STALL_SECONDS + runner.POLL_SECONDS)
@@ -923,40 +989,111 @@ class RunCallTest(RunnerCase):
         self.assertEqual(len(self.calls("stream")), 2)
         self.assertFalse(self.terminal_writes())
 
-    def test_last_slice_is_cut_to_the_budget(self):
-        budget = runner.SLICE_SECONDS + 100
+    def test_last_slice_is_cut_to_the_follow_window(self):
+        budget = runner.SLICE_SECONDS + runner.SLICE_FLOOR_SECONDS + 10 + runner.POST_RUN_RESERVE_SECONDS
         out = self.run_call(lambda t: running(updated_at=t), budget=budget)
         self.assertTrue(out["call_again"])
-        self.assertEqual(self.clock.t, T0 + budget)
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS + runner.SLICE_FLOOR_SECONDS + 10)
         self.assertEqual(len(self.calls("stream")), 2)
 
-    def test_error_in_a_later_slice_returns_call_again(self):
+    def test_no_slice_starts_below_the_floor(self):
+        budget = runner.SLICE_SECONDS + runner.SLICE_FLOOR_SECONDS - 10 + runner.POST_RUN_RESERVE_SECONDS
+        out = self.run_call(lambda t: running(updated_at=t), budget=budget)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
+        self.assertEqual(len(self.calls("stream")), 1)
+
+    def test_stream_blocking_past_the_slice_deadline_ends_the_call(self):
+        budget = runner.SLICE_SECONDS + 50 + runner.POST_RUN_RESERVE_SECONDS
+        omni = SliceStreams(self.log, self.clock, lambda t: running(updated_at=t),
+                            per_stream=[(runner.SLICE_SECONDS + 20, (KEEPALIVE,))])
+        out = self.run_call(None, budget=budget, omni=omni)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS + 20)
+        self.assertEqual(len(self.calls("stream")), 1)
+
+    def test_terminal_session_after_the_follow_window_defers_the_post_run(self):
+        budget = runner.SLICE_SECONDS + runner.POST_RUN_RESERVE_SECONDS
+        omni = SliceStreams(self.log, self.clock, snapshot(), per_stream=[(runner.SLICE_SECONDS + 20, (DONE_EVENT,))])
+        out = self.run_call(None, budget=budget, omni=omni)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertIn("post-run", out["reason"])
+        self.assertFalse(self.terminal_writes() + self.calls("refs") + self.calls("pull"))
+        self.log.clear()
+        out = self.run_call(snapshot())
+        self.assertEqual(out["state"], "completed")
+
+    def test_slow_post_run_blocks_transient_not_as_a_violation(self):
+        gh = SlowGitHub(self.log, self.clock, runner.POST_RUN_SECONDS, (AFTER,))
+        out = self.run_call(snapshot(), gh=gh)
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: post-run check took longer than")
+        self.assertLess(self.clock.t, T0 + runner.CALL_SECONDS)
+
+    def test_post_run_within_its_cap_completes(self):
+        gh = SlowGitHub(self.log, self.clock, 1, (AFTER,))
+        out = self.run_call(snapshot(), gh=gh)
+        self.assertEqual(out["state"], "completed")
+
+    def failing_card(self, failures, takes=0):
         kanban = FakeKanban(self.log, card_body(), RECORDED)
-        reads = iter([None])
+        plan = iter(failures)
 
         def card(task_id):
-            if next(reads, "fail") == "fail":
+            if next(plan, False):
+                self.clock.t += takes
                 raise OSError("database is locked")
             return FakeKanban.card(kanban, task_id)
 
         kanban.card = card
+        return kanban
+
+    def test_isolated_slice_errors_are_retried(self):
+        kanban = self.failing_card([False, True, True, False, True])
+        out = self.run_call(lambda t: running(updated_at=t), kanban=kanban)
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertEqual(out["reason"], "session still running")
+        self.assertGreater(len(self.calls("stream")), 3)
+
+    def test_errors_at_the_end_of_the_call_return_call_again(self):
+        kanban = self.failing_card([False] * (FOLLOW // runner.SLICE_SECONDS - 1) + [True] * 2, takes=200)
         out = self.run_call(lambda t: running(updated_at=t), kanban=kanban)
         self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("running", True, "conv_old"))
         self.assertIn("database is locked", out["reason"])
-        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
 
-    def test_error_in_the_first_slice_propagates(self):
-        kanban = FakeKanban(self.log, card_body(), RECORDED)
-        kanban.card = lambda task_id: (_ for _ in ()).throw(OSError("database is locked"))
-        with self.assertRaises(OSError):
-            self.run_call(lambda t: running(updated_at=t), kanban=kanban)
+    def test_consecutive_slice_errors_end_the_call(self):
+        for failures in ([True] * runner.MAX_SLICE_ERRORS, [False] + [True] * runner.MAX_SLICE_ERRORS):
+            with self.subTest(failures=failures):
+                self.log.clear()
+                self.clock.t = T0
+                with self.assertRaises(OSError):
+                    self.run_call(lambda t: running(updated_at=t), kanban=self.failing_card(failures))
 
     def test_each_slice_rereads_the_card(self):
-        out = self.run_call(lambda t: running(updated_at=t), comments=RECORDED[:1], budget=2 * runner.SLICE_SECONDS,
+        out = self.run_call(lambda t: running(updated_at=t), comments=RECORDED[:1], budget=2 * runner.SLICE_SECONDS
+                            + runner.POST_RUN_RESERVE_SECONDS,
                             sessions=[{"id": "conv_found", "labels": {"agent-stack/card": "t_1"}}])
         self.assertTrue(out["call_again"])
         self.assertEqual([c[1] for c in self.calls("stream")], ["conv_found", "conv_found"])
         self.assertEqual(len(self.calls("list_sessions")), 2)
+
+    def test_two_calls_on_one_card_write_one_verdict(self):
+        kanban = OneCardKanban(self.log, card_body(), RECORDED, writers=2)
+        outs = [None, None]
+
+        def call(i):
+            clock = Clock()
+            omni = FakeOmnigent(self.log, clock, snapshot())
+            gh = FakeGitHub(self.log, (AFTER,))
+            outs[i] = runner.run_call(ENV, kanban, omni, gh, now=clock, clock=clock, sleep=clock.sleep)
+
+        threads = [threading.Thread(target=call, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertEqual(sorted(w[-1] for w in self.calls("complete")), [False, True])
+        self.assertEqual(sorted((o["state"], o["call_again"]) for o in outs), [("completed", False), ("running", False)])
+        self.assertIn(runner._STALE.reason, [o["reason"] for o in outs])
 
 
 class InfraRunnerTest(RunnerCase):

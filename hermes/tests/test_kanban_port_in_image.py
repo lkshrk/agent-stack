@@ -81,6 +81,20 @@ class KanbanPortInImageTest(unittest.TestCase):
         self.assertTrue(port.block(task_id, run_id, "needs_input", "BLOCKED{decision}: which?"))
         self.assertEqual(port.card(task_id).status, "blocked")
 
+    def test_one_run_writes_one_verdict(self):
+        from agent_stack_hermes.kanban_port import HermesKanban
+
+        for first, second in (("complete", "complete"), ("complete", "block"), ("block", "complete"), ("block", "block")):
+            with self.subTest(first=first, second=second):
+                claimer = f"test-host:{first}-{second}"
+                task_id, run_id = self.claimed_card(claimer)
+                port = HermesKanban(claimer=claimer, db_path=self.db)
+                write = {"complete": lambda: port.complete(task_id, run_id, "polly DONE", {"post_run": "ok"}),
+                         "block": lambda: port.block(task_id, run_id, "transient", "BLOCKED{environment}: x")}
+                self.assertTrue(write[first]())
+                self.assertFalse(write[second]())
+                self.assertFalse(port.heartbeat(task_id, run_id, "following conv_1"))
+
 
 if __name__ == "__main__":
     unittest.main()
