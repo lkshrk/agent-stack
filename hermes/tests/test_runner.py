@@ -1014,7 +1014,9 @@ class RunCallTest(RunnerCase):
 
     def test_terminal_session_after_the_follow_window_defers_the_post_run(self):
         budget = runner.SLICE_SECONDS + runner.POST_RUN_RESERVE_SECONDS
-        omni = SliceStreams(self.log, self.clock, snapshot(), per_stream=[(runner.SLICE_SECONDS + 20, (DONE_EVENT,))])
+        ends = T0 + runner.SLICE_SECONDS + 10
+        omni = SliceStreams(self.log, self.clock, lambda t: running(updated_at=t) if t < ends else snapshot(),
+                            per_stream=[(runner.SLICE_SECONDS + 20, (DONE_EVENT,))])
         out = self.run_call(None, budget=budget, omni=omni)
         self.assertEqual((out["state"], out["call_again"]), ("running", True))
         self.assertIn("post-run", out["reason"])
@@ -1061,12 +1063,49 @@ class RunCallTest(RunnerCase):
         self.assertIn("database is locked", out["reason"])
 
     def test_consecutive_slice_errors_end_the_call(self):
-        for failures in ([True] * runner.MAX_SLICE_ERRORS, [False] + [True] * runner.MAX_SLICE_ERRORS):
+        for failures, session in (([True] * runner.MAX_SLICE_ERRORS, None),
+                                  ([False] + [True] * runner.MAX_SLICE_ERRORS, "conv_old")):
             with self.subTest(failures=failures):
                 self.log.clear()
                 self.clock.t = T0
-                with self.assertRaises(OSError):
-                    self.run_call(lambda t: running(updated_at=t), kanban=self.failing_card(failures))
+                out = self.run_call(lambda t: running(updated_at=t), kanban=self.failing_card(failures))
+                self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("running", False, session))
+                self.assertIn("database is locked", out["reason"])
+
+    def test_call_on_an_ended_session_judges_before_following(self):
+        out = self.run_call(snapshot(), events=[KEEPALIVE] * 100, step=60)
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(self.clock.t, T0)
+        self.assertFalse(self.calls("stream"))
+
+    def test_call_on_a_running_session_reconciles_then_follows(self):
+        out = self.run_call(lambda t: running(updated_at=t), budget=runner.SLICE_SECONDS + runner.POST_RUN_RESERVE_SECONDS)
+        self.assertTrue(out["call_again"])
+        names = [c[0] for c in self.log if c[0] in ("snapshot", "stream")]
+        self.assertEqual(names[:2], ["snapshot", "stream"])
+
+    def test_post_run_uses_the_readers_deadline(self):
+        seen = []
+
+        class Reader(FakeGitHub):
+            def with_deadline(self, until, clock):
+                seen.append(until - clock())
+                return self
+
+        out = self.run_call(snapshot(), gh=Reader(self.log, (AFTER,)))
+        self.assertEqual(out["state"], "completed")
+        self.assertEqual(seen, [runner.POST_RUN_SECONDS])
+
+    def test_reader_deadline_blocks_transient(self):
+        class Reader(FakeGitHub):
+            def with_deadline(self, until, clock):
+                return self
+
+            def refs(self, repo):
+                raise runner.DeadlineExceeded("post-run deadline")
+
+        out = self.run_call(snapshot(), gh=Reader(self.log, (AFTER,)))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: post-run check took longer than")
 
     def test_each_slice_rereads_the_card(self):
         out = self.run_call(lambda t: running(updated_at=t), comments=RECORDED[:1], budget=2 * runner.SLICE_SECONDS

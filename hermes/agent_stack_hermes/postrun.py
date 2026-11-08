@@ -1,4 +1,5 @@
 import base64
+import copy
 import datetime
 import fnmatch
 import functools
@@ -62,6 +63,10 @@ class GitHubError(Exception):
         super().__init__(f"github: {message}")
         self.status = BAD_BODY_STATUS if status is None else status
         self.malformed = status is None
+
+
+class DeadlineExceeded(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -209,6 +214,21 @@ class GitHubReader:
         self.agents = frozenset(agents)
         self._api = api.rstrip("/")
         self._opener = opener
+        self._until: float | None = None
+        self._clock = time.monotonic
+
+    def with_deadline(self, until: float, clock=time.monotonic) -> "GitHubReader":
+        bounded = copy.copy(self)
+        bounded._until, bounded._clock = until, clock
+        return bounded
+
+    def _time_left(self, need: float = 0.0) -> float:
+        if self._until is None:
+            return TIMEOUT_SECONDS
+        left = self._until - self._clock()
+        if left <= need:
+            raise DeadlineExceeded(f"post-run deadline reached ({left:.0f} s left)")
+        return min(TIMEOUT_SECONDS, left)
 
     def _token(self, owner: str) -> str:
         path = self._token_files.get(owner.lower(), self._token_file)
@@ -224,6 +244,7 @@ class GitHubReader:
         return token
 
     def _get(self, url: str, owner: str) -> tuple[object, str]:
+        timeout = self._time_left()
         request = urllib.request.Request(
             url,
             headers={
@@ -233,7 +254,7 @@ class GitHubReader:
             },
         )
         try:
-            with self._opener(request, timeout=TIMEOUT_SECONDS) as resp:
+            with self._opener(request, timeout=timeout) as resp:
                 status = resp.status
                 raw = resp.read()
                 link = resp.headers.get("Link", "") if getattr(resp, "headers", None) else ""
@@ -375,6 +396,7 @@ class GitHubReader:
         listed = [item for body in self._pages(url, "commit pulls", _owner(repo)) for item in body]
         if not listed:
             # GitHub links a merge commit to its PR with a short delay.
+            self._time_left(PULLS_RETRY_SECONDS)
             self._sleep(PULLS_RETRY_SECONDS)
             listed = [item for body in self._pages(url, "commit pulls", _owner(repo)) for item in body]
         for item in listed:

@@ -7,7 +7,16 @@ from dataclasses import dataclass, field
 
 from agent_stack_hermes.kanban_port import CardView, HermesKanban, KanbanPort
 from agent_stack_hermes.omnigent import MachineCredentials, OmnigentClient, TokenSource
-from agent_stack_hermes.postrun import DEFAULT_TRUSTED, PR_URL, GitHubReader, InfraReads, agent_actors, token_files, violations
+from agent_stack_hermes.postrun import (
+    DEFAULT_TRUSTED,
+    PR_URL,
+    DeadlineExceeded,
+    GitHubReader,
+    InfraReads,
+    agent_actors,
+    token_files,
+    violations,
+)
 from agent_stack_hermes.retry import OutageClock, unreachable
 from agent_stack_hermes.runspec import (
     INVALID_RESULT,
@@ -73,10 +82,6 @@ _STALE = _Verdict("stale", "stale run: the card is no longer held by this run")
 _DEFERRED = _Verdict("running", "session ended; post-run check deferred to the next call")
 
 
-class _PostRunTimeout(Exception):
-    pass
-
-
 class _BoundedGitHub:
     def __init__(self, gh, clock, until: float):
         self._gh, self._clock, self._until = gh, clock, until
@@ -88,7 +93,7 @@ class _BoundedGitHub:
 
         def bounded(*args, **kw):
             if self._clock() >= self._until:
-                raise _PostRunTimeout()
+                raise DeadlineExceeded("post-run deadline reached")
             return value(*args, **kw)
 
         return bounded
@@ -446,6 +451,7 @@ def run_slice(
     sleep=time.sleep,
     clock=time.monotonic,
     judge_by: float | None = None,
+    reconcile_first: bool = False,
 ) -> dict:
     ids = _kanban_ids(env)
     if ids is None:
@@ -470,12 +476,15 @@ def run_slice(
             if judge_by is not None and clock() > judge_by:
                 return _DEFERRED
             try:
-                return _judge(spec, session_id, outcome, comments, omni, _BoundedGitHub(gh, clock, clock() + POST_RUN_SECONDS))
-            except _PostRunTimeout:
+                until = clock() + POST_RUN_SECONDS
+                reader = gh.with_deadline(until, clock) if hasattr(gh, "with_deadline") else gh
+                return _judge(spec, session_id, outcome, comments, omni, _BoundedGitHub(reader, clock, until))
+            except DeadlineExceeded:
                 return _blocked("environment", f"post-run check took longer than {POST_RUN_SECONDS} s; retry the card")
 
         heartbeat = _Heartbeat(kanban, task_id, run_id, session_id, clock)
-        if not heartbeat.beat() or not _follow(omni, session_id, heartbeat, clock, deadline):
+        followed = not reconcile_first
+        if not heartbeat.beat() or (followed and not _follow(omni, session_id, heartbeat, clock, deadline)):
             return _close(kanban, task_id, run_id, session_id, _STALE)
         outage = OutageClock(comments, run_id, lambda body: kanban.note(task_id, body), now)
         while True:
@@ -490,6 +499,11 @@ def run_slice(
                 outage.ok()
             if verdict.state != "running" or verdict is _DEFERRED or clock() >= deadline:
                 break
+            if not followed:
+                followed = True
+                if not _follow(omni, session_id, heartbeat, clock, deadline):
+                    return _close(kanban, task_id, run_id, session_id, _STALE)
+                continue
             sleep(max(0.0, min(POLL_SECONDS, deadline - clock())))
             if not heartbeat.beat():
                 return _close(kanban, task_id, run_id, session_id, _STALE)
@@ -517,12 +531,12 @@ def run_call(
             return out
         try:
             out = run_slice(env, kanban, omni, gh, now=now, slice_seconds=max(0.0, min(slice_seconds, remaining)),
-                            sleep=sleep, clock=clock, judge_by=follow_until)
+                            sleep=sleep, clock=clock, judge_by=follow_until, reconcile_first=out is None)
         except Exception as exc:
             errors += 1
+            out = _result("running", session_id, "runner error: " + _short(exc), call_again=errors < MAX_SLICE_ERRORS)
             if errors >= MAX_SLICE_ERRORS:
-                raise
-            out = _result("running", session_id, "runner error: " + _short(exc), call_again=True)
+                return out
             sleep(max(0.0, min(POLL_SECONDS, follow_until - clock())))
             continue
         errors, session_id = 0, out.get("session_id")
