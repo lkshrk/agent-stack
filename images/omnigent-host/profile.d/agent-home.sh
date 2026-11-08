@@ -2,7 +2,8 @@
 export PATH="/opt/agent/pinned:/opt/mise/shims:/opt/agent/bin:${PATH}"
 export MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/etc/mise MISE_GLOBAL_CONFIG_FILE=/etc/mise/config.toml MISE_YES=1
 export MISE_CACHE_DIR="${MISE_CACHE_DIR:-/tmp/mise-cache}"
-export GH_TOKEN_FILE="${GH_TOKEN_FILE:-/agent-secrets/github/code}"
+GH_TOKEN_FILE=$(/opt/agent/bin/github-token-file)
+export GH_TOKEN_FILE
 export KNOWLEDGE_TOKEN_FILE="${KNOWLEDGE_TOKEN_FILE:-/agent-secrets/github/knowledge}"
 export FORKS_TOKEN_FILE="${FORKS_TOKEN_FILE:-/agent-secrets/github/forks}"
 
@@ -16,3 +17,8 @@ fi
 if [ -n "${HOME:-}" ] && [ -w "$HOME" ] && [ ! -e "$HOME/.agent-seeded" ]; then
   /opt/agent/bin/seed-agent-home && : >"$HOME/.agent-seeded"
 fi
+
+if [ -z "${KUBECONFIG:-}" ] && agent_kubeconfig=$(/opt/agent/bin/agent-kubeconfig 2>/dev/null); then
+  export KUBECONFIG="$agent_kubeconfig"
+fi
+unset agent_kubeconfig

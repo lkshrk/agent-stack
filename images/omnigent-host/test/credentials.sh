@@ -136,6 +136,32 @@ if [[ $(id -u) == 0 && -x /usr/local/bin/gh ]]; then
     expect "gh: a fork check that exits 1 stops a --repo call" "$("$bin/gh" pr list --repo lkshrk/omnigent 2>/dev/null; echo "exit=$?")" exit=1
     restore_python
   fi
+  if [[ ! -e /agent-secrets ]]; then
+    install -d /agent-secrets/github
+    printf hcloud-token >/agent-secrets/github/hcloud
+    printf mounted-knowledge-token >/agent-secrets/github/knowledge
+    expect "gh: with only hcloud mounted and no GH_TOKEN_FILE, gh uses hcloud" "$(env -u GH_TOKEN_FILE "$bin/gh" pr list -R lkshrk/h-cloud)" hcloud-token
+    expect "git: with only hcloud mounted and no GH_TOKEN_FILE, git uses hcloud" "$(unset GH_TOKEN_FILE; GIT_TOKEN=stale password lkshrk/h-cloud.git)" hcloud-token
+    expect "git: with only hcloud mounted, knowledge keeps its token" "$(unset GH_TOKEN_FILE KNOWLEDGE_TOKEN_FILE; password lkshrk/knowledge.git)" mounted-knowledge-token
+    # shellcheck disable=SC2016
+    expect "profile: with only hcloud mounted, GH_TOKEN_FILE is hcloud" "$(env -u GH_TOKEN_FILE HOME= sh -c '. /etc/profile.d/zz-agent-home.sh; printf %s "$GH_TOKEN_FILE"')" /agent-secrets/github/hcloud
+    printf review-token >/agent-secrets/github/review
+    expect "gh: hcloud wins over review" "$(env -u GH_TOKEN_FILE "$bin/gh" pr list)" hcloud-token
+    rm /agent-secrets/github/hcloud
+    expect "gh: with only review mounted, gh uses review" "$(env -u GH_TOKEN_FILE "$bin/gh" pr list)" review-token
+    printf mounted-code-token >/agent-secrets/github/code
+    printf hcloud-token >/agent-secrets/github/hcloud
+    expect "gh: with code mounted, gh uses code" "$(env -u GH_TOKEN_FILE "$bin/gh" pr list)" mounted-code-token
+    expect "git: with code mounted, git uses code" "$(unset GH_TOKEN_FILE; password lkshrk/agent-stack.git)" mounted-code-token
+    # shellcheck disable=SC2016
+    expect "profile: with code mounted, GH_TOKEN_FILE is code" "$(env -u GH_TOKEN_FILE HOME= sh -c '. /etc/profile.d/zz-agent-home.sh; printf %s "$GH_TOKEN_FILE"')" /agent-secrets/github/code
+    expect "gh: an explicit GH_TOKEN_FILE wins over the mounted keys" "$("$bin/gh" pr list)" code-token
+    # shellcheck disable=SC2016
+    expect "profile: an explicit GH_TOKEN_FILE wins" "$(env GH_TOKEN_FILE=/x HOME= sh -c '. /etc/profile.d/zz-agent-home.sh; printf %s "$GH_TOKEN_FILE"')" /x
+    rm -rf /agent-secrets
+  else
+    echo "skip mounted-key checks (/agent-secrets exists)"
+  fi
   mv /usr/local/bin/gh.real /usr/local/bin/gh
 else
   echo "skip gh wrapper checks (need root to stand in for /usr/local/bin/gh)"

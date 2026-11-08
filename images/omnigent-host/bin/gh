@@ -2,7 +2,7 @@
 # Re-reads the rotated token on every call; a token cached at pod start would expire mid-session.
 set -euo pipefail
 
-file=${GH_TOKEN_FILE:-/agent-secrets/github/code}
+file=$(/opt/agent/bin/github-token-file)
 repo="" prev=""
 for arg in "$@"; do
   case "$prev" in -R | --repo) repo=$arg ;; esac
