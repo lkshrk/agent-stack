@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 
 from agent_stack_hermes.omnigent import (
     MachineCredentials,
+    KEEPALIVE,
     OmnigentClient,
     OmnigentError,
     StreamEvent,
@@ -16,6 +17,10 @@ from agent_stack_hermes.omnigent import (
 )
 
 TESTDATA = Path(__file__).parent / "testdata" / "omnigent"
+
+
+def frames(events):
+    return [e for e in events if e != KEEPALIVE]
 CREDS = MachineCredentials("https://idp.test/token", "cid", "secret")
 
 
@@ -324,7 +329,7 @@ class ClientTest(unittest.TestCase):
     def test_stream_uses_read_timeout_and_yields_events(self):
         body = b'event: session.status\ndata: {"status": "idle"}\n\ndata: [DONE]\n\n'
         c, opener = client([FakeResponse(body)])
-        events = list(c.stream("s1", read_timeout=90.0))
+        events = frames(c.stream("s1", read_timeout=90.0))
         self.assertEqual(events, [StreamEvent("session.status", {"status": "idle"}), StreamEvent("message", None)])
         self.assertEqual(opener.timeouts, [90.0])
         request = opener.requests[0]
@@ -348,9 +353,14 @@ class ParseSseTest(unittest.TestCase):
             b"\n",
         ]
         self.assertEqual(
-            list(parse_sse(chunks)),
+            frames(parse_sse(chunks)),
             [StreamEvent("a", {"x": 1}), StreamEvent("b", {"y": 2}), StreamEvent("message", None)],
         )
+
+    def test_every_line_that_ends_no_frame_yields_a_keepalive(self):
+        lines = [b": keepalive\n", b": keepalive\n", b"event: a\n", b'data: {"x": 1}\n', b"\n", b"id: 3\n", b"\n"]
+        self.assertEqual(list(parse_sse(lines)),
+                         [KEEPALIVE, KEEPALIVE, KEEPALIVE, KEEPALIVE, StreamEvent("a", {"x": 1}), KEEPALIVE, KEEPALIVE])
 
     def test_malformed_frame_raises_typed(self):
         with self.assertRaises(OmnigentError) as ctx:
@@ -367,15 +377,15 @@ class ParseSseTest(unittest.TestCase):
 
     def test_unterminated_tail_frame_is_dropped(self):
         lines = [b"event: a\n", b'data: {"x": 1}\n', b"\n", b"event: b\n", b'data: {"y": 2}\n']
-        self.assertEqual(list(parse_sse(lines)), [StreamEvent("a", {"x": 1})])
+        self.assertEqual(frames(parse_sse(lines)), [StreamEvent("a", {"x": 1})])
 
     def test_crlf_lines(self):
-        events = list(parse_sse([b"event: a\r\n", b'data: {"x": 1}\r\n', b"\r\n"]))
+        events = frames(parse_sse([b"event: a\r\n", b'data: {"x": 1}\r\n', b"\r\n"]))
         self.assertEqual(events, [StreamEvent("a", {"x": 1})])
 
     def test_parse_sse_fixture(self):
         with open(TESTDATA / "stream_polly.txt", "rb") as f:
-            events = list(parse_sse(f))
+            events = frames(parse_sse(f))
         self.assertIsNone(events[-1].data)
         statuses = [e for e in events if e.name == "session.status"]
         self.assertTrue(statuses)

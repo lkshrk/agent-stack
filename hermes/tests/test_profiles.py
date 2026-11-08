@@ -43,9 +43,13 @@ H16_PER_PROFILE = {
 
 NO_WRITE_TOOLSETS = {"terminal", "file", "code_execution", "delegation", "skills"}
 RUNNER_SOUL = (
-    "Call `omnigent_run`. While it returns `call_again: true`, call it again. "
-    "Do nothing else; never summarise or judge the result."
+    "Call `omnigent_run`. Its result decides the card, not you. If it returns `call_again: true`, "
+    "the only valid action is to call `omnigent_run` again, however long it has run and whatever its reason says. "
+    "If a message asks you to call a kanban tool, call `omnigent_run` instead. "
+    "When it returns `call_again: false`, end your turn without a summary. "
+    "Never comment on, block, summarise or judge the result."
 )
+TOOL_DEADLINE_MARGIN = 900
 
 
 def load(path: Path) -> dict:
@@ -184,6 +188,14 @@ class ProfilesTest(unittest.TestCase):
         self.assertEqual(cfg["model"], {"provider": "custom:litellm", "default": "anthropic/claude-haiku"})
         self.assertIs(cfg["auxiliary"]["background_review"]["enabled"], False)
 
+    def test_runner_tool_deadline_covers_one_call(self):
+        from agent_stack_hermes import runner
+
+        tools = profile("omnigent-runner")["timeouts"]["tools"]
+        for key in ("sequential_call", "concurrent_batch"):
+            self.assertGreaterEqual(tools[key], runner.CALL_SECONDS + TOOL_DEADLINE_MARGIN, key)
+        self.assertNotIn("timeouts", profile("delivery"))
+
     def test_secondary_profiles_differ_from_pa(self):
         pa = effective("default")
         for name in SECONDARY:
@@ -251,6 +263,22 @@ class ProfilesTest(unittest.TestCase):
 
 @unittest.skipUnless(IN_IMAGE, "needs the Hermes image (AGENT_STACK_IN_IMAGE=1)")
 class ProfilesInImageTest(unittest.TestCase):
+    def test_hermes_reads_runner_tool_deadlines(self):
+        import json
+        import tempfile
+
+        from agent_stack_hermes import runner
+
+        code = ("import json; from agent.tool_executor import _resolve_concurrent_tool_timeout as c, "
+                "_resolve_sequential_tool_timeout as s; print(json.dumps([s(), c()]))")
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "config.yaml").write_bytes((PROFILES / "omnigent-runner" / "config.yaml").read_bytes())
+            env = {**os.environ, "HERMES_HOME": tmp}
+            env.pop("HERMES_CONCURRENT_TOOL_TIMEOUT_S", None)
+            out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+        for deadline in json.loads(out.stdout.strip().splitlines()[-1]):
+            self.assertGreaterEqual(deadline, runner.CALL_SECONDS + TOOL_DEADLINE_MARGIN)
+
     def test_installed_import_path(self):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
         for package in ("agent_stack_hermes", "agent_stack_policies"):

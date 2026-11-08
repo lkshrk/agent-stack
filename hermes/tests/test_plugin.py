@@ -70,7 +70,7 @@ class PluginTest(unittest.TestCase):
             with self.subTest(tool=tool):
                 verdict = hook(tool_name=tool, args={}, **kw)
                 self.assertEqual(verdict["action"], "block")
-                self.assertTrue(verdict["message"].strip())
+                self.assertIn("Call omnigent_run now.", verdict["message"])
         self.assertIsNone(hook(tool_name="omnigent_run", args={}, **kw))
 
     def test_handler_without_config_reports_error(self):
@@ -83,7 +83,7 @@ class PluginTest(unittest.TestCase):
         env = configured()
         boom = mock.Mock(side_effect=OSError("database is locked"))
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
-                mock.patch.object(runner, "run_slice", boom):
+                mock.patch.object(runner, "run_call", boom):
             out = json.loads(runner.handle({}))
         self.assertEqual((out["state"], out["call_again"]), ("running", False))
         self.assertIn("database is locked", out["reason"])
@@ -92,18 +92,18 @@ class PluginTest(unittest.TestCase):
         env = {**configured(), "GITHUB_AGENT_ACTORS": "app-a[bot],app-b[bot]"}
         seen = mock.Mock(return_value={})
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
-                mock.patch.object(runner, "run_slice", seen):
+                mock.patch.object(runner, "run_call", seen):
             runner.handle({})
         self.assertEqual(seen.call_args.args[3].agents, frozenset({"app-a[bot]", "app-b[bot]"}))
         with mock.patch.dict(os.environ, configured(), clear=True), \
-                mock.patch.object(runner, "HermesKanban"), mock.patch.object(runner, "run_slice", seen):
+                mock.patch.object(runner, "HermesKanban"), mock.patch.object(runner, "run_call", seen):
             runner.handle({})
         self.assertEqual(seen.call_args.args[3].agents, frozenset())
 
     def handled_reader(self, env):
         seen = mock.Mock(return_value={})
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(runner, "HermesKanban"), \
-                mock.patch.object(runner, "run_slice", seen):
+                mock.patch.object(runner, "run_call", seen):
             out = json.loads(runner.handle({}))
         return out, (seen.call_args.args[3] if seen.called else None)
 

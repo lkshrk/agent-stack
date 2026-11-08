@@ -35,6 +35,9 @@ class StreamEvent:
     data: dict | None
 
 
+KEEPALIVE = StreamEvent("keepalive", {})
+
+
 def _error_from(exc: urllib.error.HTTPError) -> OmnigentError:
     try:
         detail = exc.read().decode("utf-8", "replace")[:500]
@@ -133,17 +136,18 @@ def parse_sse(lines: Iterable[bytes]) -> Iterator[StreamEvent]:
             line = raw.decode("utf-8").rstrip("\r\n")
         except UnicodeDecodeError:
             raise _bad_body("SSE line is not UTF-8") from None
-        if line == "":
-            if data:
-                yield _frame(name, data)
+        if line == "" and data:
+            yield _frame(name, data)
             name = "message"
             data = []
-        elif line.startswith(":"):
             continue
+        if line == "":
+            name = "message"
         elif line.startswith("event:"):
             name = line[6:].strip()
         elif line.startswith("data:"):
             data.append(line[5:].removeprefix(" "))
+        yield KEEPALIVE
 
 
 class OmnigentClient:

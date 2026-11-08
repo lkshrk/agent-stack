@@ -14,6 +14,7 @@ from agent_stack_hermes.postrun import (
     Activity,
     Compare,
     Content,
+    DeadlineExceeded,
     FileChange,
     GitHubError,
     GitHubReader,
@@ -895,6 +896,79 @@ class AgentActorsTest(unittest.TestCase):
         for value in (None, "", " , "):
             with self.subTest(value=value):
                 self.assertEqual(agent_actors(value), frozenset())
+
+
+class StepClock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+class ClockedOpener(FakeOpener):
+    def __init__(self, responses, clock, step):
+        super().__init__(responses)
+        self.clock, self.step = clock, step
+
+    def __call__(self, request, timeout=None):
+        self.clock.t += self.step
+        return super().__call__(request, timeout)
+
+
+class DeadlineTest(ReaderCase):
+    NEXT = f'<{API}/repositories/1/activity?after=c>; rel="next"'
+
+    def bounded(self, responses, until, step=0.0):
+        self.clock = StepClock()
+        self.opener = ClockedOpener(responses, self.clock, step)
+        self.sleeps = []
+        reader = GitHubReader(self.token_file, opener=self.opener, sleep=self.sleeps.append)
+        return reader.with_deadline(until, self.clock)
+
+    def item(self, ts="2023-11-14T22:20:00Z", ref="refs/heads/main"):
+        return {"id": 1, "node_id": "n", "before": "a", "after": "b", "ref": ref, "timestamp": ts,
+                "activity_type": "push", "actor": {"login": "lkshrk"}}
+
+    def test_request_timeout_is_the_time_left(self):
+        self.bounded([jr({"default_branch": "main"}), jr({"default_branch": "main"})], until=12).default_branch(REPO)
+        self.assertEqual(self.opener.timeouts, [12])
+        self.bounded([jr({"default_branch": "main"})], until=100).default_branch(REPO)
+        self.assertEqual(self.opener.timeouts, [30])
+
+    def test_no_request_after_the_deadline(self):
+        r = self.bounded([jr({"default_branch": "main"})], until=0)
+        with self.assertRaises(DeadlineExceeded):
+            r.default_branch(REPO)
+        self.assertFalse(self.opener.requests)
+
+    def test_paginating_reads_stop_at_the_deadline(self):
+        reads = {
+            "activity": (lambda: [self.item()], lambda r: r.activity(REPO, "refs/heads/main", 0.0)),
+            "head_pushes": (lambda: [self.item()], lambda r: r.head_pushes(REPO, "main", "zzz")),
+            "refs": (lambda: [], lambda r: r.refs(REPO)),
+            "tag_runs": (lambda: {"workflow_runs": []}, lambda r: r.tag_runs(REPO, "c" * 40)),
+        }
+        for name, (page, read) in reads.items():
+            with self.subTest(read=name):
+                r = self.bounded([jr(page(), {"Link": self.NEXT}) for _ in range(MAX_PAGES)], until=25, step=10)
+                with self.assertRaises(DeadlineExceeded):
+                    read(r)
+                self.assertEqual(len(self.opener.requests), 3)
+
+    def test_merged_pulls_does_not_sleep_past_the_deadline(self):
+        r = self.bounded([jr([]), jr([])], until=PULLS_RETRY_SECONDS - 1)
+        with self.assertRaises(DeadlineExceeded):
+            r.merged_pulls(REPO, "a" * 40)
+        self.assertEqual(self.sleeps, [])
+        self.assertEqual(len(self.opener.requests), 1)
+
+    def test_deadline_is_not_a_github_error(self):
+        self.assertFalse(issubclass(DeadlineExceeded, GitHubError))
+
+    def test_unbounded_reader_keeps_the_default_timeout(self):
+        self.reader([jr({"default_branch": "main"})]).default_branch(REPO)
+        self.assertEqual(self.opener.timeouts, [30])
 
 
 class RefsTest(ReaderCase):

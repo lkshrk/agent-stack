@@ -17,6 +17,12 @@ agent:
   max_turns: 400
   disabled_toolsets: [kanban, terminal, file, code_execution, delegation, skills, web, memory, browser, cronjob, computer_use]
 
+# One omnigent_run call follows the session for up to runner.CALL_SECONDS (2700 s), post-run check included; Hermes's default is 420 s.
+timeouts:
+  tools:
+    sequential_call: 3600
+    concurrent_batch: 3600
+
 memory:
   write_approval: true
 
