@@ -21,6 +21,7 @@ from agent_stack_hermes.runspec import (
 )
 
 SLICE_SECONDS = 300
+CALL_SECONDS = 2700
 HEARTBEAT_SECONDS = 900
 STALL_SECONDS = 2700
 POLL_SECONDS = 15
@@ -45,8 +46,8 @@ TOKEN_ENV = ("GITHUB_RO_TOKEN_FILE", "GITHUB_RO_TOKEN_FILES")
 TOOL_SCHEMA = {
     "name": "omnigent_run",
     "description": (
-        "Run or resume this card's Omnigent session for one bounded slice. Takes no arguments: "
-        "the run spec comes from the card. Call again while the result has call_again: true."
+        "Run or resume this card's Omnigent session for up to 45 minutes. Takes no arguments: "
+        "the run spec comes from the card. If the result has call_again: true, call omnigent_run again."
     ),
     "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
 }
@@ -460,11 +461,37 @@ def run_slice(
     return _close(kanban, task_id, run_id, session_id, verdict)
 
 
+def run_call(
+    env: Mapping[str, str],
+    kanban: KanbanPort,
+    omni: OmnigentClient,
+    gh: GitHubReader,
+    now=time.time,
+    sleep=time.sleep,
+    budget_seconds: int = CALL_SECONDS,
+    slice_seconds: int = SLICE_SECONDS,
+) -> dict:
+    deadline = now() + budget_seconds
+    last = None
+    while True:
+        remaining = max(0.0, deadline - now())
+        try:
+            out = run_slice(env, kanban, omni, gh, now=now, slice_seconds=min(slice_seconds, remaining), sleep=sleep)
+        except Exception as exc:
+            if last is None:
+                raise
+            return _result("running", last["session_id"], "runner error: " + _short(exc), call_again=True)
+        if not out.get("call_again") or now() >= deadline:
+            return out
+        last = out
+
+
 def deny_kanban_terminal(tool_name: str = "", args: dict | None = None, **kw) -> dict | None:
     if tool_name in DENIED_TOOLS:
         return {
             "action": "block",
-            "message": f"{tool_name} is not available in the omnigent-runner lane: omnigent_run closes the card.",
+            "message": f"{tool_name} is not available in the omnigent-runner lane: omnigent_run closes the card. "
+            "Call omnigent_run now.",
         }
     return None
 
@@ -493,6 +520,6 @@ def handle(args: dict | None = None, **kw) -> str:
                           token_files=owners, trusted=agent_actors(env.get("GITHUB_TRUSTED_ACTORS")) or DEFAULT_TRUSTED,
                           main_trusted=agent_actors(env.get("GITHUB_TRUSTED_MAIN_ACTORS")))
         kanban = HermesKanban(claimer=env.get("HERMES_KANBAN_CLAIM_LOCK"))
-        return json.dumps(run_slice(env, kanban, omni, gh))
+        return json.dumps(run_call(env, kanban, omni, gh))
     except Exception as exc:
         return json.dumps(_result("running", None, "runner error: " + _short(exc)))

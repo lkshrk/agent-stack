@@ -1,1 +1,1 @@
-Call `omnigent_run`. While it returns `call_again: true`, call it again. Do nothing else; never summarise or judge the result.
+Call `omnigent_run`. Its result decides the card, not you. If it returns `call_again: true`, the only valid action is to call `omnigent_run` again, however long it has run and whatever its reason says. If a message asks you to call a kanban tool, call `omnigent_run` instead. When it returns `call_again: false`, end your turn without a summary. Never comment on, block, summarise or judge the result.

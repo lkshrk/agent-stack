@@ -849,6 +849,116 @@ def landed(sha=MERGED, **over):
     return MergedPull(**{**fields, **over})
 
 
+class LosesClaimKanban(FakeKanban):
+    def __init__(self, *args, lose_after, **kw):
+        super().__init__(*args, **kw)
+        self.beats_left = lose_after
+
+    def heartbeat(self, task_id, run_id, note):
+        super().heartbeat(task_id, run_id, note)
+        self.beats_left -= 1
+        return self.beats_left >= 0
+
+
+class RunCallTest(RunnerCase):
+    def run_call(self, snap, comments=RECORDED, bundle="polly", budget=runner.CALL_SECONDS, kanban=None, **omni):
+        self.kanban = kanban or FakeKanban(self.log, card_body(bundle), comments)
+        self.omni = FakeOmnigent(self.log, self.clock, snap, **omni)
+        self.gh = FakeGitHub(self.log, (AFTER,))
+        return runner.run_call(ENV, self.kanban, self.omni, self.gh, now=self.clock, sleep=self.sleep,
+                               budget_seconds=budget)
+
+    def test_call_budget_is_far_longer_than_a_slice(self):
+        self.assertGreaterEqual(runner.CALL_SECONDS, 1800)
+        self.assertEqual(runner.CALL_SECONDS % runner.SLICE_SECONDS, 0)
+
+    def test_running_session_runs_until_the_budget(self):
+        out = self.run_call(lambda t: running(updated_at=t))
+        self.assertEqual((out["state"], out["call_again"]), ("running", True))
+        self.assertEqual(self.clock.t, T0 + runner.CALL_SECONDS)
+        slices = runner.CALL_SECONDS // runner.SLICE_SECONDS
+        self.assertEqual(len(self.calls("stream")), slices)
+        self.assertFalse(self.terminal_writes())
+
+    def test_every_slice_heartbeats(self):
+        self.run_call(lambda t: running(updated_at=t))
+        slices = runner.CALL_SECONDS // runner.SLICE_SECONDS
+        beats = [i for i, c in enumerate(self.log) if c[0] == "heartbeat"]
+        streams = [i for i, c in enumerate(self.log) if c[0] == "stream"]
+        self.assertEqual(len(beats), slices)
+        self.assertTrue(all(beat < stream for beat, stream in zip(beats, streams)))
+
+    def test_done_after_some_slices_completes_in_the_same_call(self):
+        done_at = T0 + 2 * runner.SLICE_SECONDS + 30
+        out = self.run_call(lambda t: running(updated_at=t) if t < done_at else snapshot())
+        self.assertEqual((out["state"], out["call_again"]), ("completed", False))
+        self.assertEqual(len(self.calls("complete")), 1)
+        self.assertEqual(len(self.calls("stream")), 3)
+        self.assertLess(self.clock.t, T0 + 3 * runner.SLICE_SECONDS)
+
+    def test_blocked_after_some_slices_blocks_in_the_same_call(self):
+        failed_at = T0 + runner.SLICE_SECONDS + 30
+        sandbox = {"stage": "failed", "error": "spend limit reached"}
+        out = self.run_call(lambda t: running(updated_at=t) if t < failed_at else running(updated_at=t, sandbox_status=sandbox))
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: sandbox failed: spend limit reached")
+        self.assertEqual(len(self.calls("stream")), 2)
+
+    def test_stall_still_blocks_inside_one_call(self):
+        out = self.run_call(running(updated_at=T0), budget=runner.STALL_SECONDS + 2 * runner.SLICE_SECONDS)
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: stalled")
+        self.assertGreater(self.clock.t, T0 + runner.STALL_SECONDS)
+        self.assertLessEqual(self.clock.t, T0 + runner.STALL_SECONDS + runner.POLL_SECONDS)
+
+    def test_runtime_cap_still_blocks_inside_one_call(self):
+        created = T0 - runspec.MAX_RUNTIME["planner"] + runner.SLICE_SECONDS + 30
+        out = self.run_call(lambda t: running(updated_at=t, created_at=created), bundle="planner")
+        self.assert_blocked(out, "transient", "BLOCKED{environment}: runtime cap")
+        self.assertEqual(self.calls("interrupt"), [("interrupt", "conv_old")])
+        self.assertEqual(len(self.calls("stream")), 2)
+
+    def test_lost_claim_stops_the_call_without_call_again(self):
+        kanban = LosesClaimKanban(self.log, card_body(), RECORDED, lose_after=2)
+        out = self.run_call(lambda t: running(updated_at=t), kanban=kanban)
+        self.assertEqual((out["state"], out["call_again"]), ("running", False))
+        self.assertEqual(len(self.calls("stream")), 2)
+        self.assertFalse(self.terminal_writes())
+
+    def test_last_slice_is_cut_to_the_budget(self):
+        budget = runner.SLICE_SECONDS + 100
+        out = self.run_call(lambda t: running(updated_at=t), budget=budget)
+        self.assertTrue(out["call_again"])
+        self.assertEqual(self.clock.t, T0 + budget)
+        self.assertEqual(len(self.calls("stream")), 2)
+
+    def test_error_in_a_later_slice_returns_call_again(self):
+        kanban = FakeKanban(self.log, card_body(), RECORDED)
+        reads = iter([None])
+
+        def card(task_id):
+            if next(reads, "fail") == "fail":
+                raise OSError("database is locked")
+            return FakeKanban.card(kanban, task_id)
+
+        kanban.card = card
+        out = self.run_call(lambda t: running(updated_at=t), kanban=kanban)
+        self.assertEqual((out["state"], out["call_again"], out["session_id"]), ("running", True, "conv_old"))
+        self.assertIn("database is locked", out["reason"])
+        self.assertEqual(self.clock.t, T0 + runner.SLICE_SECONDS)
+
+    def test_error_in_the_first_slice_propagates(self):
+        kanban = FakeKanban(self.log, card_body(), RECORDED)
+        kanban.card = lambda task_id: (_ for _ in ()).throw(OSError("database is locked"))
+        with self.assertRaises(OSError):
+            self.run_call(lambda t: running(updated_at=t), kanban=kanban)
+
+    def test_each_slice_rereads_the_card(self):
+        out = self.run_call(lambda t: running(updated_at=t), comments=RECORDED[:1], budget=2 * runner.SLICE_SECONDS,
+                            sessions=[{"id": "conv_found", "labels": {"agent-stack/card": "t_1"}}])
+        self.assertTrue(out["call_again"])
+        self.assertEqual([c[1] for c in self.calls("stream")], ["conv_found", "conv_found"])
+        self.assertEqual(len(self.calls("list_sessions")), 2)
+
+
 class InfraRunnerTest(RunnerCase):
     def setUp(self):
         super().setUp()
