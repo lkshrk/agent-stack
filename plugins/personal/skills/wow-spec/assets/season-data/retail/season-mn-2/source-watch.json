@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-10-26T14:03:50.213421+00:00",
+  "captured_at": "2026-11-09T16:22:30.018855+00:00",
   "season": "season-mn-2",
   "sources": {
     "https://nether.wowhead.com/tooltip/item/240094": {
@@ -1436,7 +1436,7 @@
       "sha256": "b16a509076302cd5d1eb076e8f082dde8be8973588fd5b674d069f0c672c43f8",
       "meta": {
         "patch": "12.1.5",
-        "updated": "2026-10-16"
+        "updated": "2026-10-28"
       }
     },
     "https://www.method.gg/guides/fire-mage/stats-races-and-consumables": {
@@ -1723,285 +1723,285 @@
       "spec_ids": [
         250
       ],
-      "sha256": "ea66c1a64470ec8ef53b4e43a1cefd3d3a0ae911d49ac4596f0e2d16c734fba3"
+      "sha256": "23a403b0e9b27307a9337fb07b8418d024cc4fc0602312c99fe427a22db54095"
     },
     "https://murlok.io/death-knight/frost/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         251
       ],
-      "sha256": "ad4d26c048cb59062633fad3b889b8045a495f130a3fc8a53c73412f4e810c7f"
+      "sha256": "0a38f9e7c78db99aeca727ba4b005f46532e0cc6f5cc3e24efba6b59cf5d227b"
     },
     "https://murlok.io/death-knight/unholy/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         252
       ],
-      "sha256": "c54eb193c5eb79c0aff4acd0037196b6ce22e46121ba6728bdd75c4a45f84af1"
+      "sha256": "9c47e0bef770b0a4017aacb02612395e684bd13702fe9325ed3854ea0d1cbe62"
     },
     "https://murlok.io/demon-hunter/devourer/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         1480
       ],
-      "sha256": "24a7a4085c2c86afffa06ada6b112363ccf2c405c9f28f137d2acac81218456a"
+      "sha256": "d52c66d577650aa564419947481fbdfacaa532250b740f15005864a25db91cca"
     },
     "https://murlok.io/demon-hunter/havoc/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         577
       ],
-      "sha256": "b56a4c2653c24b15688a389ca0e4f02863cea8c7cb27c17ba50a569ec073132b"
+      "sha256": "aa2b3b65e18154c29f2026de374784a0d92082951b6c62ec3205193609c05b9e"
     },
     "https://murlok.io/demon-hunter/vengeance/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         581
       ],
-      "sha256": "f891289ba8558e130a896094eacce4a406d0ef5cce55c239ea30edb3f27fe122"
+      "sha256": "e1372100e0bda1e1f23d78b7ccf81124abb8d66063f5b852599582d55c7e4194"
     },
     "https://murlok.io/druid/balance/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         102
       ],
-      "sha256": "f7afdd7ad08f0e47fc0e5bc3ddd5bd492b5a46e8322d495b45c00f9e750b63d4"
+      "sha256": "d89568acadefd0953c63fddf94e715ce198747e32bc3a0c4334b5bee391f08eb"
     },
     "https://murlok.io/druid/feral/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         103
       ],
-      "sha256": "93747c8bd5fc7c10c803ed5f8534e58b2eb355e4d1e736b3719f69c61d773fab"
+      "sha256": "ff778477b61de1769ab2b5741b27ac12d7c7959baf1ff16f62df50aa94a6e4cb"
     },
     "https://murlok.io/druid/guardian/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         104
       ],
-      "sha256": "9b438bdd1c8f3bbad2c59d0fab8e0a4be81b3ef2a24b23f3ae079e62b96faf39"
+      "sha256": "f9f5e582fd91261d0a51631cc340fa5c9eb7e7c0327a1d164255894212922b92"
     },
     "https://murlok.io/druid/restoration/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         105
       ],
-      "sha256": "423617ce3376ab69dae55811d88afa627b113d6c1fe0d60486ba15c960ada16e"
+      "sha256": "2d0aa229a43e96ad34f3eaa6a2d9cb010fa524ee1fde3a84e346022281cdbc97"
     },
     "https://murlok.io/evoker/augmentation/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         1473
       ],
-      "sha256": "fb5844a64e4e2d3939ed7438ee16074231ca771d786eed8bcd12f7a36e9572d0"
+      "sha256": "058d70e097c2d1d982430960a4dfd176267f22bbda5fd22b041d601a3a0efffc"
     },
     "https://murlok.io/evoker/devastation/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         1467
       ],
-      "sha256": "6dfd2b014a92957a0cbd3b61f2c08128450776c51e14a8c5f0362cc1d682d168"
+      "sha256": "225abf7b3dac9a31bf60a38a74d04cb53dbab840037f855d734405c851c987f8"
     },
     "https://murlok.io/evoker/preservation/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         1468
       ],
-      "sha256": "2e0df0a8c5deea228a7a83ce3bbd112e57f5e1a8d340019ed45cbb65ce9842e5"
+      "sha256": "4e1d4faa92ccdcd5568d6a91a956b8d0131cb3edbb89c6ffabdc03a623023e1a"
     },
     "https://murlok.io/hunter/beast-mastery/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         253
       ],
-      "sha256": "0c845a7bb7c3153aab30f8217ca55f33ef5841731d585cd6c0a28deacda0e86a"
+      "sha256": "19de4b6a52de2bcce9152b4d8a98aada0a6fa11483917fc7e4d6a62a7d79cf8d"
     },
     "https://murlok.io/hunter/marksmanship/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         254
       ],
-      "sha256": "f1f211430ed68a75b889ec4b66eb086e97317069fce9c4c919ad89f5307d8f56"
+      "sha256": "64ddf5c24a0a46babcfebda12d2ff286b34b0b27a22e4a8328418f0890616ed4"
     },
     "https://murlok.io/hunter/survival/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         255
       ],
-      "sha256": "930cb14ebe2e33e52f82922e433e860e16f05c5fa86f08356deda4d08a510a77"
+      "sha256": "b6b147835615172c7c7432016da605b3279aafe871901d595885215af2a6459a"
     },
     "https://murlok.io/mage/arcane/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         62
       ],
-      "sha256": "2fa5006e900272e016a36236c8c1e362575eb4dbfab9afe7593a8215cf74101b"
+      "sha256": "e71ce6d3d84ab297e15156d1680b862dbaf89b8217a4f05e23e59c3469447cb2"
     },
     "https://murlok.io/mage/fire/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         63
       ],
-      "sha256": "23c41c09606d94a27bb3d5b09a56b8409c32693ac645a93b8c3888ef60d2ad84"
+      "sha256": "6b410417c160675f01d52ee9142e292e12818df6eab4525ebbebbf28c6ba5a24"
     },
     "https://murlok.io/mage/frost/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         64
       ],
-      "sha256": "46327297b587f2f64c8cc4832acefe89852b299410c4a6a7c7c435fdef76636b"
+      "sha256": "325c624c0a688917698aa5775251679c41a0f6f029882334b2b16700e08f8ef6"
     },
     "https://murlok.io/monk/brewmaster/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         268
       ],
-      "sha256": "b966fae5d59b687a3bbcf60d8461b3fff56f1e7cb4934dc85854117bf748cc3a"
+      "sha256": "5c9a036de69eef3691ed8921381cbae87c83b0a306955fdd41f5268b6dd549d2"
     },
     "https://murlok.io/monk/mistweaver/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         270
       ],
-      "sha256": "7d1b7a9f05a9499f62ced1d7f3e58a343288c863a9f2d1bd3d596cb77bf4c65a"
+      "sha256": "3208667f9b5d67ff62f86ae4bb37eb4d35803b5a0e221a83eb947a2fa75c9909"
     },
     "https://murlok.io/monk/windwalker/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         269
       ],
-      "sha256": "9d00107fcf32e4d282ca5c4a3dcbbafdfd8c7d99ff2d2dca373405f6b3547e1e"
+      "sha256": "eedbec01cfa7550714429169912be45d19a028b261db0244fcb8cbfe0213c0f6"
     },
     "https://murlok.io/paladin/holy/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         65
       ],
-      "sha256": "c7351a7da0997878b57726159d45daa8f2f78b34aeb94d739e21a9f4d4417b47"
+      "sha256": "32ed6f60087dbd98de4fa2433fb92c4d7569276cdf29ad824cccc1a44f84f489"
     },
     "https://murlok.io/paladin/protection/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         66
       ],
-      "sha256": "e10073b34b423adbd7ed0c274f5698f9977d8df62b3dfbbc3231eb3979fa43c1"
+      "sha256": "4786570dcf3449742325aa7dcc4c7d301a90ef25eeb966db112f2cede1b0c550"
     },
     "https://murlok.io/paladin/retribution/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         70
       ],
-      "sha256": "acaeb5cc942d2edc8de22daa4ffa57ea4c34cb99d9b446f553721a9b9df0976c"
+      "sha256": "48b881ac7ec846a8c1d8423698b366866d592564788e83ea1db4ce3ca48ac939"
     },
     "https://murlok.io/priest/discipline/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         256
       ],
-      "sha256": "362d6a0ae56e574ffb32f00e4b481c6999f265c8454ef5840d327ff345d4b587"
+      "sha256": "3bd47e5aacd3bcd47563a90e5810e1fe8cb972f896bab99adaf267c7007996e7"
     },
     "https://murlok.io/priest/holy/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         257
       ],
-      "sha256": "029fb528f7e2fe08794d0fc838899160f69fa214e8e80ceeae95720fa2356963"
+      "sha256": "841923bf6319f0294baa63b6553f8a4f34faf8dddf8b2de70c27b1e218b48815"
     },
     "https://murlok.io/priest/shadow/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         258
       ],
-      "sha256": "b04f1e6342e2092e4bf3a29f736bcd4e89c13d9c0fc9616efe8527674a078c90"
+      "sha256": "035974455dd8db54852853342eb09032d069908809eefaf3af20e55828d03dd3"
     },
     "https://murlok.io/rogue/assassination/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         259
       ],
-      "sha256": "8adfa17a8d4e9023616541217fb9161c37f1bf922bf7d0e4b01f91976342bd54"
+      "sha256": "578d09606167fa98e939e52a0f169e4fbbd20df0f8a9e9ca29cf8ac0b66c8393"
     },
     "https://murlok.io/rogue/outlaw/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         260
       ],
-      "sha256": "54861ddabaa23be735f20f7a55c596939e06af3632668057c514e9b7dadbb9a5"
+      "sha256": "1af355816b472b5a525853a77e470a668873a481c48dba8b2f80b4bed798fc58"
     },
     "https://murlok.io/rogue/subtlety/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         261
       ],
-      "sha256": "f04755247d81f63bf14eda7279900eda35de3e43710eafbf88edfdba06e24c7e"
+      "sha256": "d05d2205280352d545c6422f9e9b8b9026fcf480db99bbf790e096a5c51da1e3"
     },
     "https://murlok.io/shaman/elemental/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         262
       ],
-      "sha256": "4c926bcd33c43d4e76b94f000bc6ba563e876b2625930fcd2244a227e410f798"
+      "sha256": "f7ba8bc2117fcf9e5057daca870c9dde3a97db5a052854899d13ee653e695865"
     },
     "https://murlok.io/shaman/enhancement/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         263
       ],
-      "sha256": "644bc604fd348f7a2f8947c7cee16db122c16989c9965808826687234480d575"
+      "sha256": "19bce0fa6e7f70c6ce3b3d437e3a61837c2ea65b6c59c8a23572c98849377660"
     },
     "https://murlok.io/shaman/restoration/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         264
       ],
-      "sha256": "131943bab1bacba6fdfbfdb9eb5b727184157107689f595dd6da4c8ea6001c07"
+      "sha256": "c3eb1745a0f4a6929432ae1691eb32eaad9d1b2a3703135a210af38c051564a0"
     },
     "https://murlok.io/warlock/affliction/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         265
       ],
-      "sha256": "b17c30b92910893ef8d0bb422de5727968834f6c9eb3d7d8d1f9ace3e4e6a1c2"
+      "sha256": "46ddf6f117ba1fcf888c52b65771933482a7996e0812c4a8a27a8282dfb50ee8"
     },
     "https://murlok.io/warlock/demonology/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         266
       ],
-      "sha256": "49ae3b5ea104526384e96308b1454158c8332282d12cd8544b6d4ba1326963ce"
+      "sha256": "1245302890efd2296ea0844e700b7ab7a4e7cf6bf911d43f5b1b2678beaa0384"
     },
     "https://murlok.io/warlock/destruction/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         267
       ],
-      "sha256": "cb2f27dfdc9a59a9ce8d5a095ab2578e19b9baccb147fd72b99e6ccf7472695b"
+      "sha256": "7dfd9a2d212b8513cb3c9c673df72e1c9cf0015bb4ed156b2e7f87a511e57275"
     },
     "https://murlok.io/warrior/arms/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         71
       ],
-      "sha256": "6e8d2195cb4a9a32c4311136198813dee30dfaf76e5da27a6559b963e7b672e5"
+      "sha256": "4180f4010d77476a9d4992011ddda32d65bec0438097dd5b9896d8775428eb22"
     },
     "https://murlok.io/warrior/fury/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         72
       ],
-      "sha256": "4170a2028d11cc3e7b7d76870bbe0e9a3e3c63bc8ba330377920d895b83280dc"
+      "sha256": "d5c206bbde047976b9cfd61043f3b61c4b7ef01d0a4301f1a8fe8048950c241a"
     },
     "https://murlok.io/warrior/protection/m+": {
       "kind": "crosscheck",
       "spec_ids": [
         73
       ],
-      "sha256": "fcc51e00bff89c34b27d6a243883781b5bd2a10dbaa48ec708966ce2030eddeb"
+      "sha256": "ce13d9038c79b2b3982c1eec3a5ac2fb928042b8c517fb17f3c346b23cd658ff"
     },
     "https://worldofwarcraft.blizzard.com/en-us/news": {
       "kind": "news",
       "spec_ids": [],
-      "sha256": "6fa5ca6225e40d6269c350d8f284777348cda37ae66e8b4cb6892fa72372fad2"
+      "sha256": "dc615c9cc6e59ecf516e19e74909d849f5ca95a1a6e57b903df13703b36d9305"
     },
     "https://nether.wowhead.com/tooltip/item/243985": {
       "kind": "tooltip",

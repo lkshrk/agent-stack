@@ -5,7 +5,7 @@
   "game": "retail",
   "season": "season-mn-2",
   "verified_patch": "12.1.5",
-  "verified_at": "2026-10-26",
+  "verified_at": "2026-11-09",
   "status": "verified",
   "scope": "Max-level PvE guide baseline; not personalized optimization.",
   "sources": [
@@ -58,5 +58,9 @@
     "Exact quality ranks, item effects, durations and shared cooldowns require tooltip verification.",
     "No personal simulation."
   ],
-  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed."
+  "validation_scope": "Current guide recommendations and linked identities only; unknown item mechanics are not assumed.",
+  "acknowledged_differences": {
+    "differences": "0581ff84ef9d88ad61a6cdf0805a5579f08648e3cbaea9fd51559c9f6360f235",
+    "sections": "a97b3a813230f60efab438abaed1bb1d4f3b8b73125bce0aec5aadfdba547fd0"
+  }
 }
