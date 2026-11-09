@@ -27,7 +27,7 @@ gitleaks = "8.30.1"
 "go:golang.org/x/tools/gopls" = "0.24.0"
 "npm:pyright" = "1.1.414"
 "npm:typescript" = "7.0.2"
-"npm:typescript-language-server" = "6.0.2"
+"npm:typescript-language-server" = "6.0.3"
 # svelte@4.2.20 is an official 4.x backport published without provenance after 5.0.0 introduced it.
 "npm:svelte-language-server" = { version = "0.18.6", trust_policy_excludes = ["svelte@4.2.20"] }
 "npm:bash-language-server" = "5.8.1"
