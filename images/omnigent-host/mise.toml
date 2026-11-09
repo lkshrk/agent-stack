@@ -2,7 +2,7 @@
 go = "1.27.3"
 rust = { version = "1.99.1", profile = "minimal", components = "clippy,rustfmt,rust-src" }
 bun = "1.4.4"
-pnpm = "12.15.0"
+pnpm = "12.18.0"
 uv = "0.13.7"
 java = "temurin-21"
 kotlin = "2.4.21"
