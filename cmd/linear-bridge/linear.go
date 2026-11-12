@@ -22,7 +22,6 @@ const (
 
 type linearAPI interface {
 	ArchiveIssue(ctx context.Context, issueID string) error
-	Thought(ctx context.Context, sessionID, body string) error
 	Issue(ctx context.Context, id string) (IssueInfo, error)
 	SetState(ctx context.Context, issueID, stateID string) error
 	Activity(ctx context.Context, sessionID string, a Activity) error
@@ -37,8 +36,8 @@ type WorkflowState struct {
 }
 
 type IssueInfo struct {
-	ID, Identifier, Title, Description, ParentID, DelegateID, TeamID, StateID string
-	States                                                                    []WorkflowState
+	ID, TeamID, StateID string
+	States              []WorkflowState
 }
 
 type tokenSource struct {
@@ -109,20 +108,15 @@ type graphQL struct {
 
 const (
 	archiveMutation  = `mutation($id:String!){ issueArchive(id:$id){ success } }`
-	issueQuery       = `query($id:String!){ issue(id:$id){ id identifier title description parent{ id } delegate{ id } state{ id } team{ id states{ nodes{ id name type } } } } }`
+	issueQuery       = `query($id:String!){ issue(id:$id){ id state{ id } team{ id states{ nodes{ id name type } } } } }`
 	stateMutation    = `mutation($id:String!,$s:String!){ issueUpdate(id:$id, input:{stateId:$s}){ success } }`
 	activityMutation = `mutation($s:String!,$content:JSONObject!){ agentActivityCreate(input:{agentSessionId:$s, content:$content}){ success } }`
 	commentMutation  = `mutation($id:String!,$b:String!){ commentCreate(input:{issueId:$id, body:$b}){ success } }`
 	linkMutation     = `mutation($id:String!,$t:String!,$u:String!){ attachmentCreate(input:{issueId:$id, title:$t, url:$u}){ success } }`
-	thoughtMutation  = `mutation($s:String!,$b:String!){ agentActivityCreate(input:{agentSessionId:$s, content:{type: "thought", body:$b}}){ success } }`
 )
 
 func (g *graphQL) ArchiveIssue(ctx context.Context, issueID string) error {
 	return g.run(ctx, archiveMutation, map[string]any{"id": issueID}, "issueArchive")
-}
-
-func (g *graphQL) Thought(ctx context.Context, sessionID, body string) error {
-	return g.run(ctx, thoughtMutation, map[string]any{"s": sessionID, "b": body}, "agentActivityCreate")
 }
 
 func (g *graphQL) SetState(ctx context.Context, issueID, stateID string) error {
@@ -155,16 +149,7 @@ func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
 	var out struct {
 		Data struct {
 			Issue *struct {
-				ID          string  `json:"id"`
-				Identifier  string  `json:"identifier"`
-				Title       string  `json:"title"`
-				Description *string `json:"description"`
-				Parent      *struct {
-					ID string `json:"id"`
-				} `json:"parent"`
-				Delegate *struct {
-					ID string `json:"id"`
-				} `json:"delegate"`
+				ID    string `json:"id"`
 				State *struct {
 					ID string `json:"id"`
 				} `json:"state"`
@@ -188,18 +173,9 @@ func (g *graphQL) Issue(ctx context.Context, id string) (IssueInfo, error) {
 	if i == nil {
 		return IssueInfo{}, permanent(errors.New("linear issue not found"))
 	}
-	info := IssueInfo{ID: i.ID, Identifier: i.Identifier, Title: i.Title, TeamID: i.Team.ID, States: i.Team.States.Nodes}
-	if i.Description != nil {
-		info.Description = *i.Description
-	}
-	if i.Parent != nil {
-		info.ParentID = i.Parent.ID
-	}
+	info := IssueInfo{ID: i.ID, TeamID: i.Team.ID, States: i.Team.States.Nodes}
 	if i.State != nil {
 		info.StateID = i.State.ID
-	}
-	if i.Delegate != nil {
-		info.DelegateID = i.Delegate.ID
 	}
 	return info, nil
 }

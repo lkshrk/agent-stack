@@ -17,12 +17,7 @@ import (
 const (
 	cardTimeout   = 3 * time.Second
 	notifyTimeout = 5 * time.Second
-	stopTimeout   = 30 * time.Second
 )
-
-func newGateHTTPClient() *http.Client {
-	return &http.Client{Timeout: stopTimeout + notifyTimeout}
-}
 
 const gateNotFound = "unknown card"
 
@@ -60,19 +55,8 @@ type CardEvent struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
-type RootCardRequest struct {
-	IssueID     string `json:"issue_id"`
-	Identifier  string `json:"identifier"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	SessionID   string `json:"session_id"`
-}
-
 type kanbanAPI interface {
-	CreateRootCard(ctx context.Context, r RootCardRequest) (Card, error)
-	CardByIssue(ctx context.Context, issueID string) (Card, bool, error)
 	Card(ctx context.Context, id string) (Card, error)
-	StopCard(ctx context.Context, id, reason string) error
 	Events(ctx context.Context, after int64, limit int) ([]CardEvent, error)
 	Cursor(ctx context.Context, name string) (int64, error)
 	SetCursor(ctx context.Context, name string, v int64) error
@@ -90,16 +74,6 @@ func gateSaysUnknownCard(raw []byte) bool {
 		Error string `json:"error"`
 	}
 	return json.Unmarshal(raw, &b) == nil && b.Error == gateNotFound
-}
-
-func interruptDetail(raw []byte) string {
-	var b struct {
-		InterruptErrors []string `json:"interrupt_errors"`
-	}
-	if json.Unmarshal(raw, &b) != nil || len(b.InterruptErrors) == 0 {
-		return ""
-	}
-	return " (interrupt errors: " + truncate(strings.Join(b.InterruptErrors, "; "), 200) + ")"
 }
 
 func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (int, error) {
@@ -132,7 +106,7 @@ func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (
 		if resp.StatusCode == http.StatusNotFound && gateSaysUnknownCard(raw) {
 			return resp.StatusCode, errUnknownCard
 		}
-		return resp.StatusCode, fmt.Errorf("kanban gate %s %s returned %d%s", method, path, resp.StatusCode, interruptDetail(raw))
+		return resp.StatusCode, fmt.Errorf("kanban gate %s %s returned %d", method, path, resp.StatusCode)
 	}
 	if out != nil {
 		if err := json.Unmarshal(raw, out); err != nil {
@@ -142,41 +116,10 @@ func (g *gateClient) do(ctx context.Context, method, path string, in, out any) (
 	return resp.StatusCode, nil
 }
 
-func (g *gateClient) CreateRootCard(ctx context.Context, r RootCardRequest) (Card, error) {
-	var c Card
-	_, err := g.do(ctx, http.MethodPost, "/v1/cards", r, &c)
-	return c, err
-}
-
-func (g *gateClient) CardByIssue(ctx context.Context, issueID string) (Card, bool, error) {
-	var c Card
-	_, err := g.do(ctx, http.MethodGet, "/v1/cards?linear_issue="+url.QueryEscape(issueID), nil, &c)
-	if errors.Is(err, errUnknownCard) {
-		return Card{}, false, nil
-	}
-	return c, err == nil, err
-}
-
 func (g *gateClient) Card(ctx context.Context, id string) (Card, error) {
 	var c Card
 	_, err := g.do(ctx, http.MethodGet, "/v1/cards/"+url.PathEscape(id), nil, &c)
 	return c, err
-}
-
-func (g *gateClient) StopCard(ctx context.Context, id, reason string) error {
-	var out struct {
-		InterruptErrors []string `json:"interrupt_errors"`
-		ArchiveErrors   []string `json:"archive_errors"`
-	}
-	_, err := g.do(ctx, http.MethodPost, "/v1/cards/"+url.PathEscape(id)+"/stop", map[string]string{"reason": reason}, &out)
-	if err != nil {
-		return err
-	}
-	if n := len(out.InterruptErrors) + len(out.ArchiveErrors); n > 0 {
-		detail := truncate(strings.Join(append(out.InterruptErrors, out.ArchiveErrors...), "; "), 200)
-		return fmt.Errorf("stop card %s: %d interrupt/archive errors: %s", id, n, detail)
-	}
-	return nil
 }
 
 func (g *gateClient) Events(ctx context.Context, after int64, limit int) ([]CardEvent, error) {

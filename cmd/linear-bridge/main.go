@@ -41,13 +41,12 @@ func main() {
 			recipient: mustEnv("SIGNAL_RECIPIENT"),
 			http:      httpClient,
 		},
-		kanban: &gateClient{
-			base:  mustEnv("KANBAN_GATE_URL"),
-			token: mustEnv("KANBAN_GATE_TOKEN"),
-			http:  newGateHTTPClient(),
-		},
-		ownerID:   mustEnv("LINEAR_OWNER_ID"),
 		appUserID: mustEnv("LINEAR_APP_USER_ID"),
+	}
+	gate := &gateClient{
+		base:  mustEnv("KANBAN_GATE_URL"),
+		token: mustEnv("KANBAN_GATE_TOKEN"),
+		http:  httpClient,
 	}
 	listen := os.Getenv("LISTEN_ADDR")
 	if listen == "" {
@@ -68,7 +67,7 @@ func main() {
 
 	projCtx, stopProject := context.WithCancel(context.Background())
 	projDone := make(chan struct{})
-	proj := newProjector(b.kanban, b.linear, b.notify)
+	proj := newProjector(gate, b.linear, b.notify)
 	go func() {
 		defer close(projDone)
 		proj.run(projCtx)
@@ -105,9 +104,6 @@ func main() {
 	case <-workerDone:
 	case <-ctx.Done():
 		log.Print("linear-bridge: shutdown grace expired with events still queued")
-	}
-	if !b.waitStops(ctx, shutdownGrace) {
-		log.Print("linear-bridge: shutdown grace expired with owner stops in flight")
 	}
 	select {
 	case <-projDone:

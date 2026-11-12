@@ -87,7 +87,6 @@ func TestEvidenceListsGaps(t *testing.T) {
 }
 
 type projKanban struct {
-	fakeKanban
 	events    []CardEvent
 	cards     map[string]Card
 	cursor    int64

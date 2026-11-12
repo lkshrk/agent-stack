@@ -20,16 +20,10 @@ const (
 )
 
 type event struct {
-	Type   string `json:"type"`
-	Action string `json:"action"`
-	Actor  *struct {
-		ID string `json:"id"`
-	} `json:"actor"`
+	Type             string          `json:"type"`
+	Action           string          `json:"action"`
 	WebhookTimestamp int64           `json:"webhookTimestamp"`
 	Data             json.RawMessage `json:"data"`
-	UpdatedFrom      json.RawMessage `json:"updatedFrom"`
-	AgentSession     json.RawMessage `json:"agentSession"`
-	AgentActivity    json.RawMessage `json:"agentActivity"`
 }
 
 func verifySignature(secret, body []byte, header string) bool {

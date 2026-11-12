@@ -129,21 +129,6 @@ func TestGraphQLArchiveSendsMutation(t *testing.T) {
 	}
 }
 
-func TestGraphQLThoughtSendsMutation(t *testing.T) {
-	ts := newTokenServer(t)
-	srv, calls := gqlServer(t, func(_ int, w http.ResponseWriter) {
-		_, _ = fmt.Fprint(w, `{"data":{"agentActivityCreate":{"success":true}}}`)
-	})
-	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
-	if err := g.Thought(context.Background(), "sess-1", "hello"); err != nil {
-		t.Fatal(err)
-	}
-	c := (*calls)[0]
-	if !strings.Contains(c.req.Query, "agentActivityCreate") || !strings.Contains(c.req.Query, `type: "thought"`) || c.req.Variables["s"] != "sess-1" || c.req.Variables["b"] != "hello" {
-		t.Fatalf("call = %+v", c)
-	}
-}
-
 func TestGraphQLSuccessFalseIsError(t *testing.T) {
 	ts := newTokenServer(t)
 	srv, _ := gqlServer(t, func(_ int, w http.ResponseWriter) {
@@ -161,7 +146,7 @@ func TestGraphQLErrorsIsError(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"errors":[{"message":"nope"}]}`)
 	})
 	g := &graphQL{endpoint: srv.URL, tokens: newSource(ts.URL), http: http.DefaultClient}
-	if err := g.Thought(context.Background(), "s", "b"); err == nil || !strings.Contains(err.Error(), "nope") {
+	if err := g.ArchiveIssue(context.Background(), "x"); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -239,8 +224,7 @@ func TestGraphQLIssueQuery(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &req)
 		query, vars = req.Query, req.Variables
-		_, _ = w.Write([]byte(`{"data":{"issue":{"id":"i1","identifier":"ROU-1","title":"T","description":null,
-			"parent":{"id":"p1"},"delegate":{"id":"app1"},
+		_, _ = w.Write([]byte(`{"data":{"issue":{"id":"i1","state":{"id":"s1"},
 			"team":{"id":"tm1","states":{"nodes":[{"id":"s1","name":"Todo","type":"unstarted"}]}}}}}`))
 	}))
 	defer srv.Close()
@@ -250,7 +234,7 @@ func TestGraphQLIssueQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, frag := range []string{"parent{ id }", "team{ id states{ nodes{ id name type } } }", "delegate{ id }"} {
+	for _, frag := range []string{"state{ id }", "team{ id states{ nodes{ id name type } } }"} {
 		if !strings.Contains(query, frag) {
 			t.Fatalf("query missing %q: %s", frag, query)
 		}
@@ -259,11 +243,11 @@ func TestGraphQLIssueQuery(t *testing.T) {
 		t.Fatalf("vars = %v", vars)
 	}
 	want := IssueInfo{
-		ID: "i1", Identifier: "ROU-1", Title: "T", ParentID: "p1", DelegateID: "app1", TeamID: "tm1",
+		ID: "i1", TeamID: "tm1", StateID: "s1",
 		States: []WorkflowState{{ID: "s1", Name: "Todo", Type: "unstarted"}},
 	}
-	if info.ID != want.ID || info.ParentID != want.ParentID || info.DelegateID != want.DelegateID ||
-		info.TeamID != want.TeamID || info.Description != "" || len(info.States) != 1 || info.States[0] != want.States[0] {
+	if info.ID != want.ID || info.TeamID != want.TeamID || info.StateID != want.StateID ||
+		len(info.States) != 1 || info.States[0] != want.States[0] {
 		t.Fatalf("info = %+v", info)
 	}
 }
