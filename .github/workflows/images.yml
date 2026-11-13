@@ -69,30 +69,6 @@ jobs:
           echo "modes=$modes" >>"$GITHUB_OUTPUT"
           jq -r --arg prev "${PREVIOUS:-none}" '"Since \($prev): " + (to_entries | map("\(.key) \(.value)") | join(", "))' <<<"$modes"
 
-  runner:
-    needs: plan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.version || github.sha }}
-      - uses: ./.github/actions/build-image
-        if: fromJSON(needs.plan.outputs.modes)['omnigent-host'] == 'build'
-        with:
-          image: omnigent-host
-          version: ${{ inputs.version }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          app: omnigent-runner
-          # A constant, unlike a commit time, keeps the flattened base layer's digest across releases of the same base.
-          source-date-epoch: "1767225600"
-      - uses: ./.github/actions/retag-image
-        if: fromJSON(needs.plan.outputs.modes)['omnigent-host'] == 'retag'
-        with:
-          image: omnigent-host
-          version: ${{ inputs.version }}
-          previous: ${{ needs.plan.outputs.previous }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
   build:
     needs: plan
     runs-on: ubuntu-latest
@@ -125,18 +101,3 @@ jobs:
           version: ${{ inputs.version }}
           previous: ${{ needs.plan.outputs.previous }}
           token: ${{ secrets.GITHUB_TOKEN }}
-
-  # The server image pins the runner of the same release by tag, so it publishes only after the runner did.
-  server:
-    needs: runner
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.version || github.sha }}
-      - uses: ./.github/actions/build-image
-        with:
-          image: omnigent-server
-          version: ${{ inputs.version }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          app: omnigent

@@ -1,5 +1,4 @@
 [credential "https://github.com"]
-	useHttpPath = true
 	helper =
 	helper = /opt/agent/bin/git-credential-agent
 [user]

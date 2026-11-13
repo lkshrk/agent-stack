@@ -4,8 +4,6 @@ ci: &ci
   - '.github/actions/test-image/**'
   - '.github/changes.yml'
   - '!README.md'
-  - '!bundles/README.md'
-  - '!plugins/README.md'
   - '!cmd/README.md'
 shared: &shared
   - *ci
@@ -20,33 +18,10 @@ go:
   - 'cmd/**'
   - 'go.mod'
   - 'go.sum'
-policies:
+hermes-tests:
   - *ci
-  - 'policies/omnigent/**'
   - 'hermes/**'
   - 'config/hermes/**'
-  - 'bundles/**'
-  - 'config/omnigent/**'
-  - 'images/omnigent-host/codex/**'
-  - 'templates/**'
-  - 'scripts/**'
-  - 'config/public-contributions.yaml'
-  - 'cmd/contribution-approver/forks.json'
-omnigent-host:
-  - *shared
-  - 'policies/omnigent/agent_stack_policies/**'
-  - 'images/omnigent-host/**'
-  - '.claude-plugin/**'
-  - '.agents/**'
-  - 'plugins/**'
-  - 'config/public-contributions.yaml'
-omnigent-server:
-  - *shared
-  - 'policies/omnigent/**'
-  - 'bundles/**'
-  - 'config/omnigent/**'
-  - 'images/omnigent-server/**'
-  - 'config/public-contributions.yaml'
 agent-tools:
   - *shared
   - 'images/agent-tools/**'
@@ -58,20 +33,13 @@ hermes:
   - 'images/hermes/**'
   - 'config/hermes/**'
   - 'hermes/**'
-  - 'policies/omnigent/**'
-  - 'bundles/**'
-  - 'config/omnigent/**'
-  - 'images/omnigent-host/codex/**'
 hermes-webui:
   - *shared
   - 'images/hermes-webui/**'
   - 'images/hermes/bin/**'
+  - 'images/hermes/install-tools'
+  - 'images/hermes/mise.toml'
   - 'images/hermes/profile.d/agent-path.sh'
   - 'images/hermes/gitconfig'
   - 'config/hermes/config.yaml'
   - 'config/hermes/profiles/default/config.yaml'
-public-validator:
-  - *shared
-  - 'images/public-validator/**'
-  - 'policies/omnigent/agent_stack_policies/**'
-  - 'config/public-contributions.yaml'

@@ -1,56 +1,33 @@
 # agent-stack
 
-Everything the h-cloud cluster needs to run its coding agents, built and released from one repository:
+Images, configuration and small tools for **Hermes**, the owner's always-on agent in the h-cloud cluster. Hermes is reached through a Signal group and a web UI, keeps memory in its own home and in OpenViking, runs cron jobs, and keeps h-cloud up to date by working its Renovate PRs (`upgrade-h-cloud`).
 
-- container images (Omnigent runner and server, Hermes, Go tools)
-- Omnigent agent bundles
-- an agent plugin marketplace (`agent-stack`) for Claude Code and Codex
-- small Go services and tools
-- runtime policies fetched by other workloads
-
-Two agents run on this stack:
-
-- **Omnigent** runs coding sessions. Each session is a Kubernetes Job in `omnigent-sandboxes`, started from the runner image. Polly plans and delegates to Claude Code (implementer) and Codex (reviewer); work lands as pull requests.
-- **Hermes** is an always-on general agent reached through a Signal group. It keeps memory in its own home and in OpenViking, and starts Omnigent sessions when code needs to change.
-
-Deployment manifests, secrets, databases and routes live in the h-cloud repository.
+Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`).
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| [`images/`](images/README.md) | Dockerfiles and image assets |
-| [`bundles/`](bundles/README.md) | Omnigent agent bundles (`polly`, `planner`, `security-review`, `documenter`, `infra`) |
-| [`plugins/`](plugins/README.md) | Plugins `runner`, `linear`, `personal` |
-| [`cmd/`](cmd/README.md) | Go programs: `signal-shim`, `token-minter`, `linear-bridge` |
-| [`config/`](config/README.md) | Omnigent server and Hermes configuration baked into images |
-| [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime and the Omnigent policy package baked into the Omnigent images |
-| `.claude-plugin/`, `.agents/plugins/` | Marketplace manifests for Claude Code and Codex |
-| `.github/workflows/` | CI, image build, release and the WoW refresh |
-
-## Plugin marketplace
-
-- Runners: the `runner` plugin is baked into the `omnigent-host` image (`images/omnigent-host/bin/install-claude-plugins`).
-- `linear` and `personal` are installed through apm with `git: lkshrk/agent-stack` and `path: plugins/<name>`.
-- Claude Code on any machine: `claude plugin marketplace add lkshrk/agent-stack`.
+| [`images/`](images/README.md) | Dockerfiles for `hermes`, `hermes-webui` and `agent-tools`, and Hermes' wrappers and tool pins |
+| [`config/`](config/README.md) | Hermes managed config, `SOUL.md` and its single profile `default` with the shipped skills |
+| [`cmd/`](cmd/README.md) | Go program `signal-shim`: Hermes' Signal adapter to signal-cli-rest-api |
+| `hermes/tests/` | Tests for the Hermes config and image |
+| [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime |
 
 ## Credentials
 
-Runners never hold long-lived credentials.
-
-- **Models**: all LLM traffic goes through the LiteLLM gateway with a per-consumer key.
-- **Linear**: agents read through the MCP server `linear_read`. Writes go through `linear_app` as the Linear app "Daedalus", behind the guard in h-cloud.
-- **GitHub**: tokens come from `token-minter`, are mounted as files and expire after an hour; git and `gh` read the current token on every call.
+- **Models**: all LLM traffic goes through the LiteLLM gateway with Hermes' key.
+- **GitHub**: a classic PAT of the bot user `agent-npa` (`repo`, `workflow`, `read:packages`), the SOPS Secret `ai/hermes-github-token` in h-cloud, mounted as a file; git and `gh` read it on every call.
+- **Cluster**: the `hermes` service account reads everything except Secrets and may only request Flux reconciles.
 
 ## Releases
 
-Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a version and builds the images in `images.yml`. Renovate in h-cloud bumps the image tags.
+Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a version and builds the images in `images.yml`. Each released image is deployed through an `image-update` dispatch to h-cloud, which pins the new tag on its `main`.
 
 ## CI
 
 | Workflow | Purpose |
 | --- | --- |
-| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
+| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, the Hermes config tests, and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
 | `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
 | `release.yml` | `semantic-release` on `main`, then calls `images.yml` |
-| `wow-season-updates.yml` | Weekly WoW season refresh with Claude Code. Needs secret `WOW_REFRESH_API_KEY` and variables `WOW_REFRESH_BASE_URL`, `WOW_REFRESH_MODEL`; the key is the LiteLLM key `agent-stack-ci` in the ops-agents team |

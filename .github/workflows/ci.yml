@@ -27,7 +27,7 @@ jobs:
     outputs:
       go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
       images: ${{ steps.images.outputs.images }}
-      policies: ${{ github.event_name != 'pull_request' || steps.filter.outputs.policies == 'true' }}
+      hermes-tests: ${{ github.event_name != 'pull_request' || steps.filter.outputs.hermes-tests == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,12 +36,6 @@ jobs:
       - name: hermes and hermes-webui pin the same Hermes image
         run: |
           [ "$(grep -h '^ARG HERMES_IMAGE=' images/hermes/Dockerfile)" = "$(grep -h '^ARG HERMES_IMAGE=' images/hermes-webui/Dockerfile)" ]
-      - name: omnigent-host and omnigent-server use the same Omnigent version
-        run: |
-          host=$(sed -nE 's/^ARG OMNIGENT_HOST_IMAGE=[^@]*:(v[^:@]+)@.*/\1/p' images/omnigent-host/Dockerfile)
-          server=$(sed -nE 's/^ARG OMNIGENT_SERVER_IMAGE=[^@]*:(v[^:@]+)@.*/\1/p' images/omnigent-server/Dockerfile)
-          echo "omnigent-host ${host:-?}, omnigent-server ${server:-?}"
-          [ -n "$host" ] && [ "$host" = "$server" ]
       - name: Last commit main passed ci on, empty to build everything
         id: before
         if: github.event_name == 'push'
@@ -66,7 +60,7 @@ jobs:
       - name: Images to build, only the changed ones when the changes are known
         id: images
         env:
-          ALL: '["omnigent-host", "omnigent-server", "agent-tools", "hermes", "hermes-webui", "public-validator"]'
+          ALL: '["agent-tools", "hermes", "hermes-webui"]'
           CHANGES: ${{ steps.filter.outputs.changes }}
         run: |
           if [ -n "$CHANGES" ]; then
@@ -82,8 +76,6 @@ jobs:
         with:
           persist-credentials: false
       - run: docker run --rm -v "$PWD:/repo" -w /repo docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
-      - name: actionlint the contribution fork template
-        run: docker run --rm -v "$PWD:/repo" -w /repo docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color templates/contribution-fork/.github/workflows/*.yml
 
   go:
     needs: changes
@@ -100,15 +92,13 @@ jobs:
         with:
           version: v2.15.0
 
-  policies:
+  hermes-tests:
     needs: changes
-    if: needs.changes.outputs.policies == 'true'
+    if: needs.changes.outputs.hermes-tests == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: python3 -m unittest discover -s policies/omnigent/tests -t policies/omnigent -v
       - run: python3 -m unittest discover -s hermes/tests -t hermes -v
-      - run: python3 -m unittest discover -s templates/tests -t . -v
 
   images:
     needs: changes
@@ -158,7 +148,7 @@ jobs:
 
   gate:
     if: always()
-    needs: [changes, actionlint, go, policies, images, images-main]
+    needs: [changes, actionlint, go, hermes-tests, images, images-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job that ran to succeed

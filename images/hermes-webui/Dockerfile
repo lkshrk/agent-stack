@@ -8,7 +8,8 @@ FROM ${HERMES_IMAGE} AS hermes
 FROM ${WEBUI_IMAGE}
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.4
-ARG KUBECTL_VERSION=v1.37.2
+ARG MISE_VERSION=v2026.10.24
+ARG MISE_SHA256=be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
 # Same commit the Hermes plugin catalog pins for openviking.
 ARG OPENVIKING_PLUGIN_SHA=9f150ece247ad683494ab172d738023bd6dc6170
 
@@ -23,10 +24,8 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends jq \
  && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" -o /usr/local/bin/kubectl \
- && curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256" -o /tmp/kubectl.sha256 \
- && echo "$(cat /tmp/kubectl.sha256)  /usr/local/bin/kubectl" | sha256sum -c - \
- && chmod 0755 /usr/local/bin/kubectl && rm /tmp/kubectl.sha256
+RUN --mount=type=bind,source=images/hermes,target=/build \
+    /build/install-tools /build/mise.toml
 
 RUN python3 -m venv /opt/obsidian-wiki \
  && /opt/obsidian-wiki/bin/pip install --no-cache-dir "obsidian-wiki==${OBSIDIAN_WIKI_VERSION}" \
@@ -84,5 +83,8 @@ managed.write_text(hermes_yaml.safe_dump(merged, sort_keys=False, width=2**31 - 
 pa.unlink()
 EOF
 
+# Registry logins stay in the container, never on the backed-up /opt/data volume.
 ENV PATH="/opt/agent/bin:${PATH}" \
-    HERMES_MANAGED_DIR=/etc/hermes
+    HERMES_MANAGED_DIR=/etc/hermes \
+    REGISTRY_AUTH_FILE=/tmp/registry-auth/auth.json \
+    DOCKER_CONFIG=/tmp/docker

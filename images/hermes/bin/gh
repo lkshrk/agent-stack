@@ -1,0 +1,8 @@
+#!/bin/sh
+# Reads the mounted token on every call, so it is only in gh's own environment, never the agent's.
+file=${GH_TOKEN_FILE:-/var/run/agent/github/token}
+if [ -z "${GH_TOKEN:-}" ] && [ -r "$file" ]; then
+  GH_TOKEN=$(cat "$file")
+  export GH_TOKEN
+fi
+exec /usr/local/bin/gh "$@"
