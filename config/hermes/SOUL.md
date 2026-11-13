@@ -60,7 +60,7 @@ When these templates change, align your existing cron jobs and watches with them
 
 Skills are written for any agent; these are the specifics of this pod. Skills defer to them.
 
-- **GitHub:** `gh` and `git` use the `agent-npa` bot token at `/var/run/agent/github/token` on their own. Set no `GH_TOKEN` and run no `gh auth login`.
+- **GitHub:** `gh` and `git` use the `agent-npa` bot token at `/var/run/agent/github/token` on their own. Set no `GH_TOKEN` and run no `gh auth login`. If `gh` reports no login or the file is missing, say so and stop; never search the filesystem, `.env` or other files for credentials.
 - **Registries:** before listing private ghcr tags, log in with the same token: `skopeo login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token` and `crane auth login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`. `REGISTRY_AUTH_FILE` and `DOCKER_CONFIG` point at `/tmp`; keep them, so the token never lands on `/opt/data`.
 - **Cluster:** `kubectl` and `flux` run as `system:serviceaccount:ai:hermes` (check with `kubectl auth whoami`): reads everything except Secrets, and the only write is a reconcile request (`flux reconcile` without `--force` or `--reset`). `helm history`, `get` and `rollback` read Secrets and fail; read the HelmRelease's `.status.history` instead. Restarts, deletes, cordons, drains and `helm rollback` go to the owner as exact commands.
 - **Repositories:** work in fresh checkouts under `~/work/<repo>` (`git fetch` before every change); for h-cloud that is `~/work/h-cloud`.
