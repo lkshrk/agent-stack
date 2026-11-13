@@ -12,5 +12,7 @@ Hermes configuration baked into the `hermes` and `hermes-webui` images.
 Skills come from [lkshrk/useful-skills](https://github.com/lkshrk/useful-skills), cloned at the release in `USEFUL_SKILLS_VERSION` (both Dockerfiles, bumped by Renovate) to `/opt/useful-skills`, read-only. `skills.external_dirs` lists only the skill directories Hermes uses (Hermes scans each entry recursively, so listing a skill's own directory exposes just that skill):
 
 - `upgrade-flux-cluster`: works the open Renovate PRs of `lkshrk/h-cloud`, reading h-cloud's specifics from its `AGENTS.md` ("Upgrade sweeps") and this pod's from `SOUL.md` ("Environment").
+- `upgrade-deps`: dependency upgrades in other repositories, one at a time, gated on each repo's own checks.
+- `wow-help`, `wow-spec`: World of Warcraft answers and spec setups on request over Signal.
 
 A skill of the same name in Hermes' own `/opt/data/skills` shadows a shipped one.

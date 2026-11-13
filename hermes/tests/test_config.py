@@ -17,7 +17,7 @@ CONFIG = REPO / "config" / "hermes"
 PROFILES = CONFIG / "profiles"
 INSTALLED = Path("/opt/agent-stack/hermes-profiles")
 USEFUL_SKILLS = Path("/opt/useful-skills/skills")
-HERMES_SKILLS = ["upgrade-flux-cluster"]
+HERMES_SKILLS = ["upgrade-flux-cluster", "upgrade-deps", "wow-help", "wow-spec"]
 
 PER_PROFILE_KEYS = ("model", "agent", "delegation", "mcp_servers", "plugins", "platform_toolsets", "kanban", "gateway")
 
