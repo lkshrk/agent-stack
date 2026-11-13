@@ -81,6 +81,29 @@ class ConfigTest(unittest.TestCase):
         self.assertRegex(pin, r"^v\d+\.\d+\.\d+@[0-9a-f]{40}$")
         self.assertNotRegex(pin, r"@0{40}$")
 
+    def test_litellm_mcp_include_uses_litellm_tool_names(self):
+        servers = default()["mcp_servers"]
+        self.assertTrue(servers["linear_read"]["tools"]["include"])
+        for server, spec in servers.items():
+            include = (spec.get("tools") or {}).get("include")
+            if include is None or "litellm-proxy" not in spec["url"]:
+                continue
+            self.assertTrue(spec["url"].endswith(f"/mcp/{server}"), server)
+            for name in include:
+                self.assertRegex(name, rf"^{server}-[a-z_]+$", server)
+
+    def test_no_nous_tool_routes(self):
+        cfg = effective()
+        self.assertEqual(cfg["web"], {"backend": "searxng", "keyless_fallback": False, "keyless_rescue": False})
+        self.assertIn("image_gen", cfg["agent"]["disabled_toolsets"])
+        self.assertFalse(cfg["tools"]["connectors"]["enabled"])
+        self.assertNotIn("base_url", cfg["model"])
+
+    def test_compression_fits_the_compression_model(self):
+        cfg = effective()
+        self.assertEqual(cfg["auxiliary"]["compression"]["model"], "anthropic/claude-haiku")
+        self.assertLess(cfg["compression"]["threshold_tokens"], 200_000)
+
     def test_mcp_secrets_are_env_references(self):
         for server, spec in (default().get("mcp_servers") or {}).items():
             for header, value in (spec.get("headers") or {}).items():

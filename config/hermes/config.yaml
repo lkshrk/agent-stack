@@ -20,6 +20,15 @@ auxiliary:
 skills:
   guard_agent_created: true
 
+web:
+  backend: searxng
+  keyless_fallback: false
+  keyless_rescue: false
+
+tools:
+  connectors:
+    enabled: false
+
 approvals:
   mode: smart
   cron_mode: deny
