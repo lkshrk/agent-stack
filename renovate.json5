@@ -27,6 +27,13 @@
     {
       customType: 'regex',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
+      matchStrings: ['ARG USEFUL_SKILLS_VERSION=(?<currentValue>\\S+)'],
+      datasourceTemplate: 'github-tags',
+      depNameTemplate: 'lkshrk/useful-skills',
+    },
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/(^|/)Dockerfile$/'],
       matchStrings: ['ARG OBSIDIAN_WIKI_VERSION=(?<currentValue>\\S+)'],
       datasourceTemplate: 'pypi',
       depNameTemplate: 'obsidian-wiki',

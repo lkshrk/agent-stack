@@ -16,7 +16,8 @@ REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / "config" / "hermes"
 PROFILES = CONFIG / "profiles"
 INSTALLED = Path("/opt/agent-stack/hermes-profiles")
-DEFAULT_SKILLS = INSTALLED / "default" / "skills"
+USEFUL_SKILLS = Path("/opt/useful-skills/skills")
+HERMES_SKILLS = ["upgrade-flux-cluster"]
 
 PER_PROFILE_KEYS = ("model", "agent", "delegation", "mcp_servers", "plugins", "platform_toolsets", "kanban", "gateway")
 
@@ -67,11 +68,15 @@ class ConfigTest(unittest.TestCase):
         for key in PER_PROFILE_KEYS:
             self.assertNotIn(key, cfg, key)
 
-    def test_reads_shipped_skills(self):
-        self.assertEqual(default()["skills"]["external_dirs"], [str(DEFAULT_SKILLS)])
-        for skill in (PROFILES / "default" / "skills").iterdir():
-            text = (skill / "SKILL.md").read_text(encoding="utf-8")
-            self.assertTrue(text.startswith(f"---\nname: {skill.name}\n"), skill.name)
+    def test_reads_only_the_chosen_useful_skills(self):
+        self.assertEqual(default()["skills"]["external_dirs"], [str(USEFUL_SKILLS / s) for s in HERMES_SKILLS])
+        self.assertFalse((PROFILES / "default" / "skills").exists())
+
+    @unittest.skipUnless((REPO / "images").is_dir(), "needs the repository checkout")
+    def test_useful_skills_pin_matches_in_both_images(self):
+        pins = {(REPO / "images" / i / "Dockerfile").read_text().split("ARG USEFUL_SKILLS_VERSION=")[1].split()[0]
+                for i in ("hermes", "hermes-webui")}
+        self.assertEqual(len(pins), 1, pins)
 
     def test_mcp_secrets_are_env_references(self):
         for server, spec in (default().get("mcp_servers") or {}).items():
@@ -102,6 +107,14 @@ class ConfigInImageTest(unittest.TestCase):
 
         self.assertEqual(_deep_merge(copy.deepcopy(default()), managed()), effective())
 
+    def test_useful_skills_installed_read_only(self):
+        for skill in HERMES_SKILLS:
+            text = (USEFUL_SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+            self.assertTrue(text.startswith(f"---\nname: {skill}\n"), skill)
+        self.assertFalse(Path("/opt/useful-skills/.git").exists())
+        for path in [USEFUL_SKILLS, *USEFUL_SKILLS.rglob("*")]:
+            self.assertFalse(path.lstat().st_mode & 0o222 and not path.is_symlink(), path)
+
     def test_shipped_skill_resolves(self):
         import json
         import tempfile
@@ -115,9 +128,11 @@ class ConfigInImageTest(unittest.TestCase):
             os.environ["HERMES_HOME"] = tmp
             try:
                 skill_utils._external_dirs_cache_clear()
-                shipped = json.loads(skill_view("upgrade-h-cloud"))
+                shipped = json.loads(skill_view("upgrade-flux-cluster"))
                 self.assertTrue(shipped.get("success"), shipped)
-                self.assertIn("## Prerequisites", shipped["content"])
+                self.assertIn("## Repository specifics", shipped["content"])
+                hidden = json.loads(skill_view("wow-help"))
+                self.assertFalse(hidden.get("success"), hidden)
             finally:
                 skill_utils._external_dirs_cache_clear()
                 if saved is None:

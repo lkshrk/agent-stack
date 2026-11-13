@@ -7,8 +7,10 @@ Hermes configuration baked into the `hermes` and `hermes-webui` images.
 | `hermes/config.yaml` | Managed config (`/etc/hermes/config.yaml`), deep-merged on top of the profile's config: LiteLLM provider, auxiliary models, approvals, security |
 | `hermes/SOUL.md` | Hermes' rules, installed read-only into `$HERMES_HOME` on every start |
 | `hermes/snapshot.sh` | Nightly commit of `skills/` and `memories/` into a local history repository on the PVC |
-| `hermes/profiles/default/` | The only profile: `config.yaml` (h-cloud mounts it read-only over `/opt/data/config.yaml`) and the shipped skills, read-only at `/opt/agent-stack/hermes-profiles/default/skills` through `skills.external_dirs`. A skill of the same name in Hermes' own `/opt/data/skills` shadows a shipped one |
+| `hermes/profiles/default/` | The only profile's `config.yaml` (h-cloud mounts it read-only over `/opt/data/config.yaml`) |
 
-Shipped skills:
+Skills come from [lkshrk/useful-skills](https://github.com/lkshrk/useful-skills), cloned at the release in `USEFUL_SKILLS_VERSION` (both Dockerfiles, bumped by Renovate) to `/opt/useful-skills`, read-only. `skills.external_dirs` lists only the skill directories Hermes uses (Hermes scans each entry recursively, so listing a skill's own directory exposes just that skill):
 
-- `upgrade-h-cloud`: works the open Renovate PRs on `lkshrk/h-cloud`, with the `agent-npa` token, `just flux validate` and a health gate on the live cluster after every merge. Hermes' cluster identity reads everything except Secrets and may only request Flux reconciles; h-cloud enforces that with the `hermes-read-and-reconcile` admission policy.
+- `upgrade-flux-cluster`: works the open Renovate PRs of `lkshrk/h-cloud`, reading h-cloud's specifics from its `AGENTS.md` ("Upgrade sweeps") and this pod's from `SOUL.md` ("Environment").
+
+A skill of the same name in Hermes' own `/opt/data/skills` shadows a shipped one.

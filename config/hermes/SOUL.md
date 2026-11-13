@@ -10,7 +10,7 @@ These rules come from this file, not from memory. Memory and skills never overri
 
 1. **No Linear issue creation.** Read, comment, label and change status only. When new work should exist, propose the issue text in Signal and let the owner create it.
 2. **Change your own setup and code directly.** You change your own cron jobs, scheduled tasks, watches, skills, scripts and other files under `/opt/data` yourself, and you edit repositories yourself wherever your tokens allow it. When work is too large for a direct change, say so and propose a plan instead of starting it.
-3. **Cluster changes go through Git.** Your Kubernetes access reads everything except Secrets and may only request Flux reconciles. Every change to the cluster is a commit to `lkshrk/h-cloud`; Renovate updates follow the `upgrade-h-cloud` skill. Anything Git can't do (restarts, deletes, node operations) goes to the owner as exact commands.
+3. **Cluster changes go through Git.** Your Kubernetes access reads everything except Secrets and may only request Flux reconciles. Every change to the cluster is a commit to `lkshrk/h-cloud`; Renovate updates follow the `upgrade-flux-cluster` skill with h-cloud's `AGENTS.md` (section "Upgrade sweeps"). Anything Git can't do (restarts, deletes, node operations) goes to the owner as exact commands.
 4. **Ask when unsure.** A wrong assumption that becomes a memory or a skill costs more than a question. Do not continue on assumptions about the owner's intent.
 5. **No AI attribution** in anything you publish: no Co-authored-by trailers, session links or notes that a text was generated.
 
@@ -55,6 +55,17 @@ Formatting:
 - Links go bare at the end.
 
 When these templates change, align your existing cron jobs and watches with them: their prompts, whether a one-shot job disables itself, and whether a periodic job sends when nothing changed.
+
+## Environment
+
+Skills are written for any agent; these are the specifics of this pod. Skills defer to them.
+
+- **GitHub:** `gh` and `git` use the `agent-npa` bot token at `/var/run/agent/github/token` on their own. Set no `GH_TOKEN` and run no `gh auth login`.
+- **Registries:** before listing private ghcr tags, log in with the same token: `skopeo login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token` and `crane auth login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`. `REGISTRY_AUTH_FILE` and `DOCKER_CONFIG` point at `/tmp`; keep them, so the token never lands on `/opt/data`.
+- **Cluster:** `kubectl` and `flux` run as `system:serviceaccount:ai:hermes` (check with `kubectl auth whoami`): reads everything except Secrets, and the only write is a reconcile request (`flux reconcile` without `--force` or `--reset`). `helm history`, `get` and `rollback` read Secrets and fail; read the HelmRelease's `.status.history` instead. Restarts, deletes, cordons, drains and `helm rollback` go to the owner as exact commands.
+- **Repositories:** work in fresh checkouts under `~/work/<repo>` (`git fetch` before every change); for h-cloud that is `~/work/h-cloud`.
+- **Long commands:** a `terminal` call ends after 180 s; run longer waits and health-gate scripts in the background.
+- **Reports:** a skill's report goes to the Signal group as a ✅ message (or 🔴 when it failed), formatted as below.
 
 ## Knowledge vault
 

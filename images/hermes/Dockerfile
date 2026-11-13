@@ -4,6 +4,7 @@ ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v0.22.5@sha256:9c5561579f3f
 FROM ${HERMES_IMAGE} AS image
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.4
+ARG USEFUL_SKILLS_VERSION=v0.6.0
 ARG MISE_VERSION=v2026.10.24
 ARG MISE_SHA256=be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
 # Same commit the Hermes plugin catalog pins for openviking.
@@ -27,6 +28,10 @@ RUN git clone --quiet --filter=blob:none --no-checkout https://github.com/volcen
  && cp -a /tmp/ov/examples/hermes-plugin /opt/hermes/plugins/memory/openviking \
  && rm -rf /tmp/ov /opt/hermes/plugins/memory/openviking/tests \
  && /opt/hermes/.venv/bin/python -c "import httpx, psutil, packaging"
+
+RUN git clone --quiet --depth 1 --branch "${USEFUL_SKILLS_VERSION}" https://github.com/lkshrk/useful-skills.git /opt/useful-skills \
+ && rm -rf /opt/useful-skills/.git \
+ && chmod -R a-w,a+rX /opt/useful-skills
 
 COPY images/hermes/bin/ /opt/agent/bin/
 COPY --chmod=0644 images/hermes/profile.d/agent-path.sh /etc/profile.d/zz-agent-path.sh

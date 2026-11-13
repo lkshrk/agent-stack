@@ -34,9 +34,9 @@ memory:
 skills:
   write_approval: false
   creation_nudge_interval: 15
-  # A same-named skill in /opt/data/skills shadows these.
+  # Only the useful-skills skills Hermes needs; a same-named skill in /opt/data/skills shadows them.
   external_dirs:
-    - /opt/agent-stack/hermes-profiles/default/skills
+    - /opt/useful-skills/skills/upgrade-flux-cluster
 
 kanban:
   dispatch_in_gateway: false
