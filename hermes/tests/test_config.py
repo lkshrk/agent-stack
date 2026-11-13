@@ -17,7 +17,7 @@ CONFIG = REPO / "config" / "hermes"
 PROFILES = CONFIG / "profiles"
 INSTALLED = Path("/opt/agent-stack/hermes-profiles")
 USEFUL_SKILLS = Path("/opt/useful-skills/skills")
-HERMES_SKILLS = ["upgrade-flux-cluster"]
+HERMES_SKILLS = ["upgrade-flux-cluster", "upgrade-deps", "wow-help", "wow-spec"]
 
 PER_PROFILE_KEYS = ("model", "agent", "delegation", "mcp_servers", "plugins", "platform_toolsets", "kanban", "gateway")
 
@@ -134,7 +134,9 @@ class ConfigInImageTest(unittest.TestCase):
                 shipped = json.loads(skill_view("upgrade-flux-cluster"))
                 self.assertTrue(shipped.get("success"), shipped)
                 self.assertIn("## Repository specifics", shipped["content"])
-                hidden = json.loads(skill_view("wow-help"))
+                for name in HERMES_SKILLS:
+                    self.assertTrue(json.loads(skill_view(name)).get("success"), name)
+                hidden = json.loads(skill_view("mac-disk-reclaim"))
                 self.assertFalse(hidden.get("success"), hidden)
             finally:
                 skill_utils._external_dirs_cache_clear()

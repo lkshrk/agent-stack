@@ -37,6 +37,9 @@ skills:
   # Only the useful-skills skills Hermes needs; a same-named skill in /opt/data/skills shadows them.
   external_dirs:
     - /opt/useful-skills/skills/upgrade-flux-cluster
+    - /opt/useful-skills/skills/upgrade-deps
+    - /opt/useful-skills/skills/wow-help
+    - /opt/useful-skills/skills/wow-spec
 
 kanban:
   dispatch_in_gateway: false
