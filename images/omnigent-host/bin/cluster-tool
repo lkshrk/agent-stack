@@ -1,7 +1,0 @@
-#!/bin/sh
-# Agent tool shells don't inherit KUBERNETES_SERVICE_*, so in-cluster access goes through a generated kubeconfig.
-tool=${0##*/}
-if [ -z "${KUBECONFIG:-}" ] && config=$(/opt/agent/bin/agent-kubeconfig 2>/dev/null); then
-  export KUBECONFIG="$config"
-fi
-exec "/opt/agent/cluster-tools/$tool" "$@"

@@ -1,3 +1,0 @@
-#!/bin/sh
-# Login shells lose the Hermes venv from PATH, and with it agent_stack_hermes and hermes_cli.
-exec /opt/hermes/.venv/bin/python -I -m agent_stack_hermes.start "$@"

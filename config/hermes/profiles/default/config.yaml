@@ -1,6 +1,3 @@
-gateway:
-  multiplex_profiles: true
-
 model:
   provider: custom:litellm
   default: smart-auto
@@ -41,14 +38,8 @@ skills:
   external_dirs:
     - /opt/agent-stack/hermes-profiles/default/skills
 
-# The gateway's dispatcher reads these from this profile for every assignee's cards.
 kanban:
-  auto_decompose: false
-  review_dispatch: false
-  failure_limit: 2
-  max_in_progress_per_profile: 3
-  # Workers can assign cards to any profile; default has the write tools, so it never takes cards.
-  dispatch_profiles: [delivery, omnigent-runner]
+  dispatch_in_gateway: false
 
 mcp_servers:
   linear_read:

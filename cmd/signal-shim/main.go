@@ -32,21 +32,16 @@ func main() {
 	if listen == "" {
 		listen = "127.0.0.1:8090"
 	}
-	approvals, err := approvalRouteFromEnv(os.Getenv)
-	if err != nil {
-		log.Fatalf("signal-shim: %v", err)
-	}
-	s := &shim{upstream: upstream, http: &http.Client{Timeout: 60 * time.Second}, approvals: approvals}
+	s := &shim{upstream: upstream, http: &http.Client{Timeout: 60 * time.Second}}
 	srv := &http.Server{Addr: listen, Handler: s.routes(), ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("signal-shim: listening on %s, forwarding to %s, contribution approvals %s", listen, upstream, map[bool]string{true: "on", false: "off"}[approvals != nil])
+	log.Printf("signal-shim: listening on %s, forwarding to %s", listen, upstream)
 	log.Fatal(srv.ListenAndServe())
 }
 
 type shim struct {
-	upstream  string
-	http      *http.Client
-	polls     pollStore
-	approvals *approvalRoute
+	upstream string
+	http     *http.Client
+	polls    pollStore
 }
 
 func (s *shim) routes() http.Handler {
@@ -123,12 +118,6 @@ func (s *shim) events(w http.ResponseWriter, r *http.Request) {
 			_, _ = io.WriteString(w, ": keepalive\n\n")
 			flusher.Flush()
 		case data := <-msgs:
-			if s.approvals != nil {
-				if d, ok := s.approvals.match(data); ok {
-					go s.forwardDecision(d)
-					continue
-				}
-			}
 			// signal-cli-rest-api relays the daemon's notification params ({"envelope":…,"account":…}) unchanged.
 			_, _ = io.WriteString(w, "data: ")
 			_, _ = w.Write(compact(s.withPollVoteText(data)))

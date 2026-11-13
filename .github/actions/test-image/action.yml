@@ -3,7 +3,7 @@ description: Build one image from images/<image>/Dockerfile without publishing i
 
 inputs:
   image:
-    description: Directory under images/, e.g. omnigent-host
+    description: Directory under images/, e.g. hermes
     required: true
   write-cache:
     description: "'true' to log in to GHCR and write the build cache"
@@ -33,32 +33,16 @@ runs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ inputs.token }}
-    - name: Require the upstream base to set no image config the flattened runner drops
-      if: inputs.image == 'omnigent-host'
-      shell: bash
-      run: images/omnigent-host/ci/upstream-config.sh
     - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
       with:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        target: ${{ (startsWith(inputs.image, 'omnigent-') || inputs.image == 'hermes' || inputs.image == 'public-validator') && 'test' || '' }}
+        target: ${{ inputs.image == 'hermes' && 'test' || '' }}
         push: false
         load: ${{ inputs.image == 'hermes-webui' }}
         outputs: ${{ inputs.image != 'hermes-webui' && 'type=cacheonly' || '' }}
         tags: agent-stack/${{ inputs.image }}:ci
-        cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
-    - name: Test a release build of the server, which pins the runner of the same release
-      if: inputs.image == 'omnigent-server'
-      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-      with:
-        context: .
-        file: images/omnigent-server/Dockerfile
-        platforms: linux/amd64
-        target: test
-        push: false
-        outputs: type=cacheonly
-        build-args: AGENT_STACK_VERSION=9.8.7
         cache-from: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache
     - name: Start hermes-webui offline and require a healthy agent
       if: inputs.image == 'hermes-webui'
@@ -80,6 +64,7 @@ runs:
         grep -q 'Dependencies already installed' <(docker logs webui 2>&1)
         grep -q 'Hermes agent critical imports verified' <(docker logs webui 2>&1)
         docker exec -u 10000 webui test -r /etc/hermes/config.yaml
+        docker exec -u 10000 webui bash -lc 'for t in kubectl flux helm yq crane flate just gh rg skopeo; do command -v "$t"; done'
     - name: Write the GHCR build cache
       id: cache
       if: inputs.write-cache == 'true'
@@ -89,7 +74,7 @@ runs:
         context: .
         file: images/${{ inputs.image }}/Dockerfile
         platforms: linux/amd64
-        target: ${{ (startsWith(inputs.image, 'omnigent-') || inputs.image == 'hermes' || inputs.image == 'public-validator') && 'test' || '' }}
+        target: ${{ inputs.image == 'hermes' && 'test' || '' }}
         push: false
         outputs: type=cacheonly
         cache-to: type=registry,ref=ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache,mode=max
@@ -97,7 +82,3 @@ runs:
       if: inputs.write-cache == 'true' && steps.cache.outcome == 'failure'
       shell: bash
       run: echo "::warning title=Build cache not written::ghcr.io/${{ github.repository }}/${{ inputs.image }}:buildcache was not updated; later builds of ${{ inputs.image }} start cold."
-    - name: Runner disk left after the build
-      if: always() && inputs.image == 'omnigent-host'
-      shell: bash
-      run: df -h /

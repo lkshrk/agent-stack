@@ -1,0 +1,24 @@
+#!/bin/sh
+# Installs the h-cloud update tools from mise.toml into /usr/local/bin; mise itself is not left on PATH, so a project .mise.toml can't swap them.
+set -eu
+
+export MISE_DATA_DIR=/opt/mise MISE_CONFIG_DIR=/etc/mise MISE_CACHE_DIR=/tmp/mise-cache \
+  MISE_GLOBAL_CONFIG_FILE=/etc/mise/config.toml MISE_YES=1
+
+apt-get update
+apt-get install -y --no-install-recommends skopeo
+rm -rf /var/lib/apt/lists/*
+
+curl -fsSL "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-x64" -o /tmp/mise
+chmod 0755 /tmp/mise
+install -D -m 0644 "$1" /etc/mise/config.toml
+cd /
+/tmp/mise install
+for bin in kubectl flux helm yq crane flate just gh rg; do
+  ln -sf "$(/tmp/mise which "$bin")" "/usr/local/bin/$bin"
+done
+rm -rf /tmp/mise /tmp/mise-cache /root/.cache
+chmod -R a+rX /opt/mise
+for bin in kubectl flux helm yq crane flate just gh rg skopeo; do
+  command -v "$bin" >/dev/null
+done
