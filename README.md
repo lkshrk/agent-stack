@@ -1,6 +1,6 @@
 # agent-stack
 
-Images, configuration and small tools for **Hermes**, the owner's always-on agent in the h-cloud cluster. Hermes is reached through a Signal group and a web UI, keeps memory in its own home and in OpenViking, runs cron jobs, and keeps h-cloud up to date by working its Renovate PRs (`upgrade-h-cloud`).
+Images, configuration and small tools for **Hermes**, the owner's always-on agent in the h-cloud cluster. Hermes is reached through a Signal group and a web UI, keeps memory in its own home and in OpenViking, runs cron jobs, and keeps h-cloud up to date by working its Renovate PRs (`upgrade-flux-cluster` from [useful-skills](https://github.com/lkshrk/useful-skills)).
 
 Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`).
 
