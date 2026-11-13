@@ -8,7 +8,7 @@ FROM ${HERMES_IMAGE} AS hermes
 FROM ${WEBUI_IMAGE}
 
 ARG OBSIDIAN_WIKI_VERSION=2026.10.4
-ARG USEFUL_SKILLS_VERSION=v0.6.0
+ARG USEFUL_SKILLS_VERSION=v0.6.0@0000000000000000000000000000000000000000
 ARG MISE_VERSION=v2026.10.24
 ARG MISE_SHA256=be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
 # Same commit the Hermes plugin catalog pins for openviking.
@@ -43,7 +43,8 @@ RUN rm -rf /opt/hermes/.venv \
  && rm -rf /tmp/ov /opt/hermes/plugins/memory/openviking/tests \
  && chmod -R a-w /opt/hermes
 
-RUN git clone --quiet --depth 1 --branch "${USEFUL_SKILLS_VERSION}" https://github.com/lkshrk/useful-skills.git /opt/useful-skills \
+RUN git clone --quiet --depth 1 --branch "${USEFUL_SKILLS_VERSION%@*}" https://github.com/lkshrk/useful-skills.git /opt/useful-skills \
+ && test "$(git -C /opt/useful-skills rev-parse HEAD)" = "${USEFUL_SKILLS_VERSION#*@}" \
  && rm -rf /opt/useful-skills/.git \
  && chmod -R a-w,a+rX /opt/useful-skills
 

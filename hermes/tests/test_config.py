@@ -77,6 +77,7 @@ class ConfigTest(unittest.TestCase):
         pins = {(REPO / "images" / i / "Dockerfile").read_text().split("ARG USEFUL_SKILLS_VERSION=")[1].split()[0]
                 for i in ("hermes", "hermes-webui")}
         self.assertEqual(len(pins), 1, pins)
+        self.assertRegex(pins.pop(), r"^v\d+\.\d+\.\d+@[0-9a-f]{40}$")
 
     def test_mcp_secrets_are_env_references(self):
         for server, spec in (default().get("mcp_servers") or {}).items():

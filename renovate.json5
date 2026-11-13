@@ -27,7 +27,7 @@
     {
       customType: 'regex',
       managerFilePatterns: ['/(^|/)Dockerfile$/'],
-      matchStrings: ['ARG USEFUL_SKILLS_VERSION=(?<currentValue>\\S+)'],
+      matchStrings: ['ARG USEFUL_SKILLS_VERSION=(?<currentValue>[^@\\s]+)@(?<currentDigest>[0-9a-f]{40})'],
       datasourceTemplate: 'github-tags',
       depNameTemplate: 'lkshrk/useful-skills',
     },
@@ -58,6 +58,11 @@
       description: 'The mise binary is pinned by checksum in the Dockerfiles; the PR must update MISE_SHA256 too',
       matchDepNames: ['jdx/mise'],
       addLabels: ['checksum-update'],
+      automerge: false,
+    },
+    {
+      description: 'useful-skills text drives Hermes, which holds the agent-npa token; the owner merges these bumps',
+      matchDepNames: ['lkshrk/useful-skills'],
       automerge: false,
     },
     {
