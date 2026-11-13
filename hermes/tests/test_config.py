@@ -19,6 +19,9 @@ INSTALLED = Path("/opt/agent-stack/hermes-profiles")
 USEFUL_SKILLS = Path("/opt/useful-skills/skills")
 HERMES_SKILLS = ["upgrade-flux-cluster", "upgrade-deps", "wow-help", "wow-spec"]
 
+POLICY_KEYS = ("web.backend", "web.keyless_fallback", "web.keyless_rescue", "tools.connectors.enabled", "nous.guest",
+               "agent.disabled_toolsets", "compression.threshold_tokens", "kanban.dispatch_in_gateway")
+
 PER_PROFILE_KEYS = ("model", "agent", "delegation", "mcp_servers", "plugins", "platform_toolsets", "kanban", "gateway")
 
 
@@ -81,6 +84,30 @@ class ConfigTest(unittest.TestCase):
         self.assertRegex(pin, r"^v\d+\.\d+\.\d+@[0-9a-f]{40}$")
         self.assertNotRegex(pin, r"@0{40}$")
 
+    def test_litellm_mcp_include_uses_litellm_tool_names(self):
+        servers = default()["mcp_servers"]
+        self.assertTrue(servers["linear_read"]["tools"]["include"])
+        for server, spec in servers.items():
+            include = (spec.get("tools") or {}).get("include")
+            if include is None or "litellm-proxy" not in spec["url"]:
+                continue
+            self.assertTrue(spec["url"].endswith(f"/mcp/{server}"), server)
+            for name in include:
+                self.assertRegex(name, rf"^{server}-[a-z_]+$", server)
+
+    def test_no_nous_tool_routes(self):
+        cfg = effective()
+        self.assertEqual(cfg["web"], {"backend": "searxng", "keyless_fallback": False, "keyless_rescue": False})
+        self.assertIn("image_gen", cfg["agent"]["disabled_toolsets"])
+        self.assertFalse(cfg["tools"]["connectors"]["enabled"])
+        self.assertFalse(cfg["nous"]["guest"])
+        self.assertNotIn("base_url", cfg["model"])
+
+    def test_compression_fits_the_compression_model(self):
+        cfg = effective()
+        self.assertEqual(cfg["auxiliary"]["compression"]["model"], "anthropic/claude-haiku")
+        self.assertLess(cfg["compression"]["threshold_tokens"], 200_000)
+
     def test_mcp_secrets_are_env_references(self):
         for server, spec in (default().get("mcp_servers") or {}).items():
             for header, value in (spec.get("headers") or {}).items():
@@ -109,6 +136,40 @@ class ConfigInImageTest(unittest.TestCase):
         from hermes_cli.config import _deep_merge
 
         self.assertEqual(_deep_merge(copy.deepcopy(default()), managed()), effective())
+
+    def test_policy_keys_are_hermes_keys(self):
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+        for path in POLICY_KEYS:
+            node = DEFAULT_CONFIG
+            for part in path.split("."):
+                self.assertIn(part, node, path)
+                node = node[part]
+
+    def test_web_search_resolves_to_searxng(self):
+        import tempfile
+
+        from hermes_cli import config as hermes_config
+        from tools import web_tools
+
+        saved = {k: os.environ.get(k) for k in ("HERMES_HOME", "SEARXNG_URL")}
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "config.yaml").write_bytes((PROFILES / "default" / "config.yaml").read_bytes())
+            os.environ.update(HERMES_HOME=tmp, SEARXNG_URL="http://searxng.invalid:8080")
+            try:
+                self.assertEqual(hermes_config.load_config()["web"]["backend"], "searxng")
+                web_tools._ensure_web_plugins_loaded()
+                provider = web_tools._registered_web_provider("searxng")
+                self.assertIsNotNone(provider)
+                self.assertTrue(provider.is_available())
+                self.assertEqual(web_tools._get_search_backend(), "searxng")
+                self.assertFalse(web_tools._managed_web_search())
+            finally:
+                for key, value in saved.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
     def test_useful_skills_installed_read_only(self):
         for skill in HERMES_SKILLS:
