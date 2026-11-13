@@ -29,6 +29,9 @@ tools:
   connectors:
     enabled: false
 
+nous:
+  guest: false
+
 approvals:
   mode: smart
   cron_mode: deny
