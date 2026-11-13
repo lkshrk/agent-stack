@@ -37,6 +37,8 @@ Research decides — never the size of the version jump.
   zero tags:
   `skopeo login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`
   and `crane auth login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`.
+  The image points both at `/tmp` (`REGISTRY_AUTH_FILE`, `DOCKER_CONFIG`);
+  keep those, so the token never lands on `/opt/data`.
 - `kubectl`/`flux` use the `hermes` service account: they read everything
   except Secrets and may only request reconciles (`flux reconcile` without
   `--force`/`--reset`). Check with `kubectl auth whoami`

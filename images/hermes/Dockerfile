@@ -41,8 +41,11 @@ RUN chmod 0755 /opt/agent/bin/* \
 COPY config/hermes/profiles/ /opt/agent-stack/hermes-profiles/
 RUN chmod -R u=rwX,go=rX /opt/agent-stack
 
+# Registry logins stay in the container, never on the backed-up /opt/data volume.
 ENV PATH="/opt/agent/bin:${PATH}" \
-    HERMES_MANAGED_DIR=/etc/hermes
+    HERMES_MANAGED_DIR=/etc/hermes \
+    REGISTRY_AUTH_FILE=/tmp/registry-auth/auth.json \
+    DOCKER_CONFIG=/tmp/docker
 
 FROM image AS test
 COPY hermes/ /src/hermes/

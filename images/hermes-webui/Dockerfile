@@ -83,5 +83,8 @@ managed.write_text(hermes_yaml.safe_dump(merged, sort_keys=False, width=2**31 - 
 pa.unlink()
 EOF
 
+# Registry logins stay in the container, never on the backed-up /opt/data volume.
 ENV PATH="/opt/agent/bin:${PATH}" \
-    HERMES_MANAGED_DIR=/etc/hermes
+    HERMES_MANAGED_DIR=/etc/hermes \
+    REGISTRY_AUTH_FILE=/tmp/registry-auth/auth.json \
+    DOCKER_CONFIG=/tmp/docker

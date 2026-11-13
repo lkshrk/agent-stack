@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 import subprocess
 import tempfile
@@ -41,6 +43,22 @@ class ToolsInImageTest(unittest.TestCase):
             for tool in ("flate", "kubectl"):
                 out = self.login_shell('command -v "$1"', project, tool)
                 self.assertEqual(out.stdout.strip(), f"/usr/local/bin/{tool}", tool)
+
+    def test_registry_logins_stay_off_the_volume(self):
+        self.assertEqual(os.environ["REGISTRY_AUTH_FILE"], "/tmp/registry-auth/auth.json")
+        self.assertEqual(os.environ["DOCKER_CONFIG"], "/tmp/docker")
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"PATH": os.environ["PATH"], "HOME": tmp,
+                   "REGISTRY_AUTH_FILE": f"{tmp}/registry-auth/auth.json", "DOCKER_CONFIG": f"{tmp}/docker"}
+            subprocess.run(["crane", "auth", "login", "ghcr.io", "-u", "agent-npa", "--password-stdin"],
+                           input="token-npa", env=env, capture_output=True, text=True, check=True)
+            self.assertIn("ghcr.io", Path(tmp, "docker", "config.json").read_text())
+            Path(tmp, "registry-auth").mkdir()
+            auth = base64.b64encode(b"agent-npa:fake").decode()
+            Path(tmp, "registry-auth", "auth.json").write_text(json.dumps({"auths": {"ghcr.io": {"auth": auth}}}))
+            out = subprocess.run(["skopeo", "login", "--get-login", "ghcr.io"], env=env, capture_output=True, text=True, check=True)
+            self.assertEqual(out.stdout.strip(), "agent-npa")
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["docker", "registry-auth"])
 
     def test_gh_reads_the_token_file(self):
         with tempfile.TemporaryDirectory() as tmp:
