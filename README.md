@@ -2,7 +2,7 @@
 
 Images, configuration and small tools for **Hermes**, the owner's always-on agent in the h-cloud cluster. Hermes is reached through a Signal group and a web UI, keeps memory in its own home and in OpenViking, runs cron jobs, and keeps h-cloud up to date by working its Renovate PRs (`upgrade-h-cloud`).
 
-Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`, `kubernetes/apps/ai/token-minter`).
+Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`).
 
 ## Layout
 
@@ -10,14 +10,14 @@ Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`
 | --- | --- |
 | [`images/`](images/README.md) | Dockerfiles for `hermes`, `hermes-webui` and `agent-tools`, and Hermes' wrappers and tool pins |
 | [`config/`](config/README.md) | Hermes managed config, `SOUL.md` and its single profile `default` with the shipped skills |
-| [`cmd/`](cmd/README.md) | Go programs: `signal-shim` (Hermes' Signal adapter to signal-cli-rest-api) and `token-minter` (short-lived GitHub tokens through octo-sts) |
+| [`cmd/`](cmd/README.md) | Go program `signal-shim`: Hermes' Signal adapter to signal-cli-rest-api |
 | `hermes/tests/` | Tests for the Hermes config and image |
 | [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime |
 
 ## Credentials
 
 - **Models**: all LLM traffic goes through the LiteLLM gateway with Hermes' key.
-- **GitHub**: `token-minter` writes the `code`, `knowledge` and `hcloud` tokens into `ai/hermes-github-tokens` every 20 minutes; they are mounted as files and expire after an hour, and git and `gh` read the current one on every call.
+- **GitHub**: a classic PAT of the bot user `agent-npa` (`repo`, `workflow`, `read:packages`), the SOPS Secret `ai/hermes-github-token` in h-cloud, mounted as a file; git and `gh` read it on every call.
 - **Cluster**: the `hermes` service account reads everything except Secrets and may only request Flux reconciles.
 
 ## Releases

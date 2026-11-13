@@ -14,6 +14,6 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 
 `kubectl`, `flux` and `helm` use the pod's service account (in-cluster config).
 
-## GitHub tokens
+## GitHub token
 
-h-cloud mounts the token-minter's `hermes-github-tokens` at `/var/run/agent/github` (`code`, `knowledge`, `hcloud`); the files rotate every 20 minutes. `github-token-file <owner>/<repo>` picks one: `HCLOUD_TOKEN_FILE` for `lkshrk/h-cloud`, `KNOWLEDGE_TOKEN_FILE` for `lkshrk/knowledge`, else `GH_TOKEN_FILE` (`code`). The git credential helper `git-credential-agent` asks it per repository, and the `gh` wrapper per call, from `-R`/`--repo`, an `api repos/<owner>/<repo>/…` path or the checkout's `origin`; neither caches a token. The boundary is the token scopes, not the choice.
+h-cloud mounts the `agent-npa` token (Secret `hermes-github-token`) at `/var/run/agent/github/token` (`GH_TOKEN_FILE`). The git credential helper `git-credential-agent` answers github.com requests from it, and the `gh` wrapper sets `GH_TOKEN` only for the `gh` process it starts, reading the file on every call.

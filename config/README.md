@@ -11,4 +11,4 @@ Hermes configuration baked into the `hermes` and `hermes-webui` images.
 
 Shipped skills:
 
-- `upgrade-h-cloud`: works the open Renovate PRs on `lkshrk/h-cloud`, with the `hcloud` token, `just flux validate` and a health gate on the live cluster after every merge. Hermes' cluster identity reads everything except Secrets and may only request Flux reconciles; h-cloud enforces that with the `hermes-read-and-reconcile` admission policy.
+- `upgrade-h-cloud`: works the open Renovate PRs on `lkshrk/h-cloud`, with the `agent-npa` token, `just flux validate` and a health gate on the live cluster after every merge. Hermes' cluster identity reads everything except Secrets and may only request Flux reconciles; h-cloud enforces that with the `hermes-read-and-reconcile` admission policy.

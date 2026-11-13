@@ -42,41 +42,25 @@ class ToolsInImageTest(unittest.TestCase):
                 out = self.login_shell('command -v "$1"', project, tool)
                 self.assertEqual(out.stdout.strip(), f"/usr/local/bin/{tool}", tool)
 
-    def test_token_file_per_repository(self):
-        env = {"PATH": os.environ["PATH"]}
-        cases = {
-            "lkshrk/h-cloud": "/var/run/agent/github/hcloud",
-            "lkshrk/h-cloud.git": "/var/run/agent/github/hcloud",
-            "lkshrk/knowledge": "/var/run/agent/github/knowledge",
-            "routivo/routivo": "/var/run/agent/github/code",
-            "": "/var/run/agent/github/code",
-        }
-        for repo, want in cases.items():
-            out = subprocess.run([BIN / "github-token-file", repo], env=env, capture_output=True, text=True, check=True)
-            self.assertEqual(out.stdout.strip(), want, repo)
-
-    def test_git_credentials_follow_the_repository(self):
+    def test_gh_reads_the_token_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            files = {}
-            for key in ("code", "knowledge", "hcloud"):
-                files[key] = Path(tmp, key)
-                files[key].write_text(f"token-{key}\n")
-            env = {
-                "PATH": os.environ["PATH"],
-                "GH_TOKEN_FILE": str(files["code"]),
-                "KNOWLEDGE_TOKEN_FILE": str(files["knowledge"]),
-                "HCLOUD_TOKEN_FILE": str(files["hcloud"]),
-            }
-            cases = {
-                "lkshrk/h-cloud.git": "token-hcloud",
-                "lkshrk/h-cloud/info/lfs": "token-hcloud",
-                "lkshrk/knowledge": "token-knowledge",
-                "routivo/routivo.git": "token-code",
-            }
-            for path, want in cases.items():
+            token = Path(tmp, "token")
+            token.write_text("token-npa\n")
+            wrapper = Path(tmp, "gh")
+            wrapper.write_text((BIN / "gh").read_text().replace("/usr/local/bin/gh", "/usr/bin/env"))
+            env = {"PATH": "/usr/bin:/bin", "GH_TOKEN_FILE": str(token)}
+            out = subprocess.run(["sh", str(wrapper)], env=env, capture_output=True, text=True, check=True)
+            self.assertIn("GH_TOKEN=token-npa\n", out.stdout)
+
+    def test_git_credentials_from_the_token_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token = Path(tmp, "token")
+            token.write_text("token-npa\n")
+            env = {"PATH": os.environ["PATH"], "GH_TOKEN_FILE": str(token)}
+            for path in ("lkshrk/h-cloud.git", "lkshrk/knowledge", "routivo/routivo.git"):
                 out = subprocess.run([BIN / "git-credential-agent", "get"], input=f"protocol=https\nhost=github.com\npath={path}\n\n",
                                      env=env, capture_output=True, text=True, check=True)
-                self.assertIn(f"password={want}\n", out.stdout, path)
+                self.assertIn("password=token-npa\n", out.stdout, path)
             out = subprocess.run([BIN / "git-credential-agent", "get"], input="protocol=https\nhost=example.com\npath=a/b\n\n",
                                  env=env, capture_output=True, text=True, check=True)
             self.assertEqual(out.stdout, "")

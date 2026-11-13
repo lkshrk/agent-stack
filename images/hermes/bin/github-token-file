@@ -1,7 +1,0 @@
-#!/bin/sh
-# Prints the token file for <owner>/<repo>: the hcloud token for lkshrk/h-cloud, the knowledge token for the vault, else the code token.
-case "${1%.git}" in
-  lkshrk/h-cloud) printf '%s\n' "${HCLOUD_TOKEN_FILE:-/var/run/agent/github/hcloud}" ;;
-  lkshrk/knowledge) printf '%s\n' "${KNOWLEDGE_TOKEN_FILE:-/var/run/agent/github/knowledge}" ;;
-  *) printf '%s\n' "${GH_TOKEN_FILE:-/var/run/agent/github/code}" ;;
-esac

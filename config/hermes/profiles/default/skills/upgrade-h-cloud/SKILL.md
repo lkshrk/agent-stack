@@ -27,15 +27,16 @@ Research decides — never the size of the version jump.
 
 ## Prerequisites
 
-- `gh` and `git` use the `hcloud` token for `lkshrk/h-cloud` on their own
-  (`/var/run/agent/github/hcloud`, rotated every 20 minutes; set no
-  `GH_TOKEN`, run no `gh auth login`); a fresh h-cloud checkout
-  (`git clone https://github.com/lkshrk/h-cloud.git`, then `git fetch` before
-  every PR); `just`, `yq`, `skopeo`, `crane`, `helm`, `flate` are installed.
-- ghcr: no ghcr credential is mounted (GitHub App tokens such as `hcloud`
-  can't read ghcr). Public ghcr packages list anonymously; a private one
-  answers 403, which looks like "zero tags". Never read that as "no new
-  version": name the package as unverified in the PR comment and the report.
+- `gh` and `git` use the `agent-npa` bot token on their own
+  (`/var/run/agent/github/token`; set no `GH_TOKEN`, run no `gh auth login`);
+  a fresh h-cloud checkout (`git clone https://github.com/lkshrk/h-cloud.git`,
+  then `git fetch` before every PR); `just`, `yq`, `skopeo`, `crane`, `helm`,
+  `flate` are installed.
+- `skopeo`/`crane`: log in to ghcr with the GitHub token first — anonymous
+  calls get 403 on private packages and every such ghcr chart silently shows
+  zero tags:
+  `skopeo login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`
+  and `crane auth login ghcr.io -u agent-npa --password-stdin < /var/run/agent/github/token`.
 - `kubectl`/`flux` use the `hermes` service account: they read everything
   except Secrets and may only request reconciles (`flux reconcile` without
   `--force`/`--reset`). Check with `kubectl auth whoami`
@@ -142,7 +143,7 @@ version — an old `clean` verdict is context, not a free pass.
   roll out nothing — check `HelmRelease .status.history[0].chartVersion`.
 - `flux reconcile` is a trigger, never the gate. CI-green or PR-merged is not
   a substitute for the live health gate.
-- ghcr needs auth for private packages; anonymous 403s look like "no tags available".
+- ghcr needs auth for `skopeo`; anonymous 403s look like "no tags available".
 - Renovate presets are fetched from h-cloud `main` per run — push config
   changes before dispatching a targeted run.
 
