@@ -48,6 +48,12 @@
       groupName: 'hermes runtime',
     },
     {
+      description: 'The mise binary is pinned by checksum in the Dockerfiles; the PR must update MISE_SHA256 too',
+      matchDepNames: ['jdx/mise'],
+      addLabels: ['checksum-update'],
+      automerge: false,
+    },
+    {
       description: 'Image inputs ship in the published images, so commit them as fixes to trigger a release',
       matchFileNames: ['**/Dockerfile', 'images/hermes/mise.toml'],
       semanticCommitType: 'fix',
