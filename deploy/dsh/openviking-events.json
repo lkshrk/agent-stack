@@ -1,0 +1,9 @@
+{
+  "description": "Repository event memory. In this account the speaker of user messages is a code repository (its peer); the messages relay a ticket, human comments, code review findings and CI results for work in that repository.\nRecord only events a future ticket in this repository could need: a design or scope decision and its reason, an approach that was tried and rejected, a regression or incident and its root cause, a follow-up that was deliberately deferred, or an ownership or process decision by a person.\nDo not record status or progress notices: CI running or passing, a pull request opened, ready or merged without a decision attached, acknowledgements, bot boilerplate such as link-back comments, or anything the assistant says about its own progress.\nRules and conventions belong in preferences, not here; record the event only when the decision itself matters later.\nEach event is atomic: one decision, rejection, regression or deferral. Name it after what happened, not after the conversation. Convert relative time expressions to dates and use a third-person perspective.",
+  "fields": [
+    {
+      "name": "summary",
+      "description": "One or two sentences with the key fact and its reason: what was decided, rejected, broken or deferred, where in the repository, and why. Use specific year-month-day dates instead of vague terms such as yesterday or last week."
+    }
+  ]
+}
