@@ -38,8 +38,22 @@
       datasourceTemplate: 'pypi',
       depNameTemplate: 'obsidian-wiki',
     },
+    {
+      customType: 'regex',
+      description: 'Versions annotated with a renovate comment in workflow env',
+      managerFilePatterns: ['/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/'],
+      matchStrings: [
+        '#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n\\s*[A-Z_]+:\\s*"?(?<currentValue>v?\\d[\\w.+-]*)',
+      ],
+    },
   ],
   packageRules: [
+    {
+      description: 'LiteLLM version the guardrail tests run against; tracks the image h-cloud deploys, not the github actions group',
+      matchDepNames: ['ghcr.io/berriai/litellm-database'],
+      groupName: 'litellm',
+      pinDigests: false,
+    },
     {
       description: 'Agent runtimes change behaviour between releases; always review',
       matchDepNames: [
