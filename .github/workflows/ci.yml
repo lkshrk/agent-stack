@@ -28,6 +28,7 @@ jobs:
       go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
       images: ${{ steps.images.outputs.images }}
       hermes-tests: ${{ github.event_name != 'pull_request' || steps.filter.outputs.hermes-tests == 'true' }}
+      deploy: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deploy == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -100,6 +101,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m unittest discover -s hermes/tests -t hermes -v
 
+  deploy:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Render each consumer
+        run: for k in deploy/*/kustomization.yaml; do kustomize build "$(dirname "$k")" >/dev/null; done
+      - run: python3 -m unittest discover -s deploy/tests -v
+
   images:
     needs: changes
     if: >-
@@ -148,7 +161,7 @@ jobs:
 
   gate:
     if: always()
-    needs: [changes, actionlint, go, hermes-tests, images, images-main]
+    needs: [changes, actionlint, go, hermes-tests, deploy, images, images-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job that ran to succeed
