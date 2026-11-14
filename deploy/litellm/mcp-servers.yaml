@@ -1,0 +1,97 @@
+---
+# Merged into the litellm-proxy HelmRelease values by valuesFrom; credentials stay os.environ/ references.
+proxy_config:
+  litellm_settings:
+    mcp_aliases:
+      context7: context7
+      linear: linear
+  mcp_servers:
+    context7:
+      allow_all_keys: true
+      description: Context7 library documentation MCP
+      transport: http
+      url: https://mcp.context7.com/mcp
+    home_assistant:
+      access_groups:
+        - hass
+      description: Home Assistant MCP (ha-mcp)
+      transport: http
+      url: http://ha-mcp.smarthome.svc.cluster.local:8086/mcp
+    linear:
+      access_groups:
+        - linear-agents
+      auth_type: bearer_token
+      auth_value: os.environ/LINEAR_API_KEY
+      description: Linear issue tracking MCP
+      transport: http
+      url: https://mcp.linear.app/mcp
+    linear_app:
+      access_groups:
+        - linear-app-agents
+      allowed_tools:
+        - save_issue
+        - save_comment
+        - prepare_file_upload
+        - get_issue
+        - list_issues
+        - list_comments
+        - get_project
+        - list_projects
+        - list_teams
+        - get_team
+        - list_issue_labels
+        - list_issue_statuses
+        - get_issue_status
+        - list_users
+        - get_user
+        - list_milestones
+        - get_milestone
+        - list_cycles
+        - get_document
+        - list_documents
+      auth_type: oauth2
+      client_id: os.environ/LINEAR_APP_CLIENT_ID
+      client_secret: os.environ/LINEAR_APP_CLIENT_SECRET
+      description: Linear as the agent app (sub-issues only, guarded)
+      oauth2_flow: client_credentials
+      scopes:
+        - read,write,app:assignable,app:mentionable
+      token_url: https://api.linear.app/oauth/token
+      transport: http
+      url: https://mcp.linear.app/mcp
+    linear_read:
+      access_groups:
+        - linear-readers
+      allowed_tools:
+        - get_issue
+        - list_issues
+        - list_comments
+        - get_project
+        - list_projects
+        - list_teams
+        - get_team
+        - list_issue_labels
+        - list_issue_statuses
+        - get_issue_status
+        - list_users
+        - get_user
+        - list_milestones
+        - get_milestone
+        - list_cycles
+        - get_document
+        - list_documents
+      auth_type: bearer_token
+      auth_value: os.environ/LINEAR_API_KEY
+      description: Linear read-only MCP (owner key, no write tools listed)
+      transport: http
+      url: https://mcp.linear.app/mcp
+    searxng:
+      allow_all_keys: true
+      description: Web search and page fetch through the LAN SearXNG (mcp-searxng)
+      instructions: |-
+        Use searxng_web_search for current web information. Engines: Brave, Google CSE and Marginalia; safe search is strict.
+        Short keyword queries (e.g. "tokio select cancellation") rank better than full sentences.
+        Keep the default category; categories "it" returns mostly unrelated MDN and Docker Hub pages.
+        Use web_url_read to read a result page before relying on its content.
+      transport: http
+      url: http://mcp-searxng.ai.svc.cluster.local:8080/mcp

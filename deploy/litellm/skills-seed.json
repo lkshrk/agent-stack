@@ -1,0 +1,151 @@
+[
+  {
+    "name": "smart-docs",
+    "source": {
+      "source": "git-subdir",
+      "url": "https://github.com/sopaco/deepwiki-rs",
+      "path": "skills/smart-docs",
+      "ref": "1.6.0",
+      "sha": "6fa1c82302f234b165a85f058a12e140bbb5ce38"
+    },
+    "description": "AI-powered codebase documentation generator: analyzes structure, identifies architecture, creates C4 diagrams, generates technical docs. Subscription-based, no external API costs.",
+    "domain": "Engineering",
+    "namespace": "documentation",
+    "keywords": [
+      "documentation",
+      "architecture",
+      "c4",
+      "codebase",
+      "developer-guide"
+    ]
+  },
+  {
+    "name": "harness",
+    "source": {
+      "source": "github",
+      "repo": "revfactory/harness",
+      "ref": "main",
+      "sha": "92d9f1b29e7af81acebf51a9fcd1832e739a1414"
+    },
+    "description": "Meta-skill: designs domain-specific agent teams",
+    "domain": "Engineering"
+  },
+  {
+    "name": "useful-skills",
+    "source": {
+      "source": "github",
+      "repo": "lkshrk/useful-skills",
+      "ref": "v0.6.0",
+      "sha": "36f406f557790afebac0c9f858de4b2e3da21b60"
+    },
+    "description": "Useful agent skills: Linear issue workflow, dependency upgrades, documentation generation, change tables, macOS maintenance and World of Warcraft planning.",
+    "domain": "Productivity",
+    "keywords": [
+      "linear",
+      "issues",
+      "upgrades",
+      "documentation"
+    ]
+  },
+  {
+    "name": "web-design-guidelines",
+    "source": {
+      "source": "git-subdir",
+      "url": "https://github.com/vercel-labs/agent-skills",
+      "path": "skills/web-design-guidelines",
+      "ref": "main",
+      "sha": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+    },
+    "description": "Reviews UI code against Vercel's Web Interface Guidelines (accessibility, UX, interaction details); fetches the current rules at run time.",
+    "domain": "Engineering",
+    "keywords": [
+      "accessibility",
+      "ux",
+      "design-review"
+    ]
+  },
+  {
+    "name": "svelte",
+    "source": {
+      "source": "git-subdir",
+      "url": "https://github.com/sveltejs/ai-tools",
+      "path": "plugins/claude/svelte",
+      "ref": "@sveltejs/mcp@0.1.30",
+      "sha": "61061d4704a5e61781e6415dd802e9d9aff89dbe"
+    },
+    "description": "Official Svelte plugin: Svelte 5 code-writer and best-practice skills, the Svelte MCP server (npx @sveltejs/mcp) and the Svelte language server (needs svelteserver installed).",
+    "domain": "Engineering",
+    "keywords": [
+      "svelte",
+      "sveltekit",
+      "mcp",
+      "lsp"
+    ]
+  },
+  {
+    "name": "frontend-design",
+    "source": {
+      "source": "git-subdir",
+      "url": "https://github.com/anthropics/claude-plugins-official",
+      "path": "plugins/frontend-design",
+      "ref": "main",
+      "sha": "b5b01ac4f889fec0c4c6bb89f27ca7c8574473f6"
+    },
+    "description": "Anthropic's frontend-design skill: distinctive, production-grade interfaces with high design quality, framework-neutral.",
+    "domain": "Engineering",
+    "keywords": [
+      "frontend",
+      "design",
+      "ui"
+    ]
+  },
+  {
+    "name": "playwright",
+    "source": {
+      "source": "git-subdir",
+      "url": "https://github.com/anthropics/claude-plugins-official",
+      "path": "external_plugins/playwright",
+      "ref": "main",
+      "sha": "b5b01ac4f889fec0c4c6bb89f27ca7c8574473f6"
+    },
+    "description": "Microsoft's Playwright MCP server for browser automation and end-to-end test debugging (runs npx @playwright/mcp@latest).",
+    "domain": "Engineering",
+    "keywords": [
+      "playwright",
+      "browser",
+      "e2e",
+      "mcp"
+    ]
+  },
+  {
+    "name": "caveman",
+    "source": {
+      "source": "github",
+      "repo": "JuliusBrussee/caveman",
+      "ref": "v4.1.0",
+      "sha": "1e91f1306d602d4ca23618701b1185575ae1869b"
+    },
+    "description": "Caveman compressed comms mode for Claude Code",
+    "domain": "Productivity",
+    "keywords": [
+      "prompt-engineering",
+      "claude-code",
+      "tokens"
+    ]
+  },
+  {
+    "name": "matt-skills",
+    "source": {
+      "source": "github",
+      "repo": "mattpocock/skills",
+      "ref": "v1.3.2",
+      "sha": "d1478fcb140db0b93c0c8df17bcfd311844749d0"
+    },
+    "description": "Skills for Real Engineers (mattpocock)",
+    "domain": "Engineering"
+  },
+  {
+    "name": "vercel-skills",
+    "retired": true
+  }
+]

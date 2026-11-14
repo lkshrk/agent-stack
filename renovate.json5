@@ -39,6 +39,16 @@
       depNameTemplate: 'obsidian-wiki',
     },
     {
+      customType: 'jsonata',
+      description: 'Claude Code plugin pins in the LiteLLM skills seed',
+      fileFormat: 'json',
+      managerFilePatterns: ['/(^|/)deploy/litellm/skills-seed\\.json$/'],
+      matchStrings: [
+        // Tagged refs (v1.2.3, 1.2.3, or monorepo tags like @scope/pkg@1.2.3) follow tags; a branch ref follows its head.
+        '$[source.ref and source.sha].( $repo := source.repo ? source.repo : $replace($replace(source.url, "https://github.com/", ""), /\\.git$/, ""); $tagged := $contains(source.ref, /^v?\\d|@v?\\d+\\.\\d/); { "depName": $repo, "packageName": $tagged ? $repo : "https://github.com/" & $repo, "datasource": $tagged ? "github-tags" : "git-refs", "currentValue": source.ref, "currentDigest": source.sha } )',
+      ],
+    },
+    {
       customType: 'regex',
       description: 'Versions annotated with a renovate comment in workflow env',
       managerFilePatterns: ['/(^|/)\\.github/workflows/[^/]+\\.ya?ml$/'],
@@ -48,6 +58,24 @@
     },
   ],
   packageRules: [
+    {
+      description: 'The gateway offers the skills seed plugins to every Claude Code client; the owner merges these bumps',
+      matchManagers: ['custom.jsonata'],
+      matchFileNames: ['deploy/litellm/skills-seed.json'],
+      automerge: false,
+    },
+    {
+      description: 'Branch-tracked Claude Code plugins in the LiteLLM skills seed: their repos move daily, the plugins rarely. Branch heads carry no release timestamp, so no minimum age',
+      matchManagers: ['custom.jsonata'],
+      matchDatasources: ['git-refs'],
+      groupName: 'claude-plugins-branch',
+      schedule: ['* * * * 1'],
+      minimumReleaseAge: null,
+      group: {
+        commitMessageTopic: '{{{groupName}}} group',
+        commitMessageExtra: '',
+      },
+    },
     {
       description: 'LiteLLM version the guardrail tests run against; tracks the image h-cloud deploys, not the github actions group',
       matchDepNames: ['ghcr.io/berriai/litellm-database'],

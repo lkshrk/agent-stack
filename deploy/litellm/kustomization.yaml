@@ -10,6 +10,13 @@ configMapGenerator:
   - name: litellm-request-size-guard
     files:
       - request_size_guard.py
+  - name: litellm-mcp-servers
+    files:
+      - mcp-servers.yaml
+  - name: litellm-skills-seed
+    files:
+      - skills-seed.json
+      - skills-seed.py
 generatorOptions:
   annotations:
     kustomize.toolkit.fluxcd.io/substitute: disabled
