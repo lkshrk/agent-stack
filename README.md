@@ -2,7 +2,7 @@
 
 Images, configuration and small tools for **Hermes**, the owner's always-on agent in the h-cloud cluster. Hermes is reached through a Signal group and a web UI, keeps memory in its own home and in OpenViking, runs cron jobs, and keeps h-cloud up to date by working its Renovate PRs (`upgrade-flux-cluster` from [useful-skills](https://github.com/lkshrk/useful-skills)).
 
-Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`).
+Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`kubernetes/apps/ai/hermes`); h-cloud pulls the agent behaviour under [`deploy/`](deploy/README.md) through Flux.
 
 ## Layout
 
@@ -12,7 +12,8 @@ Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`
 | [`config/`](config/README.md) | Hermes managed config, `SOUL.md` and its single profile `default` with the shipped skills |
 | [`cmd/`](cmd/README.md) | Go program `signal-shim`: Hermes' Signal adapter to signal-cli-rest-api |
 | `hermes/tests/` | Tests for the Hermes config and image |
-| [`policies/`](policies/README.md) | Pointer to the PR-Agent policy, now in h-cloud |
+| [`deploy/`](deploy/README.md) | Agent behaviour h-cloud applies through Flux from `main`: the PR-Agent policy |
+| [`policies/`](policies/README.md) | Pointer to the PR-Agent policy in `deploy/pr-agent/` |
 
 ## Credentials
 
@@ -28,6 +29,6 @@ Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a vers
 
 | Workflow | Purpose |
 | --- | --- |
-| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, the Hermes config tests, and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
+| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, the Hermes config tests, a render and test of `deploy/`, and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
 | `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
 | `release.yml` | `semantic-release` on `main`, then calls `images.yml` |

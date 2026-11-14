@@ -24,6 +24,9 @@ pre-commit:
     hermes-tests:
       glob: "{hermes/**,config/hermes/**}"
       run: python3 -m unittest discover -s hermes/tests -t hermes
+    deploy-tests:
+      glob: "deploy/**"
+      run: python3 -m unittest discover -s deploy/tests
 
 pre-push:
   parallel: true

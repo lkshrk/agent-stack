@@ -18,6 +18,9 @@ go:
   - 'cmd/**'
   - 'go.mod'
   - 'go.sum'
+deploy:
+  - *ci
+  - 'deploy/**'
 hermes-tests:
   - *ci
   - 'hermes/**'
