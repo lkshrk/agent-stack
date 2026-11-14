@@ -1,0 +1,13 @@
+{
+  "description": "Repository convention memory. In this account the speaker of user messages is a code repository (its peer). Those messages relay a ticket, human comments, code review findings and CI results for work in that repository.\nCapture durable, reusable knowledge about how work must be done in this repository: coding conventions, design-system rules, required checks or commands before pushing, review expectations, recurring reviewer findings and how they were resolved, and tooling or deployment constraints.\nRecord a convention only when a message states or demonstrates it as a rule for the repository: a reviewer flags it, a human corrects the work, or CI enforces it. Do not record requirements that apply only to the current ticket.\nIgnore ticket acceptance criteria, one-off instructions, CI progress notices, bot boilerplate and anything the assistant says about itself.\nStore each convention area as a separate memory; do not mix unrelated areas.",
+  "fields": [
+    {
+      "name": "topic",
+      "description": "Convention area, lowercase with underscores, at most 3 words, for example styling_tokens, pre_push_checks, review_expectations, test_coverage, commit_messages.\nThe topic is an identity component together with user. Merge only true aliases for the same convention area; related areas stay separate."
+    },
+    {
+      "name": "content",
+      "description": "Markdown bullets, one per distinct rule: the rule, where it applies (paths, packages, layers), and the reason or source (reviewer finding, human correction, CI check) when given.\nWrite each rule so an agent working on a different ticket in this repository can follow it. Omit ticket IDs, PR numbers, dates and details that only matter for one change.\nExample:\n- Use semantic design tokens for colors and spacing in frontend components; hardcoded rem or hex values are flagged in review."
+    }
+  ]
+}
