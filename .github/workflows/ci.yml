@@ -105,13 +105,24 @@ jobs:
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
+    env:
+      UV_PYTHON: "3.14"
+      # Keep equal to the litellm-database image tag h-cloud deploys.
+      # renovate: datasource=docker depName=ghcr.io/berriai/litellm-database
+      LITELLM_VERSION: v1.109.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: false
+          tool_versions: |
+            github:astral-sh/uv 0.13.8
       - name: Render each consumer
         run: for k in deploy/*/kustomization.yaml; do kustomize build "$(dirname "$k")" >/dev/null; done
-      - run: python3 -m unittest discover -s deploy/tests -v
+      - name: Tests, LiteLLM guardrails against the deployed LiteLLM version
+        run: uv run --no-project --with "litellm==${LITELLM_VERSION#v}" --with httpx --with fastapi python3 -m unittest discover -s deploy/tests -v
 
   images:
     needs: changes

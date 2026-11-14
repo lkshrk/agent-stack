@@ -1,0 +1,16 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ai
+configMapGenerator:
+  - name: litellm-linear-app-guard
+    files:
+      - linear_app_guard.py
+  - name: litellm-request-size-guard
+    files:
+      - request_size_guard.py
+generatorOptions:
+  annotations:
+    kustomize.toolkit.fluxcd.io/substitute: disabled
+  disableNameSuffixHash: true
