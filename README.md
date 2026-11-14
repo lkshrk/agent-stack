@@ -12,7 +12,7 @@ Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`
 | [`config/`](config/README.md) | Hermes managed config, `SOUL.md` and its single profile `default` with the shipped skills |
 | [`cmd/`](cmd/README.md) | Go program `signal-shim`: Hermes' Signal adapter to signal-cli-rest-api |
 | `hermes/tests/` | Tests for the Hermes config and image |
-| [`policies/`](policies/README.md) | PR-Agent policies fetched at runtime |
+| [`policies/`](policies/README.md) | Pointer to the PR-Agent policy, now in h-cloud |
 
 ## Credentials
 
