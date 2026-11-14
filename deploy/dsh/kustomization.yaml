@@ -6,7 +6,9 @@ namespace: dsh-yawn
 configMapGenerator:
   - name: dsh-yawn-agent-config
     files:
+      - mcp-servers.yaml
       - models.yaml
+      - openviking-row.yaml
       - superagent.yaml
 generatorOptions:
   annotations:
