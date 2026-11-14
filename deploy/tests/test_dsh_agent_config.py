@@ -1,4 +1,4 @@
-"""Check the dsh prompts, team skills and model choices against the contract of h-cloud's upsert-patch.mjs and dsh-superagent."""
+"""Check the dsh agent config against the contract of h-cloud's upsert-patch.mjs, upsert-mcp.mjs and dsh-superagent."""
 
 from pathlib import Path
 import re
@@ -7,6 +7,11 @@ import unittest
 import yaml
 
 DSH = Path(__file__).resolve().parents[1] / "dsh"
+LITELLM = Path(__file__).resolve().parents[1] / "litellm"
+ROW_FILES = ("models.yaml", "openviking-row.yaml", "superagent.yaml")
+MCP_ROUTE = re.compile(r"^http://litellm-proxy\.ai\.svc\.cluster\.local:4000/mcp/([A-Za-z0-9_-]+)$")
+SERVER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+MCP_KEYS = {"serverName", "url", "enabled", "offByDefault"}
 PROVIDER = "litellm"
 MODEL_ID = re.compile(r"\b(?:anthropic|openai|moonshot)/[a-z0-9][a-z0-9.-]*[a-z0-9]")
 TEAM_SECTIONS = {"communication", "scope", "delivery"}
@@ -18,7 +23,7 @@ SECRET = re.compile(
     r"sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|lin_(?:api|oauth)_|xox[abp]-|AKIA[0-9A-Z]{16}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]{10,}\.|[A-Za-z0-9+/]{40,}={0,2}"
 )
-SECRET_KEYS = re.compile(r"(?i)secret|token|password|api.?key")
+SECRET_KEYS = re.compile(r"(?i)secret|token(?!s$)|password|api.?key")
 
 
 def load_entries(name):
@@ -51,7 +56,7 @@ def keys(node):
 
 class UpsertContractTest(unittest.TestCase):
     def test_files_are_one_document_with_valid_entries(self):
-        for name in ("models.yaml", "superagent.yaml"):
+        for name in ROW_FILES:
             with self.subTest(file=name):
                 _, documents = load_entries(name)
                 self.assertEqual(len(documents), 1)
@@ -60,7 +65,9 @@ class UpsertContractTest(unittest.TestCase):
                 for entry in entries:
                     self.assertIsInstance(entry["id"], str)
                     self.assertNotIn("delete", entry)
-                    if "config" in entry:
+                    if set(entry) == {"id", "disabled"}:
+                        self.assertIsInstance(entry["disabled"], bool)
+                    elif "config" in entry:
                         self.assertNotIn("path", entry)
                     else:
                         self.assertIsInstance(entry["path"], list)
@@ -68,7 +75,7 @@ class UpsertContractTest(unittest.TestCase):
                         self.assertIn("value", entry)
 
     def test_no_secret_looking_values(self):
-        for name in ("models.yaml", "superagent.yaml"):
+        for name in (*ROW_FILES, "mcp-servers.yaml"):
             text, documents = load_entries(name)
             with self.subTest(file=name):
                 self.assertIsNone(SECRET.search(text))
@@ -145,6 +152,52 @@ class SuperagentTest(unittest.TestCase):
             for model in MODEL_ID.findall(text):
                 with self.subTest(model=model):
                     self.assertIn(model, allowed)
+
+
+class McpServersTest(unittest.TestCase):
+    def setUp(self):
+        _, documents = load_entries("mcp-servers.yaml")
+        self.assertEqual(len(documents), 1)
+        self.servers = documents[0]
+        self.catalogue = yaml.safe_load((LITELLM / "mcp-servers.yaml").read_text())["proxy_config"]["mcp_servers"]
+
+    def test_entries_have_only_upsert_keys(self):
+        self.assertIsInstance(self.servers, list)
+        self.assertTrue(self.servers)
+        for server in self.servers:
+            with self.subTest(server=server.get("serverName")):
+                self.assertLessEqual(set(server), MCP_KEYS)
+                self.assertIsInstance(server.get("enabled", True), bool)
+
+    def test_server_names_are_valid_and_unique(self):
+        names = [server["serverName"] for server in self.servers]
+        self.assertEqual(len(names), len(set(names)))
+        for name in names:
+            with self.subTest(server=name):
+                self.assertRegex(name, SERVER_NAME)
+                self.assertNotIn("__", name)
+                self.assertFalse(name.endswith("_"))
+
+    def test_urls_are_litellm_mcp_routes_of_the_catalogue(self):
+        for server in self.servers:
+            with self.subTest(server=server["serverName"]):
+                match = MCP_ROUTE.match(server["url"])
+                self.assertIsNotNone(match)
+                self.assertIn(match[1], self.catalogue)
+
+
+class OpenVikingRowTest(unittest.TestCase):
+    def setUp(self):
+        self.entries = load_entries("openviking-row.yaml")[1][0]
+
+    def test_only_the_openviking_row(self):
+        self.assertEqual({entry["id"] for entry in self.entries}, {"openviking-memory-runtime"})
+
+    def test_row_is_enabled_with_a_config(self):
+        self.assertIn({"id": "openviking-memory-runtime", "disabled": False}, self.entries)
+        configs = [entry["config"] for entry in self.entries if "config" in entry]
+        self.assertEqual(len(configs), 1)
+        self.assertIsInstance(configs[0], dict)
 
 
 if __name__ == "__main__":

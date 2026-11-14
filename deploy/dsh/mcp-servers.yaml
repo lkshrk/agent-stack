@@ -1,0 +1,11 @@
+---
+# Upserted into /data/.dsh-yawn/mcp.json at every start (bearer token from LITELLM_API_KEY); other servers stay the user's.
+- serverName: linear
+  url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/linear_app
+  enabled: true
+- serverName: context7
+  url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/context7
+  enabled: true
+- serverName: searxng
+  url: http://litellm-proxy.ai.svc.cluster.local:4000/mcp/searxng
+  enabled: true

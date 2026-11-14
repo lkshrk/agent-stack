@@ -1,0 +1,9 @@
+---
+# The OpenViking memory row, upserted by the superagent-plugin init container once the pinned version is installed.
+- id: openviking-memory-runtime
+  config:
+    skipSubagentSessions: true
+    captureToolResults: false
+    recallMaxTokens: 2000
+- id: openviking-memory-runtime
+  disabled: false
