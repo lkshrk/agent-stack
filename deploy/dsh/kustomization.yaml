@@ -8,6 +8,7 @@ configMapGenerator:
     files:
       - mcp-servers.yaml
       - models.yaml
+      - openviking-preferences.json
       - openviking-row.yaml
       - superagent.yaml
 generatorOptions:
