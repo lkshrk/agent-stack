@@ -23,7 +23,7 @@ SECRET = re.compile(
     r"sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|lin_(?:api|oauth)_|xox[abp]-|AKIA[0-9A-Z]{16}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]{10,}\.|[A-Za-z0-9+/]{40,}={0,2}"
 )
-SECRET_KEYS = re.compile(r"(?i)secret|token(?!s$)|password|api.?key")
+SECRET_KEYS = re.compile(r"(?i)secret|(?<!max)token|password|api.?key|bearer")
 
 
 def load_entries(name):
@@ -152,6 +152,16 @@ class SuperagentTest(unittest.TestCase):
             for model in MODEL_ID.findall(text):
                 with self.subTest(model=model):
                     self.assertIn(model, allowed)
+
+
+class SecretKeysTest(unittest.TestCase):
+    def test_pattern_flags_credential_keys_only(self):
+        for key in ("token", "tokens", "refreshTokens", "accessTokens", "authToken", "bearer", "bearerAuth", "apiKey", "password"):
+            with self.subTest(key=key):
+                self.assertIsNotNone(SECRET_KEYS.search(key))
+        for key in ("maxTokens", "recallMaxTokens"):
+            with self.subTest(key=key):
+                self.assertIsNone(SECRET_KEYS.search(key))
 
 
 class McpServersTest(unittest.TestCase):
