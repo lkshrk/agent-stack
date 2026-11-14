@@ -1,0 +1,89 @@
+---
+# Upserted into dsh-superagent's row after h-cloud's superagent-row.yaml, which sets managed without these keys.
+- id: dsh-superagent
+  path: [managed, executor, model]
+  value: {provider: litellm, model: anthropic/claude-opus}
+- id: dsh-superagent
+  path: [managed, executor, modelRules]
+  value:
+    - {label: hard, model: {provider: litellm, model: anthropic/claude-fable}}
+- id: dsh-superagent
+  path: [managed, prompts]
+  value:
+    delivery:
+      append: >-
+        If DSH_SUPERAGENT_LINEAR_MODE is split, this ticket plans a Linear epic: write no code and create no branch or PR.
+        The Linear tools (mcp__linear__*) can register a little after you start: if they are missing, run `sleep 30` in the
+        shell and look again, up to five times, and only then report blocked, naming the missing tools.
+        First list the epic's sub-issues with the Linear tools; if any exist, reply that the epic is already split and
+        report ready. Otherwise read the repository and the epic, plan, then create 2 to 8 sub-issues under the epic
+        (parentId = $DSH_SUPERAGENT_LINEAR_ISSUE), each with a goal, acceptance criteria and test notes. Create them in
+        dependency order and set blockedBy on create to the earlier sub-issues each one needs; leave independent work
+        unrelated so it can run in parallel, because issues cannot be updated afterwards. Do not delegate, assign or label.
+        Reply with the list and report ready.
+        Otherwise each ticket works on its own branch: before your first commit, create agent/$DSH_SUPERAGENT_NAME from the
+        repository's default branch, push it to origin, and open the ticket's PR from it.
+        Before you plan or write code, load the skill dsh-superagent-delivery and follow every step of it, from planning
+        to reporting ready; it holds the definition of done, the review and PR-Agent loop, the screenshot and comment
+        rules and what the PR body must contain.
+        Choose no models for subagents other than anthropic/claude-sonnet, anthropic/claude-fable and anthropic/claude-opus.
+    skills:
+      delivery: |
+        ---
+        name: dsh-superagent-delivery
+        description: How to deliver a ticket - plan, prove each acceptance criterion with tests, get an Opus review, open the PR with the required body, answer the PR-Agent review and attach screenshots.
+        ---
+
+        # Delivering a ticket
+
+        Follow these steps in order. Do not report ready before the last one.
+
+        ## 1. Plan and implement
+
+        - Plan the work and review the result yourself.
+        - Hand each implementation step to a subagent. It runs on anthropic/claude-sonnet unless you choose otherwise.
+        - When the design is unclear or a first attempt failed, have a subagent on anthropic/claude-fable review the plan before going on.
+        - Use no subagent models other than anthropic/claude-sonnet, anthropic/claude-fable and anthropic/claude-opus.
+
+        ## 2. Write almost no code comments
+
+        - None by default.
+        - At most one short line, for a non-obvious fact.
+        - Never a paragraph, never reviewer-talk, never ticket references. That belongs in the PR body.
+
+        ## 3. Definition of done
+
+        Before you open or update the PR:
+
+        - Prove every acceptance criterion of the ticket with a test of the behavior a user or caller sees, not only of the wiring.
+        - When a criterion asks for a test against a real service or backend, do not stub that service in the test.
+        - Run the repository's full test suite, its linters and its type checks. Fix what fails.
+
+        ## 4. Review the diff
+
+        - Have a separate subagent on anthropic/claude-opus review the diff against the ticket: correctness, missing behavior tests, criteria not met, repository conventions.
+        - The reviewer only reports; it does not edit.
+        - Fix its findings, or say in the PR why one does not apply.
+
+        ## 5. Screenshots
+
+        When the change alters what a user sees:
+
+        - Take before and after screenshots at desktop width and at 390 px, and look at them yourself.
+        - When the ticket came from Linear, upload each image with the Linear tool prepare_file_upload (PUT the bytes with the returned headers within 60 seconds) and embed the returned image markdown in your final reply.
+        - Put no screenshots in the repository or the PR.
+
+        ## 6. Open the PR
+
+        Open it from agent/$DSH_SUPERAGENT_NAME, ready for review, not as a draft. The PR body must contain:
+
+        - When the ticket came from a GitHub issue: `Closes #<issue number>` ($DSH_SUPERAGENT_GITHUB_NUMBER), not `Refs`, so merging the PR closes the issue.
+        - When the ticket came from Linear: `Fixes $DSH_SUPERAGENT_LINEAR_ISSUE`, and the issue's link ($DSH_SUPERAGENT_LINEAR_ISSUE_URL) on its own line, so the PR reviewer reads the ticket.
+        - Each acceptance criterion, with the test or check that covers it.
+        - Why any reviewer finding you did not fix does not apply.
+
+        ## 7. Answer the PR-Agent review
+
+        - After opening the PR, wait for the h-cloud-pr-agent review comment. Check every few minutes, up to 20 minutes. It skips drafts and lock-file-only diffs.
+        - Give each finding a verdict: fix it, or reply in the PR why it does not apply.
+        - Only then report ready.

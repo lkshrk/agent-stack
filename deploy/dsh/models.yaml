@@ -1,0 +1,13 @@
+---
+# Upserted into the dsh profile after h-cloud's model-config.yaml, which defines the litellm provider and its models.
+- id: agent-default-model
+  config:
+    provider: litellm
+    model: anthropic/claude-sonnet
+- id: subagent-model-selection-settings
+  config:
+    enabled: true
+    allowedModels:
+      - {provider: litellm, model: anthropic/claude-sonnet}
+      - {provider: litellm, model: anthropic/claude-fable}
+      - {provider: litellm, model: anthropic/claude-opus}
