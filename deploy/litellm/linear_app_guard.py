@@ -12,7 +12,6 @@ class Issue:
     identifier: str
     parent_id: str | None
     creator_id: str | None
-    labels: tuple[str, ...]
     child_count: int
 
 
@@ -58,8 +57,7 @@ READ_TOOLS = frozenset(
 logger = logging.getLogger("LiteLLM Proxy")
 
 LOOKUP_TIMEOUT = 5.0
-GATE_RANK = {"gate:pr": 0, "gate:split": 1, "gate:plan": 2}
-OWNER_ISSUE_KEYS = frozenset({"id", "addLabels", "links", "blocks", "blockedBy", "relatedTo"})
+OWNER_ISSUE_KEYS = frozenset({"id", "links", "blocks", "blockedBy", "relatedTo"})
 FORBIDDEN_UPDATE_KEYS = ("state", "team", "duplicateOf", "template", "labels")
 ASSIGN_KEYS = ("delegate", "delegateId", "assignee", "assigneeId")
 RELATION_KEYS = ("blocks", "blockedBy", "relatedTo", "removeBlocks", "removeBlockedBy", "removeRelatedTo")
@@ -85,43 +83,17 @@ def _label_names(key: str, value) -> tuple[list[str] | None, str | None]:
     return names, None
 
 
-def _reserved_label(names: list[str]) -> str | None:
-    return next((name for name in names if name == "epic" or name.startswith("chain:")), None)
-
-
-def _label_error(args: dict, target: Issue, owner_issue: bool) -> str | None:
+def _label_error(args: dict, keys: tuple[str, ...]) -> str | None:
     if "removeLabels" in args:
         return "label removal not allowed"
-    if "addLabels" not in args:
-        return None
-    names, error = _label_names("addLabels", args["addLabels"])
-    if error:
-        return error
-    if owner_issue:
-        if any(not name.startswith("gate:") for name in names):
-            return "owner issue: only gate labels allowed"
-    elif reserved := _reserved_label(names):
-        return f"label {reserved} not allowed"
-    gates = [name for name in names if name.startswith("gate:")]
-    if any(name not in GATE_RANK for name in gates):
-        return "unknown gate label"
-    current = max((GATE_RANK[n] for n in map(_norm, target.labels) if n in GATE_RANK), default=GATE_RANK["gate:plan"])
-    if any(GATE_RANK[name] < current for name in gates):
-        return "gate cannot be lowered"
-    return None
-
-
-def _create_label_error(args: dict) -> str | None:
-    for key in ("labels", "addLabels"):
+    for key in keys:
         if key not in args:
             continue
         names, error = _label_names(key, args[key])
         if error:
             return error
-        if any(name.startswith("gate:") for name in names):
-            return "gate labels on create are owner-only"
-        if reserved := _reserved_label(names):
-            return f"label {reserved} not allowed"
+        if "epic" in names:
+            return "label epic not allowed"
     return None
 
 
@@ -241,7 +213,7 @@ async def _create(args: dict, lookup: Lookup, policy: Policy) -> str | None:
     for key in ("template", "state", "duplicateOf"):
         if key in args:
             return f"{key} not allowed"
-    error = _create_label_error(args)
+    error = _label_error(args, ("labels", "addLabels"))
     if error:
         return error
     refs, error = _relation_refs(args)
@@ -268,7 +240,7 @@ async def _update(args: dict, lookup: Lookup, policy: Policy) -> str | None:
     for key in FORBIDDEN_UPDATE_KEYS:
         if key in args:
             return f"{key} not allowed"
-    error = _label_error(args, target, owner_issue)
+    error = _label_error(args, ("addLabels",))
     if error:
         return error
     refs, error = _relation_refs(args)
@@ -342,7 +314,7 @@ GRAPHQL_URL = "https://api.linear.app/graphql"
 GRAPHQL_TIMEOUT = 4.0
 ISSUE_QUERY = (
     "query($id:String!){ issue(id:$id){ id identifier parent{ id } creator{ id } "
-    "labels{ nodes{ name } } children(first:50){ nodes{ id } } } }"
+    "children(first:50){ nodes{ id } } } }"
 )
 SERVER_NAME = "linear_app"
 
@@ -371,7 +343,6 @@ class GraphQLLookup:
             identifier=node["identifier"],
             parent_id=(node["parent"] or {}).get("id"),
             creator_id=(node["creator"] or {}).get("id"),
-            labels=tuple(label["name"] for label in node["labels"]["nodes"]),
             child_count=len(node["children"]["nodes"]),
         )
 
