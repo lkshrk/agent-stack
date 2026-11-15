@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sends or closes a Signal poll through the signal-shim sidecar; <chat> is `group:<id>` or a phone number.
+# Sends or closes a Signal poll through the Signal hub's signal-cli endpoint; <chat> is `group:<id>` or a phone number.
 set -euo pipefail
 
 usage() {
@@ -15,7 +15,7 @@ rpc() {
   fi
   resp=$(jq -nc --arg m "$method" --argjson p "$params" '{jsonrpc: "2.0", method: $m, params: $p, id: "signal-poll"}' \
     | curl -fsS --max-time 60 -H 'Content-Type: application/json' --data-binary @- \
-      "${SIGNAL_HTTP_URL:-http://127.0.0.1:8090}/api/v1/rpc")
+      "${SIGNAL_HTTP_URL:-http://signal-hub.tools.svc.cluster.local:8091}/api/v1/rpc")
   if jq -e '.error' <<<"$resp" >/dev/null; then
     echo "signal-poll: $(jq -r '.error.message // .error' <<<"$resp")" >&2
     exit 1
