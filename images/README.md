@@ -4,7 +4,6 @@ Built from the repository root (`docker build -f images/<name>/Dockerfile .`) an
 
 | Image | Contents |
 | --- | --- |
-| `agent-tools/` | The Go programs from `cmd/` on distroless |
 | `hermes/` | Hermes with its managed configuration and profile from `config/hermes/`, git, the vault tooling and the h-cloud update tools |
 | `hermes-webui/` | Hermes web UI; pins the same Hermes image as `hermes/` (checked in CI) and ships the same tools, since it runs the agent in-process |
 

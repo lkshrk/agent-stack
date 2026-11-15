@@ -75,10 +75,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [agent-tools, hermes, hermes-webui]
+        image: [hermes, hermes-webui]
         include:
-          - image: agent-tools
-            app: agent-tools
           - image: hermes
             app: hermes
           - image: hermes-webui
