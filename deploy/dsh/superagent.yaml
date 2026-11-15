@@ -15,12 +15,12 @@
         If DSH_SUPERAGENT_LINEAR_MODE is split, this ticket plans a Linear epic: write no code and create no branch or PR.
         The Linear tools (mcp__linear__*) can register a little after you start: if they are missing, run `sleep 30` in the
         shell and look again, up to five times, and only then report blocked, naming the missing tools.
-        First list the epic's sub-issues with the Linear tools; if any exist, reply that the epic is already split and
-        report ready. Otherwise read the repository and the epic, plan, then create 2 to 8 sub-issues under the epic
+        First list the epic's sub-issues with the Linear tools; if any exist, say in your orchestrator_report that the
+        epic is already split and report ready. Otherwise read the repository and the epic, plan, then create 2 to 8 sub-issues under the epic
         (parentId = $DSH_SUPERAGENT_LINEAR_ISSUE), each with a goal, acceptance criteria and test notes. Create them in
         dependency order and set blockedBy on create to the earlier sub-issues each one needs; leave independent work
         unrelated so it can run in parallel, because issues cannot be updated afterwards. Do not delegate, assign or label.
-        Reply with the list and report ready.
+        Put the list in your orchestrator_report and report ready.
         Otherwise each ticket works on its own branch: before your first commit, create agent/$DSH_SUPERAGENT_NAME from the
         repository's default branch, push it to origin, and open the ticket's PR from it.
         Before you plan or write code, load the skill dsh-superagent-delivery and follow every step of it, from planning
@@ -70,8 +70,9 @@
         When the change alters what a user sees:
 
         - Take before and after screenshots at desktop width and at 390 px, and look at them yourself.
-        - When the ticket came from Linear, upload each image with the Linear tool prepare_file_upload (PUT the bytes with the returned headers within 60 seconds) and embed the returned image markdown in your final reply.
+        - When the ticket came from Linear, upload each image with the Linear tool prepare_file_upload (PUT the bytes with the returned headers within 60 seconds) and put the returned image markdown in your orchestrator_report. You post no Linear reply yourself: the orchestrator builds the ticket's Linear session reply from that report and posts it only after you report ready.
         - Put no screenshots in the repository or the PR.
+        - Never write in a PR body, PR comment or anywhere else that the screenshots are already in Linear. If a reviewer asks, say they will appear in the Linear session reply once the ticket reports ready.
 
         ## 6. Open the PR
 
