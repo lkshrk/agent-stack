@@ -43,3 +43,4 @@ security:
 
 terminal:
   backend: local
+  env_passthrough: [SIGNAL_HTTP_URL]
