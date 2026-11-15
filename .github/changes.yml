@@ -4,7 +4,6 @@ ci: &ci
   - '.github/actions/test-image/**'
   - '.github/changes.yml'
   - '!README.md'
-  - '!cmd/README.md'
 shared: &shared
   - *ci
   - '.github/workflows/images.yml'
@@ -13,11 +12,6 @@ shared: &shared
   - '.github/actions/retag-image/**'
   - '.github/scripts/image-modes.sh'
   - '.dockerignore'
-go:
-  - *ci
-  - 'cmd/**'
-  - 'go.mod'
-  - 'go.sum'
 deploy:
   - *ci
   - 'deploy/**'
@@ -25,12 +19,6 @@ hermes-tests:
   - *ci
   - 'hermes/**'
   - 'config/hermes/**'
-agent-tools:
-  - *shared
-  - 'images/agent-tools/**'
-  - 'cmd/**'
-  - 'go.mod'
-  - 'go.sum'
 hermes:
   - *shared
   - 'images/hermes/**'

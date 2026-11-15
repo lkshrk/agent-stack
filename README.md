@@ -8,9 +8,8 @@ Deployment manifests, secrets, RBAC and routes live in the h-cloud repository (`
 
 | Path | Contents |
 | --- | --- |
-| [`images/`](images/README.md) | Dockerfiles for `hermes`, `hermes-webui` and `agent-tools`, and Hermes' wrappers and tool pins |
+| [`images/`](images/README.md) | Dockerfiles for `hermes` and `hermes-webui`, and Hermes' wrappers and tool pins |
 | [`config/`](config/README.md) | Hermes managed config, `SOUL.md` and its single profile `default` with the shipped skills |
-| [`cmd/`](cmd/README.md) | Go program `signal-shim`: Hermes' Signal adapter to signal-cli-rest-api |
 | `hermes/tests/` | Tests for the Hermes config and image |
 | [`deploy/`](deploy/README.md) | Agent behaviour h-cloud applies through Flux from `main`: the PR-Agent policy and the LiteLLM guardrails |
 | [`policies/`](policies/README.md) | Pointer to the PR-Agent policy in `deploy/pr-agent/` |
@@ -29,6 +28,6 @@ Pushes to `main` run `semantic-release` (after `ci` succeeds), which tags a vers
 
 | Workflow | Purpose |
 | --- | --- |
-| `ci.yml` | actionlint, `go vet`, `go test -race`, golangci-lint, the Hermes config tests, a render and test of `deploy/` (LiteLLM guardrails against the pinned LiteLLM version), and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
+| `ci.yml` | actionlint, the Hermes config tests, a render and test of `deploy/` (LiteLLM guardrails against the pinned LiteLLM version), and an image build with each image's tests: changed images on pull requests, every image on `main` and on manual runs. Pushes to `main` write the GHCR build cache `<image>:buildcache` |
 | `images.yml` | Builds and pushes `ghcr.io/lkshrk/agent-stack/<image>` for a release tag |
 | `release.yml` | `semantic-release` on `main`, then calls `images.yml` |

@@ -25,7 +25,6 @@ jobs:
       contents: read
       actions: read
     outputs:
-      go: ${{ github.event_name != 'pull_request' || steps.filter.outputs.go == 'true' }}
       images: ${{ steps.images.outputs.images }}
       hermes-tests: ${{ github.event_name != 'pull_request' || steps.filter.outputs.hermes-tests == 'true' }}
       deploy: ${{ github.event_name != 'pull_request' || steps.filter.outputs.deploy == 'true' }}
@@ -61,7 +60,7 @@ jobs:
       - name: Images to build, only the changed ones when the changes are known
         id: images
         env:
-          ALL: '["agent-tools", "hermes", "hermes-webui"]'
+          ALL: '["hermes", "hermes-webui"]'
           CHANGES: ${{ steps.filter.outputs.changes }}
         run: |
           if [ -n "$CHANGES" ]; then
@@ -77,21 +76,6 @@ jobs:
         with:
           persist-credentials: false
       - run: docker run --rm -v "$PWD:/repo" -w /repo docker.io/rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
-
-  go:
-    needs: changes
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: go vet ./...
-      - run: go test -race ./...
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.15.0
 
   hermes-tests:
     needs: changes
@@ -172,7 +156,7 @@ jobs:
 
   gate:
     if: always()
-    needs: [changes, actionlint, go, hermes-tests, deploy, images, images-main]
+    needs: [changes, actionlint, hermes-tests, deploy, images, images-main]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job that ran to succeed

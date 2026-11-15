@@ -3,9 +3,6 @@ pre-commit:
   commands:
     gitleaks:
       run: gitleaks git --staged --redact --no-banner
-    gofmt:
-      glob: "*.go"
-      run: 'test -z "$(gofmt -l {staged_files})" || { gofmt -l {staged_files}; echo "run gofmt -w on these files"; exit 1; }'
     shellcheck:
       glob: "{images/*/bin/*,images/*/cont-init.d/*,images/*/profile.d/*.sh,images/hermes/install-tools,config/**/*.sh}"
       run: shellcheck -S warning {staged_files}
@@ -27,9 +24,3 @@ pre-commit:
     deploy-tests:
       glob: "deploy/**"
       run: python3 -m unittest discover -s deploy/tests
-
-pre-push:
-  parallel: true
-  commands:
-    go:
-      run: go vet ./... && go test ./...
