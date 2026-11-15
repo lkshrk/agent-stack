@@ -75,7 +75,7 @@
 
         ## 6. Open the PR
 
-        Open it from agent/$DSH_SUPERAGENT_NAME, ready for review, not as a draft. The PR body must contain:
+        Open it from agent/$DSH_SUPERAGENT_NAME, ready for review, not as a draft. Its title is a conventional commit subject; when the ticket came from Linear, end it with ` ($DSH_SUPERAGENT_LINEAR_ISSUE)`, for example `docs(readme): add license section (XXX-431)`. The PR body must contain:
 
         - When the ticket came from a GitHub issue: `Closes #<issue number>` ($DSH_SUPERAGENT_GITHUB_NUMBER), not `Refs`, so merging the PR closes the issue.
         - When the ticket came from Linear: `Fixes $DSH_SUPERAGENT_LINEAR_ISSUE`, and the issue's link ($DSH_SUPERAGENT_LINEAR_ISSUE_URL) on its own line, so the PR reviewer reads the ticket.
