@@ -96,7 +96,6 @@ terminal:
   lifetime_seconds: 300
   process_wait_auto_notify: true
   client_env_passthrough: []
-  env_passthrough: [SIGNAL_HTTP_URL]
   container_cpu: 1
   container_memory: 5120
   container_disk: 51200
