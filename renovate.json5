@@ -97,9 +97,8 @@
       groupName: 'hermes runtime',
     },
     {
-      description: 'The mise binary is pinned by checksum in the Dockerfiles; the PR must update MISE_SHA256 too',
+      description: 'mise runs as root at image build time; the owner merges these bumps',
       matchDepNames: ['jdx/mise'],
-      addLabels: ['checksum-update'],
       automerge: false,
     },
     {
