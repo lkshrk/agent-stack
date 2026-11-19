@@ -15,13 +15,12 @@ APP = "u-app"
 POLICY = guard.Policy(owner_id=OWNER, app_user_id=APP)
 
 
-def issue(n, parent=None, creator=OWNER, labels=(), children=0):
+def issue(n, parent=None, creator=OWNER, children=0):
     return guard.Issue(
         id=f"uuid-{n}",
         identifier=f"ROU-{n}",
         parent_id=f"uuid-{parent}" if parent is not None else None,
         creator_id=creator,
-        labels=tuple(labels),
         child_count=children,
     )
 
@@ -222,7 +221,7 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_update_remove_labels_denied(self):
-        for name in ("gate:pr", "Gate:PR", " risk:high", "bug"):
+        for name in ("bug", " Bug ", "epic"):
             with self.subTest(name=name):
                 await self.assertDenied(
                     "label removal", "save_issue", {"id": "ROU-2", "removeLabels": [name]}, issue(1), issue(2, 1, APP)
@@ -230,17 +229,6 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_remove_labels_on_owner_issue_denied(self):
         await self.assertDenied("owner issue", "save_issue", {"id": "ROU-1", "removeLabels": ["bug"]}, issue(1))
-
-    async def test_update_lower_gate_case_and_space_variants_denied(self):
-        for name in ("Gate:PR", " gate:pr", "GATE:SPLIT"):
-            with self.subTest(name=name):
-                await self.assertDenied(
-                    "gate",
-                    "save_issue",
-                    {"id": "ROU-2", "addLabels": [name]},
-                    issue(1),
-                    issue(2, 1, APP, labels=("Gate:Plan",)),
-                )
 
     async def test_update_add_label_uuid_denied(self):
         await self.assertDenied(
@@ -253,18 +241,11 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_add_labels_string_denied(self):
         await self.assertDenied(
-            "addLabels", "save_issue", {"id": "ROU-2", "addLabels": "bug,gate:plan"}, issue(1), issue(2, 1, APP)
+            "addLabels", "save_issue", {"id": "ROU-2", "addLabels": "bug,feature"}, issue(1), issue(2, 1, APP)
         )
 
-    async def test_update_add_unknown_gate_denied(self):
-        await self.assertDenied(
-            "gate", "save_issue", {"id": "ROU-2", "addLabels": ["gate:other"]}, issue(1), issue(2, 1, APP)
-        )
-
-    async def test_update_add_risk_and_plain_labels_allowed(self):
-        await self.assertAllowed(
-            "save_issue", {"id": "ROU-2", "addLabels": ["risk:high", "bug"]}, issue(1), issue(2, 1, APP)
-        )
+    async def test_update_add_plain_labels_allowed(self):
+        await self.assertAllowed("save_issue", {"id": "ROU-2", "addLabels": ["bug"]}, issue(1), issue(2, 1, APP))
 
     async def test_update_reparent_with_children_denied(self):
         await self.assertDenied(
@@ -299,48 +280,6 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(ValueError):
                     guard.Policy(owner_id=owner, app_user_id=app)
 
-    async def test_update_lower_gate_denied(self):
-        await self.assertDenied(
-            "gate",
-            "save_issue",
-            {"id": "ROU-2", "addLabels": ["gate:pr"]},
-            issue(1),
-            issue(2, 1, APP, labels=("gate:plan",)),
-        )
-
-    async def test_update_raise_gate_allowed(self):
-        await self.assertAllowed(
-            "save_issue",
-            {"id": "ROU-2", "addLabels": ["gate:plan"]},
-            issue(1),
-            issue(2, 1, APP, labels=("gate:pr",)),
-        )
-
-    async def test_update_add_gate_without_current_defaults_to_plan(self):
-        for gate in ("gate:pr", "gate:split"):
-            await self.assertDenied(
-                "gate", "save_issue", {"id": "ROU-2", "addLabels": [gate]}, issue(1), issue(2, 1, APP)
-            )
-        await self.assertAllowed(
-            "save_issue", {"id": "ROU-2", "addLabels": ["gate:plan"]}, issue(1), issue(2, 1, APP)
-        )
-
-    async def test_update_non_gate_current_labels_default_to_plan(self):
-        await self.assertDenied(
-            "gate",
-            "save_issue",
-            {"id": "ROU-2", "addLabels": ["gate:pr"]},
-            issue(1),
-            issue(2, 1, APP, labels=("bug",)),
-        )
-
-    async def test_create_gate_label_denied(self):
-        for key in ("labels", "addLabels"):
-            for gate in ("gate:plan", " Gate:PR "):
-                await self.assertDenied(
-                    "gate", "save_issue", {"title": "t", "parentId": "ROU-1", key: [gate]}, issue(1)
-                )
-
     async def test_create_plain_labels_allowed(self):
         await self.assertAllowed("save_issue", {"title": "t", "parentId": "ROU-1", "labels": ["bug"]}, issue(1))
 
@@ -353,7 +292,7 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_create_malformed_labels_denied(self):
-        for value in ("gate:pr", [1], None, {"a": "b"}):
+        for value in ("bug", [1], None, {"a": "b"}):
             await self.assertDenied(
                 "labels", "save_issue", {"title": "t", "parentId": "ROU-1", "labels": value}, issue(1)
             )
@@ -365,20 +304,10 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
     async def test_update_owner_issue_description_denied(self):
         await self.assertDenied("owner issue", "save_issue", {"id": "ROU-1", "description": "x"}, issue(1))
 
-    async def test_update_owner_issue_non_gate_label_denied(self):
-        for labels in (["bug"], ["gate:split", "risk:high"], ["epic"]):
+    async def test_update_owner_issue_labels_denied(self):
+        for labels in (["bug"], ["epic"]):
             with self.subTest(labels=labels):
-                await self.assertDenied(
-                    "only gate labels", "save_issue", {"id": "ROU-1", "addLabels": labels}, issue(1, labels=("gate:pr",))
-                )
-
-    async def test_update_owner_issue_gate_label_allowed(self):
-        await self.assertAllowed(
-            "save_issue", {"id": "ROU-1", "addLabels": ["gate:split"]}, issue(1, labels=("gate:pr",))
-        )
-
-    async def test_update_owner_issue_lower_gate_still_denied(self):
-        await self.assertDenied("gate", "save_issue", {"id": "ROU-1", "addLabels": ["gate:split"]}, issue(1))
+                await self.assertDenied("owner issue", "save_issue", {"id": "ROU-1", "addLabels": labels}, issue(1))
 
     async def test_update_owner_issue_links_allowed(self):
         await self.assertAllowed(
@@ -414,14 +343,14 @@ class GuardTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_reserved_labels_denied(self):
         for key in ("labels", "addLabels"):
-            for name in ("epic", "EPIC", " Epic ", "chain:serial", "Chain:Anything"):
+            for name in ("epic", "EPIC", " Epic "):
                 with self.subTest(key=key, name=name):
                     await self.assertDenied(
                         "not allowed", "save_issue", {"title": "t", "parentId": "ROU-1", key: ["bug", name]}, issue(1)
                     )
 
     async def test_update_app_issue_reserved_labels_denied(self):
-        for name in ("epic", "EPIC", "chain:serial"):
+        for name in ("epic", "EPIC", " Epic "):
             with self.subTest(name=name):
                 await self.assertDenied(
                     "not allowed", "save_issue", {"id": "ROU-2", "addLabels": [name]}, issue(1), issue(2, 1, APP)
@@ -611,7 +540,6 @@ def graphql_issue(**overrides):
         "identifier": "ROU-1",
         "parent": {"id": "uuid-0"},
         "creator": {"id": OWNER},
-        "labels": {"nodes": [{"name": "gate:plan"}]},
         "children": {"nodes": [{"id": "c1"}, {"id": "c2"}]},
     }
     node.update(overrides)
@@ -625,7 +553,7 @@ def lookup_with(handler):
 
 @unittest.skipIf(httpx is None, "litellm wiring needs httpx and fastapi")
 class GraphQLLookupTest(unittest.IsolatedAsyncioTestCase):
-    async def test_maps_issue_with_label_names(self):
+    async def test_maps_issue(self):
         seen = {}
 
         def handler(request):
@@ -635,10 +563,9 @@ class GraphQLLookupTest(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=graphql_issue())
 
         found = await lookup_with(handler).issue("ROU-1")
-        self.assertEqual(found, guard.Issue("uuid-1", "ROU-1", "uuid-0", OWNER, ("gate:plan",), 2))
+        self.assertEqual(found, guard.Issue("uuid-1", "ROU-1", "uuid-0", OWNER, 2))
         self.assertEqual(seen["auth"], "lin_token")
         self.assertEqual(seen["url"], "https://api.linear.app/graphql")
-        self.assertIn("labels{ nodes{ name } }", seen["body"])
 
     async def test_null_issue_is_none(self):
         found = await lookup_with(lambda r: httpx.Response(200, json={"data": {"issue": None}})).issue("ROU-9")
