@@ -11,6 +11,20 @@ proxy_config:
       description: Context7 library documentation MCP
       transport: http
       url: https://mcp.context7.com/mcp
+    crawl4ai:
+      allow_all_keys: true
+      allowed_tools:
+        - md
+        - html
+        - crawl
+      auth_type: bearer_token
+      auth_value: os.environ/CRAWL4AI_API_TOKEN
+      description: Read JavaScript-rendered pages through the LAN Crawl4AI (public internet only)
+      instructions: |-
+        Use md to read one page as Markdown when web_url_read returns an empty shell or a JavaScript-rendered page is missing its content. crawl takes several URLs at once; html returns cleaned HTML.
+        Only public internet addresses are reachable. Sites that block automated readers still block it: report that instead of retrying.
+      transport: sse
+      url: http://crawl4ai.ai.svc.cluster.local:11235/mcp/sse
     home_assistant:
       access_groups:
         - hass

@@ -31,7 +31,7 @@ class McpServersTest(unittest.TestCase):
         for name, server in self.values["proxy_config"]["mcp_servers"].items():
             with self.subTest(server=name):
                 self.assertTrue(server["url"].startswith(("https://", "http://")))
-                self.assertEqual(server["transport"], "http")
+                self.assertIn(server["transport"], ("http", "sse"))
 
     def test_aliases_point_at_servers(self):
         servers = self.values["proxy_config"]["mcp_servers"]
