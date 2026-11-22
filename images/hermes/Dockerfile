@@ -3,7 +3,7 @@ ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent:v0.23.2@sha256:d6746a084e93
 
 FROM ${HERMES_IMAGE} AS image
 
-ARG OBSIDIAN_WIKI_VERSION=2026.11.4
+ARG OBSIDIAN_WIKI_VERSION=2026.11.7
 ARG USEFUL_SKILLS_VERSION=v0.6.0@36f406f557790afebac0c9f858de4b2e3da21b60
 ARG MISE_VERSION=v2026.11.9
 # Same commit the Hermes plugin catalog pins for openviking.
