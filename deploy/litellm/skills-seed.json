@@ -35,8 +35,8 @@
     "source": {
       "source": "github",
       "repo": "lkshrk/useful-skills",
-      "ref": "v0.6.0",
-      "sha": "36f406f557790afebac0c9f858de4b2e3da21b60"
+      "ref": "v0.7.3",
+      "sha": "b23ffcf9abdbb2975e6f6abb90251805b253d05b"
     },
     "description": "Useful agent skills: Linear issue workflow, dependency upgrades, documentation generation, change tables, macOS maintenance and World of Warcraft planning.",
     "domain": "Productivity",
