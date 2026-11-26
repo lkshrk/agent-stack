@@ -54,7 +54,7 @@
       "url": "https://github.com/vercel-labs/agent-skills",
       "path": "skills/web-design-guidelines",
       "ref": "main",
-      "sha": "1a2c79d4e6c4a2283dc2c614b6538cbe1ed5ca62"
+      "sha": "5a37a6329fbad3666c3207392a6a7c0110e92efb"
     },
     "description": "Reviews UI code against Vercel's Web Interface Guidelines (accessibility, UX, interaction details); fetches the current rules at run time.",
     "domain": "Engineering",
@@ -89,7 +89,7 @@
       "url": "https://github.com/anthropics/claude-plugins-official",
       "path": "plugins/frontend-design",
       "ref": "main",
-      "sha": "b5b01ac4f889fec0c4c6bb89f27ca7c8574473f6"
+      "sha": "0fbfda5a91f4adc311daca25acc99132f40f0b6e"
     },
     "description": "Anthropic's frontend-design skill: distinctive, production-grade interfaces with high design quality, framework-neutral.",
     "domain": "Engineering",
@@ -106,7 +106,7 @@
       "url": "https://github.com/anthropics/claude-plugins-official",
       "path": "external_plugins/playwright",
       "ref": "main",
-      "sha": "b5b01ac4f889fec0c4c6bb89f27ca7c8574473f6"
+      "sha": "0fbfda5a91f4adc311daca25acc99132f40f0b6e"
     },
     "description": "Microsoft's Playwright MCP server for browser automation and end-to-end test debugging (runs npx @playwright/mcp@latest).",
     "domain": "Engineering",
